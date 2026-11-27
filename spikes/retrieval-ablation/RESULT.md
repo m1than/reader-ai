@@ -304,7 +304,8 @@ $0.02656115 (recompute agrees), output 15,568 tokens, per call p50 8.73 s, p95 1
   spent $4.8163 + summaries $0.36 + judge $4.73 + factcheck $2.42 = $12.33 (prefixes finished $0.38 under its cap).
   Checked without spend: the fixed `paid.py` resumed a copy of run 1's rows against the stub (171-token answers,
   `--network none`): 490 calls (472 new + run 1's 18 failures retried), all 495 nodes summarised, exit 0;
-  `dry_run.sh` 40 of 40. The cap in `paid.sh` stays $0.19 until the owner decides.
+  `dry_run.sh` 40 of 40.
+- **Owner decision (2026-11-27):** the summaries cap is raised from $0.19 to **$0.36**; the total stays $12.51.
 
 ## Paid runner (approved by the owner 2026-11-26, $12.00 staged; raised to $12.51 on 2026-11-27; the owner runs it)
 

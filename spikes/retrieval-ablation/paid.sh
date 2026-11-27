@@ -8,7 +8,8 @@
 #     stage1     context prefixes for chapters 6 and 13 (822 Haiku calls), cap $0.47 (projection $0.39 + 20%)
 #     prefixes   the rest of the book (8,282 calls), cap $4.72 (projection $4.29 from stage 1's measured cost
 #                + 10%); refused unless stage1 passed
-#     summaries  L2 summaries, 495 calls, cap $0.19 ($0.16 + 20%)
+#     summaries  L2 summaries, 495 calls, cap $0.36 (owner 2026-11-27; was $0.19: re-projection $0.28 + 20% + the
+#                $0.0266 of run 1)
 #     (then, free and local: bash spikes/retrieval-ablation/v12.sh — V1/V2 embedding, recall, topk.json)
 #     judge      judge.eval sufficiency, Sonnet 5.5, deduped card sets of 6 variants (≈ 477 calls), cap $4.73
 #     factcheck  the whole-chapter fact-check baseline, 30 Sonnet 5.5 calls, cap $2.42
@@ -41,7 +42,7 @@ source "$HERE/gates.sh"
 case "$STAGE" in
   stage1) CAP=0.47; KILL_S=3600 ;;
   prefixes) CAP=4.72; KILL_S=28800 ;;
-  summaries) CAP=0.19; KILL_S=3600 ;;
+  summaries) CAP=0.36; KILL_S=3600 ;;
   judge) CAP=4.73; KILL_S=7200 ;;
   factcheck) CAP=2.42; KILL_S=3600 ;;
   *) echo "unknown stage $STAGE" >&2; exit 2 ;;
