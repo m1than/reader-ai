@@ -196,6 +196,15 @@ def anyio_backend() -> str:
     return "asyncio"
 
 
+@pytest.fixture
+def r3_converter(monkeypatch: pytest.MonkeyPatch) -> None:
+    """FR-INGEST-40's held bump: `CONVERTER_VERSION` is r2, so tests that receive and import the r3 fixture
+    artifacts (make_artifact_fixture) deliberately make r3 the stack's version for their duration."""
+    import reader.ingest as ingest
+
+    monkeypatch.setattr(ingest, "CONVERTER_VERSION", fixture_gen.CONVERTER_VERSION)
+
+
 CONFIG = """\
 version: 1
 instance: {{ url: "https://localhost", data_dir: ./data }}

@@ -210,7 +210,10 @@ requirements:
       active pack's span with that locator; anything else is not loaded (dropped from the candidates). Citations keep
       the id the search gave (FR-TUTOR-8's `quote_sha256` stays with the SRV-INGEST note's later change). The [db]
       fixtures seal their ingest as an active r2 pack (server/tests/ingest/packseed.py). [db]
-      test_spans_active_pack_db.py.
+      test_spans_active_pack_db.py, including the resolver path (code review round 1): with an accepted seq map
+      from the r2 ingest to the active r3 pack, a legacy id whose mapped (locator, quote hash) is an r3 span loads
+      that span's page and text; a legacy id whose mapped span is neither active nor reanchored (its hash matches
+      no span) and a legacy id the map does not hold are dropped.
   - id: FR-TUTOR-6
     text: >-
       Prompt. The system prompt is the versioned file `reader/tutor/prompts/answer-v1.md` (≤ `system_bytes_max`);

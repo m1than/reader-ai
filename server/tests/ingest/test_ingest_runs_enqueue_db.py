@@ -19,7 +19,7 @@ from obs.conftest import obs_setup
 
 from .conftest import Pg, build_artifact, need, tar_of, world
 
-pytestmark = pytest.mark.anyio
+pytestmark = [pytest.mark.anyio, pytest.mark.usefixtures("r3_converter")]  # r3 artifacts, deliberately
 
 
 class Captured:

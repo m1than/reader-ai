@@ -11,8 +11,9 @@ from pathlib import Path
 from typing import Any, Final
 
 # FR-INGEST-10: the `r` number rises with any change to FR-INGEST-5..9 or the parse config; r3 is revision 3's
-# artifact format 2 (locators, quote hashes, parse_config, pack_id; FR-INGEST-40 step 1).
-CONVERTER_VERSION: Final = "docling-2.151.1+r3"
+# artifact format 2 (locators, quote hashes, parse_config, pack_id; FR-INGEST-40 step 1). The bump to r3 is
+# held (FR-INGEST-40's merge gate (e)-(i)): new imports stay r2; r3 is reachable only through this constant.
+CONVERTER_VERSION: Final = "docling-2.151.1+r2"
 
 # FR-INGEST-35: the parse config of each converter version, pinned literals in converter-version order.
 _PIPELINE: Final = {"do_ocr": False, "do_table_structure": True, "do_formula_enrichment": True,

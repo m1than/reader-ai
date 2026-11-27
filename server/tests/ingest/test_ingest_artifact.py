@@ -46,7 +46,8 @@ def test_fixture_artifact_is_valid_and_its_id_is_the_manifest_hash(tmp_path: Pat
 
 def test_converter_version_constant() -> None:
     ingest = need("reader.ingest")
-    assert ingest.CONVERTER_VERSION == "docling-2.151.1+r3"
+    assert ingest.CONVERTER_VERSION == "docling-2.151.1+r2"  # FR-INGEST-40: the r3 bump is held
+    assert list(ingest.PARSE_CONFIGS) == ["docling-2.151.1+r2", "docling-2.151.1+r3"]  # r3 code kept
     assert str(ingest.BLOBS_DIR) == "/var/lib/reader/blobs"
 
 
@@ -64,6 +65,7 @@ def test_write_artifact_round_trips_and_is_canonical(tmp_path: Path) -> None:
         outline_source="bookmarks",
         spans=spans,
         outline=outline,
+        converter_version=fixture_gen.CONVERTER_VERSION,  # the r3 fixture, named: the default is r2 (held)
     )
     written = {p.name: p.read_bytes() for p in out.iterdir()}
     assert written == artifact_files()

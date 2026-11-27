@@ -141,13 +141,11 @@ async def after_end(engine: Any, payload: Mapping[str, Any], outcome: str) -> No
     from reader.obs import runs as obs_runs
 
     async with engine.connect() as conn:
-        embeds = (
+        pack = await views.pack_of_ingest(conn, str(payload["ingest_id"]))
+        embeds = None if pack is None else (
             await conn.execute(
-                text(
-                    "SELECT count(*) FROM search_embeds e JOIN base_packs b ON b.ingest_id = e.ingest_id"
-                    " AND b.owner_id = e.owner_id WHERE e.ingest_id = :i"
-                ),
-                {"i": str(payload["ingest_id"])},
+                text("SELECT count(*) FROM search_embeds WHERE ingest_id = :i AND owner_id = :o"),
+                {"i": pack.ingest_id, "o": pack.owner_id},
             )
         ).scalar()
     if embeds:

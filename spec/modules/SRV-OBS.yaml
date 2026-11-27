@@ -729,14 +729,18 @@ requirements:
       **Paired change, ADR-0039 / SRV-INGEST INV-INGEST-16, V.kl-active-view-readers:** the source length is read
       through `reader.ingest.views`, as `DbSpanReader` now reads (SRV-PIPELINE FR-PIPELINE-2's paired change): the
       lessons' (material, pdf_first, pdf_last) come from the caller's `course_plans` rows, and each length is
-      `span_chars` of the material's pack in the caller's head manifest entry (`active_pack`), never the `ingests`
-      join; a material with two packs (r2 and r3) counts one pack's characters, never their sum, and a material with
-      no active pack gives null. The Run snapshot of an import (FR-OBS-20) reads the ingest's counts through
+      the sum of `views.page_stats` over pages pdf_first..pdf_last of the material's pack in the caller's head
+      manifest entry (`active_packs`, one page read per material), never the `ingests` join; null when no span of
+      that pack lies in the range (0 when spans there are empty); a material with two packs (r2 and r3) counts one
+      pack's characters, never their sum, and a material with no active pack (a deleted material included) gives
+      null. The Run snapshot of an import (FR-OBS-20) reads the ingest's counts through
       `views.ingest_facts`, by its ingest id, whatever its pack's state. Fixtures seal their ingests as active r2
       packs (server/tests/ingest/packseed.py); tests that changed span texts after the import choose them before it
       (a sealed pack's rows are immutable). [db] test_summary.py: VEC-OBS-3's ingests sealed as active packs give
       its expected JSON unchanged; an r3 pack of the owner's material with other page lengths, inactive, changes no
-      chars, and once activated replaces the r2 pack's (never the sum).
+      chars, and once activated replaces the r2 pack's (never the sum). FR-OBS-13's import test receives the r3
+      fixture artifact deliberately, so it runs with r3 as the stack's converter version (SRV-INGEST FR-INGEST-40:
+      the r3 bump is held, `CONVERTER_VERSION` is r2).
   - id: FR-OBS-14
     text: >-
       Under ADR-0035 (accepted 2026-11-24: the worker's assessment and prompt writes to MLflow). Code-sourced

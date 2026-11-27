@@ -116,12 +116,12 @@ async def fts_config_of(conn: AsyncConnection, material_sha256: str, ingest_id: 
     if ingest_id is None:
         sql = "SELECT config_id FROM materials WHERE sha256 = :s ORDER BY id LIMIT 1"
         row = (await conn.execute(text(sql), {"s": material_sha256})).first()
-    else:  # the material row of the ingest's pack owner (SRV-INGEST INV-INGEST-16: no `ingests` join)
-        sql = (
-            "SELECT m.config_id FROM base_packs b JOIN materials m"
-            " ON m.owner_id = b.owner_id AND m.sha256 = b.material_sha256 WHERE b.ingest_id = :i"
-        )
-        row = (await conn.execute(text(sql), {"i": ingest_id})).first()
+    else:  # the material row of the ingest's pack owner (SRV-INGEST INV-INGEST-16: through its views)
+        pack = await views.pack_of_ingest(conn, ingest_id)
+        row = None if pack is None else (await conn.execute(
+            text("SELECT config_id FROM materials WHERE owner_id = :o AND sha256 = :s"),
+            {"o": pack.owner_id, "s": pack.material_sha256},
+        )).first()
     if row is None:
         return params.fts_config_for(None)
     return await _fts_config(conn, row[0], material_sha256, _languages)
@@ -130,15 +130,17 @@ async def fts_config_of(conn: AsyncConnection, material_sha256: str, ingest_id: 
 async def current_keys(conn: AsyncConnection, owner_id: UUID) -> dict[str, Any]:
     """FR-SEARCH-7: per embedded ingest of the owner's active packs (SRV-INGEST INV-INGEST-16: one pack per
     material, never two), the params_sha256 its material would get now."""
-    active = [p.ingest_id for p in (await views.active_packs(conn, owner_id)).values()]
+    heads = (await views.active_packs(conn, owner_id)).values()
     rows = await conn.execute(
         text(
             "SELECT DISTINCT e.ingest_id, m.config_id, m.sha256 FROM search_embeds e"
-            " JOIN base_packs b ON b.ingest_id = e.ingest_id AND b.owner_id = e.owner_id"
-            " JOIN materials m ON m.owner_id = b.owner_id AND m.sha256 = b.material_sha256"
-            " WHERE e.owner_id = :o AND e.model = :m AND e.ingest_id = ANY(CAST(:a AS uuid[]))"
+            " JOIN unnest(CAST(:a AS uuid[]), CAST(:s AS text[])) AS h(ingest_id, sha256)"
+            " ON h.ingest_id = e.ingest_id"
+            " JOIN materials m ON m.owner_id = e.owner_id AND m.sha256 = h.sha256"
+            " WHERE e.owner_id = :o AND e.model = :m"
         ),
-        {"o": owner_id, "m": params.MODEL_ID, "a": active},
+        {"o": owner_id, "m": params.MODEL_ID, "a": [p.ingest_id for p in heads],
+         "s": [p.material_sha256 for p in heads]},
     )
     loaded: list[dict[str, str]] = []
 
@@ -256,13 +258,16 @@ async def search(
         row = by_id[f.id]
         sha = str(row[1])
         of = ids.get(row[6], {})
+        primary = of.get(int(row[4]))
+        if primary is None:  # no span id from the view (a gone pack or span): dropped, never minted
+            continue
         hits.append(
             Hit(
                 chunk_id=f.id,
                 material_sha256=sha,
                 page=int(row[2]),
-                span_id=of.get(int(row[4]), f"{sha}:{row[4]}"),
-                span_ids=[of.get(int(seq), f"{sha}:{seq}") for seq in row[3]],
+                span_id=primary,
+                span_ids=[of[int(seq)] for seq in row[3] if int(seq) in of],
                 snippet=snippet(str(row[5])),
                 score=f.score,
                 dense_rank=f.dense_rank,

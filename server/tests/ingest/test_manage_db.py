@@ -30,7 +30,7 @@ import pytest
 from . import conftest
 from .conftest import MATERIAL_SHA, ORIGIN, SESSION_COOKIE, Pg, World, client, need, session_for, world
 
-pytestmark = pytest.mark.anyio
+pytestmark = [pytest.mark.anyio, pytest.mark.usefixtures("r3_converter")]  # r3 artifacts, deliberately
 
 SYN = "synthetic"  # reader.yaml id of MATERIAL_SHA in the ingest world
 OWNED_TABLES = ("materials", "ingests", "material_spans", "material_outline", "uploads")

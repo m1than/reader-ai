@@ -91,11 +91,10 @@ class DbSpanReader:
 
 
 async def material_imported(conn: AsyncConnection, owner_id: uuid.UUID, material_sha256: str) -> bool:
-    if (await conn.execute(text("SELECT to_regclass('materials')"))).scalar() is None:
+    if (await conn.execute(text("SELECT to_regclass('base_packs')"))).scalar() is None:
         return False
-    found = await conn.execute(
-        # FR-PIPELINE-22: a deleted material (SRV-INGEST FR-INGEST-31) counts as not imported.
-        text("SELECT 1 FROM materials WHERE owner_id = :o AND sha256 = :m AND deleted_at IS NULL"),
-        {"o": owner_id, "m": material_sha256},
-    )
-    return found.scalar() is not None
+    from reader.ingest import views
+
+    # FR-PIPELINE-22: a deleted material (SRV-INGEST FR-INGEST-31) counts as not imported; it leaves the head
+    # manifest entry, so "imported" is "has an active pack" (FR-PIPELINE-2's paired change, INV-INGEST-16).
+    return await views.active_pack(conn, owner_id, material_sha256) is not None

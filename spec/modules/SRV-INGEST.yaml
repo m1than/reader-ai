@@ -1620,6 +1620,12 @@ requirements:
       without the material, and a delete of a material the head does not name appends none. The restore, rollback,
       anchors_missing and run-through cases need re-anchoring and the seq map and are tested with them (unit 4:
       test_manifest_db.py, test_gc_db.py, test_manage_db.py per FR-INGEST-31 revised).
+      **Activation delay, stated (V.kl-active-view-readers, code review round 1):** other modules read only active
+      packs (INV-INGEST-16), and an import only requests its activation, so a newly imported book cannot be planned,
+      compiled, searched or asked about until its legacy search embed seals and calls `try_activate` (SRV-SEARCH
+      FR-SEARCH-5's paired change). A dead embed leaves it so until Retry or `ensure` requeues the key, or the next
+      worker start's sweep activates the pending row; the sweep may activate it earlier than the embed. This is a
+      delay, not an invariant: nothing relies on an active pack being embedded.
   # Phase 2 unit 3 (seq map, re-anchoring, resolver, citation rewrite, restore and rollback): FR-INGEST-40..43.
   - id: FR-INGEST-40
     text: >-
@@ -1684,8 +1690,21 @@ requirements:
       source scan (test_readers_scan_unit.py) passes on the integration branch: every paired reader
       (`reader/pipeline/source.py`, `reader/tutor/store.py`, `reader/plan/store.py`, `reader/search/jobs.py`,
       `reader/obs/summary.py`, `reader/freshness/store.py`) reads through `active_view`, since a second `ingests`
-      row per material would otherwise double their sources (code review of unit B, 2026-11-27). **(d) is open**:
-      those readers are other specs' paired changes, not this task's.
+      row per material would otherwise double their sources (code review of unit B, 2026-11-27). (d) is met by
+      V.kl-active-view-readers (the paired readers, `reader.ingest.views`).
+      **The r3 bump is held (coordinator, code review round 1 of V.kl-active-view-readers, 2026-11-27):**
+      `CONVERTER_VERSION` stays `docling-2.151.1+r2`, so new imports stay r2 and nothing changes in behaviour when
+      this revision and its readers merge; all r3 code (artifact format 2, locators, quote hashes, packs) stays, and
+      r3 is reachable only through that constant (tests that import r3 name it explicitly). The reader scan (d) is
+      necessary, **not sufficient**: the bump to r3 also needs these paired changes landed on the integration
+      branch: (e) SRV-LESSON's `span_ref` accepts the locator form with `quote_sha256` required (cell.schema.json,
+      VEC-LESSON-3) and its `revision_packs` table; (f) SRV-PIPELINE FR-PIPELINE-7 (alias → locator plus
+      `quote_sha256`; the material taken with `reader.ingest.locator.parse` in `pipeline/notebook.py`, not split on
+      `:`) and FR-PIPELINE-27 (`pipeline/reports.py`'s distinct-material count, the same parse); (g) SRV-TUTOR
+      FR-TUTOR-8's citation `quote_sha256`; (h) WEB-NOTEBOOK FR-NOTEBOOK-2's grouping by the parsed material
+      (`citations.ts`); (i) V.kl-search-find's vector overlays (`request_activation({vectors})`) before any r2 → r3
+      re-conversion, or else a legacy-path rule that a pack replacing an active pack of its material is not
+      activated before its `search_embeds` row exists.
       **(a)–(c) met (phase 2 unit 7, 2026-11-27), as paired changes on this branch:** `reader.ingest.jobs.JOB_KINDS`
       holds every kind of this revision (`ingest.import`, `ingest.seqmap`, `ingest.reanchor`, `ingest.gc`,
       `ingest.gc_pack`, `ingest.gc_overlay`, `ingest.purge`, `ingest.reconcile`), so SRV-EVENTS' worker serves them
@@ -2200,8 +2219,12 @@ invariants:
       goes through FR-INGEST-42's resolver). **Span ids minted from a pack** are its locators (FR-INGEST-33), except
       for a pack of a `LEGACY_VERSIONS` converter, whose spans keep `<material_sha256>:<seq>` (the form its
       published citations and the seq map hold). Foreign-key declarations in other modules' migrations
-      (`REFERENCES ingests`) are the only exception, listed by file in the test. The source scan is also the
-      sequencing gate of the header: no r3 import before it passes on the integration branch. [unit]
+      (`REFERENCES ingests`) are the only exception, listed by file in the test. Other modules read `base_packs`
+      only through these helpers as well (search's language lookup and late end use `pack_of_ingest`, its current
+      keys `active_packs`). The source scan is part of the header's sequencing gate and of FR-INGEST-40's merge gate:
+      necessary, not sufficient (the r3 bump is held until (e)–(i) there have landed). **Known blind spot:** the
+      scan sees string constants only, so a table name assembled at run time (an f-string field, `+` of
+      variables, a name read from data) passes it; code review keeps such SQL out. [unit]
       test_readers_scan_unit.py: an AST scan of every reader.* module outside reader.ingest finds no string constant
       (docstrings excluded) matching `\b(ingests|material_spans|material_outline)\b`, except the listed REFERENCES
       lines in plan/migrations/plan_0001.py and freshness/migrations/freshness_0001.py; a planted literal in a
@@ -2481,14 +2504,17 @@ review: "draft 2026-11-21. deep-reviewer round 1 (909dba1): ADR-0027 no blockers
 #   - **Every reader of the ingest tables** (P5; INV-INGEST-16). Today these modules join `ingests` by
 #     `material_id` (one row per material under the frozen version) or read `material_spans` / `material_outline`
 #     directly; with two packs per material each would read both or pick one arbitrarily. Each moves to
-#     `reader.ingest.manifest.active_view` and the read helpers of `reader.ingest.packs` (`active_pack(conn, owner_id,
-#     material_sha256)`, `pack_spans`, `pack_outline`, `pack_of_ingest`), in a paired change of its own spec:
+#     `reader.ingest.manifest.active_view` and the read helpers of `reader.ingest.views` (`active_pack(conn,
+#     owner_id, material_sha256)`, `pack_spans`, `pack_outline`, `pack_of_ingest`, INV-INGEST-16), in a paired
+#     change of its own spec (done: V.kl-active-view-readers):
 #     SRV-PIPELINE FR-PIPELINE-2 (`pipeline/source.py`), SRV-PLAN (`plan/store.py`), SRV-OBS (`obs/summary.py`,
 #     `obs/runs.py`), SRV-FRESH (`freshness/store.py`, `freshness/live.py`), SRV-SEARCH (`search/store.py`,
 #     `search/jobs.py`), SRV-TUTOR (`tutor/store.py`).
 #     **Sequencing:** no r3 import of any material (FR-INGEST-40 step 2) runs before all of these paired readers are
-#     merged into the integration branch; until then a material holds exactly one ingest, so today's joins stay
-#     correct. INV-INGEST-16's source scan is the gate.
+#     merged into the integration branch. INV-INGEST-16's source scan is necessary, not sufficient:
+#     `CONVERTER_VERSION` stays r2 (held) until FR-INGEST-40's merge gate (e)–(i) have landed too (SRV-LESSON
+#     span_ref with quote_sha256 and revision_packs; FR-PIPELINE-7 and -27; FR-TUTOR-8; FR-NOTEBOOK-2;
+#     V.kl-search-find's vector overlays or the legacy-path activation rule).
 #   - **Foreign keys onto `ingests`:** `freshness_reports.ingest_id` (SRV-FRESH) and `study_plans.ingest_id`
 #     (SRV-PLAN) reference `ingests (id) ON DELETE RESTRICT`. GC and purge therefore never delete an `ingests` row: it
 #     stays as the pack's tombstone (FR-INGEST-44, -45), so those rows stay valid. SRV-FRESH and SRV-PLAN each note
@@ -2725,7 +2751,7 @@ proposed_defers:
     - "Locators for the 6 pilot pages without a text layer arrive with OCR (their figure spans already have zero-length locators)."
 
 proposed_owner_notes:
-  - "8. (Revision 3, ADR-0039.) After this update every book you have imported is re-indexed once at its new span level: until that finishes, search and tutor answers find nothing in it. For the Bashir book that took 26.8 minutes (measured). The later move to the re-converted copy (about 12 minutes of conversion on your Mac, then its own indexing in the background) causes no second gap. Lessons and the notebook stay readable throughout. If the local embedding service is down at that moment, the gap lasts until it is back: the indexing retries by itself at the next start of the stack (`reader up`)."
+  - "8. (Revision 3, ADR-0039.) After this update every book you have imported is re-indexed once at its new span level: until that finishes, search and tutor answers find nothing in it. For the Bashir book that took 26.8 minutes (measured). The later move to the re-converted copy (about 12 minutes of conversion on your Mac, then its own indexing in the background) causes no second gap. Lessons and the notebook stay readable throughout. If the local embedding service is down at that moment, the gap lasts until it is back: the indexing retries by itself at the next start of the stack (`reader up`). A book you import from now on can be planned, compiled, searched or asked about only once its indexing has finished (minutes; 26.8 for the Bashir book); if indexing fails, it stays unavailable until you press Retry or the stack restarts."
   - "9. (Revision 3.) Old copies of a book's index that no recent state uses (absent from the last 20 changes and older than 30 days, and not cited by a published lesson) are cleaned up automatically. A cleaned-up copy, like one you purge yourself, cannot be rebuilt under the same converter version: it comes back only when a newer converter version converts the book again. This also applies to a book you deleted and left deleted that long: restoring it brings back the material row and its courses, but its index returns only with the next converter version. Today no whole copy is cleaned up automatically: until the published-lesson citation check is connected (SRV-LESSON, SRV-KB), every copy counts as cited and only unused side data (such as old tag sets) goes. Once that check is connected, a deleted book's only copy becomes collectable 30 days after the deletion's change left the last 20 changes, unless a published lesson cites it; to keep a deleted book's index, restore the book before then. Profile and vector data are never cleaned up on their own, only with their copy, so switching a book's license or embedding model back always works."
 
 # Round 1 (deep-reviewer, Fable, on fe2dc2b): changes, 7 blocking; all addressed in this draft:

@@ -94,7 +94,7 @@ async def active_pack(conn: AsyncConnection, owner_id: uuid.UUID, material_sha25
     return (await active_packs(conn, owner_id)).get(material_sha256)
 
 
-async def pack_of_ingest(conn: AsyncConnection, ingest_id: uuid.UUID) -> Pack | None:
+async def pack_of_ingest(conn: AsyncConnection, ingest_id: uuid.UUID | str) -> Pack | None:
     """The pack of an ingest id, active or not (a stored id may name a superseded or collected pack)."""
     row = (await conn.execute(text(_PACK + " WHERE b.ingest_id = :i"), {"i": ingest_id})).first()
     return None if row is None else _pack(row)

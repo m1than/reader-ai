@@ -272,8 +272,13 @@ requirements:
       the worker-start hook walks every live pack. FR-SEARCH-7's candidates are restricted to the ingests of the
       owner's active packs (`current_keys`), so a material with two embedded packs (r2 and r3) is searched in one,
       never both, and a result's span ids are the ones the view mints (`span_ids`: `<sha>:<seq>` for a legacy pack,
-      the locator for an r3 pack). The [db] fixtures seal their ingest as an active r2 pack
-      (server/tests/ingest/packseed.py). [db] test_search_active_pack_db.py.
+      the locator for an r3 pack); a hit whose primary span gets no id from the view (its pack or span gone) is
+      dropped, never given a minted `<sha>:<seq>`. No `base_packs` join here either: the ingest's owner and
+      material come from `pack_of_ingest`, the current keys from `active_packs`. Before any r2 → r3 re-conversion,
+      SRV-INGEST FR-INGEST-40's merge gate (i) needs this path to keep a replacing pack inactive until its
+      `search_embeds` row exists, or V.kl-search-find's vector overlays (the r3 bump is held until then). The [db]
+      fixtures seal their ingest as an active r2 pack (server/tests/ingest/packseed.py). [db]
+      test_search_active_pack_db.py.
   - id: FR-SEARCH-6
     text: >-
       **Full-text configuration.** A material's `fts_config` comes from its reader.yaml `materials[].language`, looked up

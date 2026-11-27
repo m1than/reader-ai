@@ -175,7 +175,10 @@ requirements:
       **Paired change, ADR-0039 / SRV-INGEST INV-INGEST-16, V.kl-active-view-readers:** the spans are those of the
       material's pack in the owner's head manifest entry, read through `reader.ingest.views` (`active_pack`,
       `pack_spans`), never the `ingests` join, so a material with two packs (r2 and r3) gives one pack's spans,
-      never both; a material with no active pack has no spans (`no_source_spans`). Each span id is the one the view
+      never both; a material with no active pack has no spans (`no_source_spans`), and FR-PIPELINE-22's
+      `material_imported` is "the material has an active pack" (a deleted material leaves the head entry). No r3
+      pack is imported while SRV-INGEST holds its converter bump (FR-INGEST-40's merge gate (e)–(i), which include
+      this module's FR-PIPELINE-7 and -27). Each span id is the one the view
       mints: `<sha>:<seq>` for a legacy (r2) pack, the locator for an r3 pack (FR-INGEST-33); the locator form is
       refused by SRV-LESSON's `span_ref` until its paired change (with FR-PIPELINE-7's `quote_sha256`) lands, so a
       compile from an r3 pack fails validation rather than cite a wrong span. The [db] fixtures seal their ingest as

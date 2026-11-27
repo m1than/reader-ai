@@ -30,7 +30,7 @@ from .conftest import (
     world,
 )
 
-pytestmark = pytest.mark.anyio
+pytestmark = [pytest.mark.anyio, pytest.mark.usefixtures("r3_converter")]  # r3 artifacts, deliberately
 
 
 def tar(**manifest: Any) -> io.BytesIO:

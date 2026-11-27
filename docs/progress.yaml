@@ -2112,12 +2112,22 @@ tasks:
         spans_by_ids; legacy ids on an r3 pack through spanref.resolve), SRV-PLAN FR-PLAN-9/-13 (store.py),
         SRV-OBS FR-OBS-17 (summary.py; runs.py via ingest_facts), SRV-FRESH FR-FRESH-2 (store.py, live.py),
         SRV-SEARCH FR-SEARCH-5 (jobs.py, store.py; legacy chunk path kept). Fixtures seal their ingests through
-        server/tests/ingest/packseed.py. Open for the coordinator: (1) the legacy embed now calls try_activate,
-        since readers see only active packs and nothing else activates a fresh import before the next worker
-        start; a new material is therefore usable after its embed, not right after import; (2) an r3 pack's
-        locator ids reach SRV-PIPELINE (refused by SRV-LESSON's span_ref until its paired change and
-        FR-PIPELINE-7's quote_sha256) and the tutor's citations (no quote_sha256 yet); (3) no deep-reviewer round
-        run on this branch yet." }
+        server/tests/ingest/packseed.py. The legacy embed calls try_activate (a new book is usable once
+        indexed; FR-INGEST-39's activation-delay note, owner note 8). Code review round 1 (2eff9ab): every reader
+        verified; blocking fixed: (1) the r3 bump is HELD (coordinator): CONVERTER_VERSION = docling-2.151.1+r2,
+        r3 code kept and reachable only via the constant; ingest tests that receive the r3 fixture artifacts
+        name it (conftest r3_converter); (2) FR-TUTOR-5's resolver path tested (accepted seq map, mapped span
+        loaded, unmatched and unmapped dropped). Non-blocking applied: material_imported through views, search's
+        base_packs joins behind views, a hit with no view id dropped, FR-OBS-17 wording, header helper name, the
+        scan's f-string blind spot stated. Not applied: owner-scoping material_has_pack (the embed args carry no
+        owner). GATE for the r3 bump: INV-INGEST-16's scan is necessary, NOT sufficient; also needed on the
+        integration branch: SRV-LESSON span_ref accepting the locator form with quote_sha256 required
+        (cell.schema.json, VEC-LESSON-3) and revision_packs; SRV-PIPELINE FR-PIPELINE-7 (alias -> locator +
+        quote_sha256, material via reader.ingest.locator.parse in notebook.py) and FR-PIPELINE-27 (reports.py);
+        SRV-TUTOR FR-TUTOR-8 citation quote_sha256; WEB-NOTEBOOK FR-NOTEBOOK-2 grouping (citations.ts);
+        V.kl-search-find's vector overlays before any r2 -> r3 re-conversion, or a legacy-path rule that a
+        replacing pack is not activated before its search_embeds row exists (SRV-INGEST FR-INGEST-40 gate
+        (e)-(i))." }
   - { id: V.kl-search-find, stage: V, kind: module, track: ai, status: todo,
       needs: [V.kl-ingest-packs, V.spike.judge-gate, V.kl-agent-judges, V.kl-obs-spans],
       what: "SRV-SEARCH revision (~800–1,200 lines): the B6 cascade (routes, facets file, greedy selection under a token
