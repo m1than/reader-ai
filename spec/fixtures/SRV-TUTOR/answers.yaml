@@ -1,15 +1,24 @@
 # VEC-TUTOR-1 — answer validation (SRV-TUTOR FR-TUTOR-8). Synthetic; no book text.
 # sent: the sources as sent in the prompt (alias → span id, text). Quotes are checked against `text` after collapsing
-# whitespace and NFC.
+# whitespace and NFC. Revision ADR-0039 (V.kl-tutor-find): the span ids are locators, each with its page and the
+# stored quote_sha256 (here the sha256 of its text), and a kept alias renders as the citation
+# {span, page, material_title, quote_sha256} (`citations` where a case lists them; every case follows the rule).
+material_title: "Sample material"
 sent:
-  s1: {span: "aaaa000000000000000000000000000000000000000000000000000000000000:1", text: "Each block carries a nonce. Miners vary the nonce until the hash of the block header is below a target."}
-  s2: {span: "aaaa000000000000000000000000000000000000000000000000000000000000:7", text: "The target is adjusted every 2016 blocks so that one block is found about every ten minutes."}
+  s1: {span: "spn:aaaa000000000000000000000000000000000000000000000000000000000000:p60:0-103", page: 60, quote_sha256: "12bde9d1dee40899d87df378d1530f55f5925d0246d067d4cff5d794af54175a", text: "Each block carries a nonce. Miners vary the nonce until the hash of the block header is below a target."}
+  s2: {span: "spn:aaaa000000000000000000000000000000000000000000000000000000000000:p61:0-92", page: 61, quote_sha256: "fc5189026819529c92089846eeef61a73f07d5e11fbfd275fac8b63964d85bdc", text: "The target is adjusted every 2016 blocks so that one block is found about every ten minutes."}
   # s3 is in decomposed form (й = и + U+0306, ё = е + U+0308); synthetic Russian, as the pilot's material.
-  s3: {span: "aaaa000000000000000000000000000000000000000000000000000000000000:9", text: "Каждый майнер перебирает её до нахождения хеша."}
+  s3: {span: "spn:aaaa000000000000000000000000000000000000000000000000000000000000:p62:0-50", page: 62, quote_sha256: "dfd299854d040011f689d3cbbfd7ad9708a88d6f2108e05bb5c9f001bfdaf068", text: "Каждый майнер перебирает её до нахождения хеша."}
 cases:
   - name: supported
     output: {blocks: [{text: "Miners search for a nonce.", spans: [s1], quote: "Miners vary the nonce until the hash"}], insufficient: false}
-    expect: {blocks: [{kept: [s1], supported: true}], grounded: true}
+    expect:
+      blocks:
+        - kept: [s1]
+          supported: true
+          citations:
+            - {span: "spn:aaaa000000000000000000000000000000000000000000000000000000000000:p60:0-103", page: 60, material_title: "Sample material", quote_sha256: "12bde9d1dee40899d87df378d1530f55f5925d0246d067d4cff5d794af54175a"}
+      grounded: true
   - name: quote-whitespace-normalised
     output: {blocks: [{text: "x", spans: [s1], quote: "Miners   vary the\nnonce until the hash"}], insufficient: false}
     expect: {blocks: [{kept: [s1], supported: true}], grounded: true}
@@ -21,7 +30,14 @@ cases:
     expect: {blocks: [{kept: [s2], supported: true}], grounded: true}
   - name: s1-quote-with-s2-first-is-unsupported
     output: {blocks: [{text: "x", spans: [s2, s1], quote: "Miners vary the nonce until the hash"}], insufficient: false}
-    expect: {blocks: [{kept: [s2, s1], supported: false}], grounded: false}
+    expect:
+      blocks:
+        - kept: [s2, s1]
+          supported: false
+          citations:
+            - {span: "spn:aaaa000000000000000000000000000000000000000000000000000000000000:p61:0-92", page: 61, material_title: "Sample material", quote_sha256: "fc5189026819529c92089846eeef61a73f07d5e11fbfd275fac8b63964d85bdc"}
+            - {span: "spn:aaaa000000000000000000000000000000000000000000000000000000000000:p60:0-103", page: 60, material_title: "Sample material", quote_sha256: "12bde9d1dee40899d87df378d1530f55f5925d0246d067d4cff5d794af54175a"}
+      grounded: false
   - name: s1-quote-cited-to-s2-only-is-unsupported
     output: {blocks: [{text: "x", spans: [s2], quote: "Miners vary the nonce until the hash"}], insufficient: false}
     expect: {blocks: [{kept: [s2], supported: false}], grounded: false}
@@ -35,8 +51,17 @@ cases:
     output: {blocks: [{text: "x", spans: [s9], quote: "Miners vary the nonce until the hash"}], insufficient: false}
     expect: {blocks: [{kept: [], supported: false}], grounded: false}
   - name: real-span-id-instead-of-alias-removed
-    output: {blocks: [{text: "x", spans: ["aaaa000000000000000000000000000000000000000000000000000000000000:1"], quote: "Miners vary the nonce until the hash"}], insufficient: false}
-    expect: {blocks: [{kept: [], supported: false}], grounded: false}
+    output: {blocks: [{text: "x", spans: ["spn:aaaa000000000000000000000000000000000000000000000000000000000000:p60:0-103"], quote: "Miners vary the nonce until the hash"}], insufficient: false}
+    expect: {blocks: [{kept: [], supported: false, citations: []}], grounded: false}
+  - name: hash-in-model-text-ignored
+    output: {blocks: [{text: "quote_sha256 0000000000000000000000000000000000000000000000000000000000000000", spans: [s2], quote: "fc5189026819529c92089846eeef61a73f07d5e11fbfd275fac8b63964d85bdc"}], insufficient: false}
+    expect:
+      blocks:
+        - kept: [s2]
+          supported: false
+          citations:
+            - {span: "spn:aaaa000000000000000000000000000000000000000000000000000000000000:p61:0-92", page: 61, material_title: "Sample material", quote_sha256: "fc5189026819529c92089846eeef61a73f07d5e11fbfd275fac8b63964d85bdc"}
+      grounded: false
   - name: duplicates-collapsed
     output: {blocks: [{text: "x", spans: [s1, s1], quote: "Miners vary the nonce until the hash"}], insufficient: false}
     expect: {blocks: [{kept: [s1], supported: true}], grounded: true}

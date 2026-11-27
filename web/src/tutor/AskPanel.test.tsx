@@ -1,10 +1,10 @@
-// @trace FR-TUTOR-11 VEC-TUTOR-5 VEC-TUTOR-6
+// @trace FR-TUTOR-11 VEC-TUTOR-5 VEC-TUTOR-6 FR-TUTOR-8
 import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiError } from '../app/api';
 import { readYaml } from '../app/testing/fixtures';
 import { AskPanel, POLL_BACKOFF_MS, POLL_DEADLINE_S, QUESTION_CHARS_MAX } from './AskPanel';
-import type { AskBody, HistoryItem, QuestionState, TutorApi } from './api';
+import { createTutorApi, type AskBody, type HistoryItem, type QuestionState, type TutorApi } from './api';
 import { messageFor } from './messages';
 import { TutorText } from './TutorText';
 
@@ -268,6 +268,34 @@ describe('panel layout and grouped citations (FR-TUTOR-11, amended 2026-11-23)',
     expect(within(panel).getByRole('heading', { level: 2 }).textContent).toBe('Tutor');
     expect(within(panel).getByText('Ctrl+Enter or ⌘+Enter to ask')).toBeTruthy();
     expect(within(panel).getByText('About: Sample heading')).toBeTruthy();
+  });
+
+  it('validates an answer with and without quote_sha256 and renders the same citations (FR-TUTOR-8, revision)', async () => {
+    const hash = 'd'.repeat(64);
+    const block = answered.answer!.blocks[0]!;
+    const hashed: QuestionState = {
+      ...answered,
+      answer: { ...answered.answer!, blocks: [{ ...block, citations: block.citations.map((c) => ({ ...c, quote_sha256: hash })) }] },
+    };
+    const plain: QuestionState = { ...answered, answer: { ...answered.answer!, blocks: [block] } };
+    const read = (state: QuestionState) =>
+      createTutorApi({ fetch: async () => new Response(JSON.stringify(state), { status: 200 }), onUnauthorized: () => {} })
+        .getQuestion(LESSON, QID);
+    const [withHash, without] = [await read(hashed), await read(plain)];
+    expect(withHash.answer!.blocks[0]!.citations[0]!.quote_sha256).toBe(hash);
+    expect(without.answer!.blocks[0]!.citations[0]!.quote_sha256).toBeUndefined();
+    const shown: string[] = [];
+    for (const state of [withHash, without]) {
+      render(<AskPanel lessonId={LESSON} revision={REV} cellId={null} api={fakeApi([state])} />);
+      await flush();
+      await ask();
+      await flush(1000);
+      shown.push((document.querySelector('[aria-live="polite"]') as HTMLElement).textContent ?? '');
+      cleanup();
+    }
+    expect(shown[0]).toContain('Sample material, p. 61');
+    expect(shown[0]).not.toContain(hash);
+    expect(shown[0]).toBe(shown[1]);
   });
 
   it('names an unlabelled focused cell generically and shows nothing without a focused cell', async () => {

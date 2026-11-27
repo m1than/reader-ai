@@ -2,8 +2,9 @@
 ADR-0039 / SRV-INGEST INV-INGEST-16, V.kl-active-view-readers).
 
 The world's material MAT holds the r2 pack of its fixture (seq 0..2) and an r3 re-conversion with other texts.
+ADR-0039 revision (V.kl-tutor-find): a span loads as (page, text, quote_sha256), through `views.active_span_rows`.
 
-@trace FR-TUTOR-5
+@trace FR-TUTOR-5 FR-TUTOR-8
 """
 
 from __future__ import annotations
@@ -32,7 +33,8 @@ async def test_two_packs_answer_each_id_from_the_active_pack_only(pg: Pg, tmp_pa
 
     async with w.engine.connect() as conn:
         loaded = await store.spans_by_ids(conn, ivan, legacy + r3_ids)
-    assert loaded == {f"{MAT}:{i}": (page, body) for i, (page, body) in enumerate(SPANS)}  # r2 only
+    assert loaded == {f"{MAT}:{i}": (page, body, locator.quote_sha256(body))
+                      for i, (page, body) in enumerate(SPANS)}  # r2 only
 
     async with w.engine.begin() as conn:
         await activate_pack(conn, ivan, r3)
@@ -40,7 +42,7 @@ async def test_two_packs_answer_each_id_from_the_active_pack_only(pg: Pg, tmp_pa
         loaded = await store.spans_by_ids(conn, ivan, legacy + r3_ids)
     # The r3 pack's locators read its spans; a legacy id has no accepted seq map here, so it is never answered with
     # the r3 span of the same seq (FR-INGEST-42 `unmapped`).
-    assert loaded == {i: (p, t) for i, (p, _, t) in zip(r3_ids, R3_SPANS, strict=True)}
+    assert loaded == {i: (p, t, locator.quote_sha256(t)) for i, (p, _, t) in zip(r3_ids, R3_SPANS, strict=True)}
 
 
 async def test_legacy_ids_on_an_r3_pack_go_through_the_accepted_seq_map(pg: Pg, tmp_path: Path) -> None:
@@ -69,7 +71,8 @@ async def test_legacy_ids_on_an_r3_pack_go_through_the_accepted_seq_map(pg: Pg, 
     async with w.engine.connect() as conn:
         assert (await views.active_pack(conn, ivan, MAT)).pack_id == r3
         loaded = await store.spans_by_ids(conn, ivan, [f"{MAT}:{i}" for i in range(3)])
-    assert loaded == {f"{MAT}:0": (R3_SPANS[0][0], R3_SPANS[0][2])}  # mapped seq 1 (no such span), seq 2: dropped
+    assert loaded == {f"{MAT}:0": (R3_SPANS[0][0], R3_SPANS[0][2], locator.quote_sha256(R3_SPANS[0][2]))}
+    # mapped seq 1 (no such span) and seq 2 (unmapped): dropped
 
 
 async def test_another_owners_active_pack_is_never_read(pg: Pg, tmp_path: Path) -> None:
@@ -83,5 +86,5 @@ async def test_another_owners_active_pack_is_never_read(pg: Pg, tmp_path: Path) 
     async with w.engine.connect() as conn:
         assert await store.spans_by_ids(conn, anna, [f"{MAT}:0"]) == {}
         assert await store.spans_by_ids(conn, w.users["ivan"], [f"{MAT}:0", "junk", "a:b"]) == {
-            f"{MAT}:0": SPANS[0]
+            f"{MAT}:0": (*SPANS[0], need("reader.ingest.locator").quote_sha256(SPANS[0][1]))
         }

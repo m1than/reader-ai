@@ -19,9 +19,9 @@ criteria:
       - test_stale_rows_are_finalised_by_reads_and_the_busy_check
       - test_prompt_fits_after_escaping_and_drops_lowest_rank_first
   - name: grounding
-    proves: "INV-TUTOR-2: every citation names a sent span, page and title from the database, quotes verified; a hit
-      sends its whole chunk (FR-TUTOR-5), so a fact beside the primary span can be cited"
-    tests: [test_answer_vectors, test_grounding_property, test_quote_words_bound, test_a_hit_sends_its_whole_chunk_primary_first]
+    proves: "INV-TUTOR-2: every citation names a sent span, page, title and quote hash from the database, quotes
+      verified; each find card also sends its next span (FR-TUTOR-5), so a fact beside a card's span can be cited"
+    tests: [test_answer_vectors, test_grounding_property, test_quote_words_bound, test_a_card_sends_its_next_span_after_the_primaries]
   - name: injection
     proves: "INV-TUTOR-3: injected text cannot produce a rejected citation; the prompt JSON round-trips; no tools"
     tests: [test_injection_vectors, test_forged_source_in_span_text_gets_no_alias]

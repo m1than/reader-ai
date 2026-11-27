@@ -445,6 +445,40 @@ async def test_store_corpus_is_finds_candidates_port(w: World) -> None:
     assert top.text in {s for _, s in RU_SPANS}  # full span text; find serves the cut
 
 
+async def test_a_scoped_store_corpus_reads_one_material_only(
+    w: World, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """kl_tutor_find.corpus_scope (V.kl-tutor-find): StoreCorpus(conn, policy, material_sha256) returns only
+    that material's cards and never loads another material's Book; unscoped, both materials answer."""
+    corpus_mod = need("reader.search.corpus")
+    find = need("reader.search.find")
+    opening = need("reader.search.opening")
+    policy = need("reader.search.policy").policy()
+    await _ingested(w)
+    en = [(1, "Wallet keys sign every transfer of the owner." + FILL_EN),
+          (2, "A miner checks the block." + FILL_EN)]
+    await _ingested(w, sha=MAT_EN, spans=en)
+    real = opening.load_book
+    loaded: list[str] = []
+
+    async def spy(conn: Any, pack: Any, pol: Any) -> Any:
+        loaded.append(pack.material_sha256)
+        return await real(conn, pack, pol)
+
+    monkeypatch.setattr(opening, "load_book", spy)
+    caller = find.Caller(w.users["ivan"], ("owner",))
+    route = find.route_for(policy, "tutor", "thematic", findings=False)
+    async with w.engine.connect() as conn:
+        scoped = await corpus_mod.StoreCorpus(conn, policy, MAT_EN).candidates(
+            caller, "tutor", route, "кошелёк ключи wallet keys", {}, ())
+        scoped_loads = list(loaded)
+        both = await corpus_mod.StoreCorpus(conn, policy).candidates(
+            caller, "tutor", route, "кошелёк ключи wallet keys", {}, ())
+    assert scoped.cards and {c.id.split(":")[1] for c in scoped.cards} == {MAT_EN}
+    assert set(scoped_loads) == {MAT_EN}  # the other material's Book is never loaded
+    assert {c.id.split(":")[1] for c in both.cards} == {MAT_RU, MAT_EN}
+
+
 async def test_search_returns_locator_hits(w: World) -> None:
     store = need("reader.search.store")
     from reader.ingest import views

@@ -1,9 +1,10 @@
 """SRV-OBS [db]: the `tutor.answer` handler's call sites of the obs helpers — the root keys (lesson, course,
 prompt version, final state), the session marker with the lesson, the `tutor.retrieve` and `tutor.citations`
 child spans with their counts, and the code assessments enqueued as `obs.feedback` (exact args); the question,
-the answer and the book text reach no span and no job arg.
+the answer and the book text reach no span and no job arg. SRV-TUTOR FR-TUTOR-3 (ADR-0039 revision): the
+`tutor.retrieve` candidates count the cards `find` returned, the hits the span ids sent.
 
-@trace FR-OBS-12 FR-OBS-13 FR-OBS-14 FR-OBS-18 INV-OBS-2 INV-OBS-3
+@trace FR-OBS-12 FR-OBS-13 FR-OBS-14 FR-OBS-18 INV-OBS-2 INV-OBS-3 FR-TUTOR-3
 """
 
 from __future__ import annotations
@@ -19,8 +20,8 @@ from obs.conftest import finished, obs_setup, require
 
 from .conftest import (
     SPANS,
+    FakeFind,
     FakeProvider,
-    FakeSearch,
     Pg,
     Reply,
     answer_json,
@@ -59,9 +60,9 @@ async def _run(w: Any, qid: uuid.UUID, provider: Any, monkeypatch: pytest.Monkey
         return PROMPT_VERSION if name == "reader.tutor" else None
 
     monkeypatch.setattr(prompts, "version_of", version_of)
-    # Two hits, the first with a neighbour span: 2 candidates (search results), 3 spans sent (code review round 2:
+    # Two find cards, the first with a next span: 2 candidates (cards), 3 spans sent (code review round 2:
     # distinct counts, so swapping the two attributes fails).
-    kind = need("reader.tutor.jobs").make_kind(deps(w, provider, FakeSearch(chunks=[(0, [0, 1]), (2, [2])])))
+    kind = need("reader.tutor.jobs").make_kind(deps(w, provider, FakeFind(cards=[(0, 1), (2, None)])))
     args = kind.args.model_validate({"question_id": str(qid)})
     with obs_setup("worker") as (handle, memory):
         tracer = require("reader.obs").tracer()
@@ -108,7 +109,7 @@ async def test_answer_spans_root_keys_and_assessments(
     marker = got["job.session"]
     assert marker.attributes["session.id"] == str(lesson)
     assert marker.parent.span_id == root.context.span_id
-    # FR-OBS-13: retrieval counts (2 search results, 3 spans kept) and citation counts (2 blocks, 1 supported).
+    # FR-OBS-13: retrieval counts (2 find cards, 3 spans kept) and citation counts (2 blocks, 1 supported).
     retrieve, cited = got["tutor.retrieve"], got["tutor.citations"]
     assert (retrieve.attributes["reader.retrieval.hits"], retrieve.attributes["reader.retrieval.candidates"]) == (3, 2)
     assert (cited.attributes["reader.citations.total"], cited.attributes["reader.citations.valid"]) == (2, 1)

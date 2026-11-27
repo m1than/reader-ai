@@ -193,25 +193,8 @@ def test_status_map_matches_the_fixture() -> None:
         assert params.status_from(row["job"], row["overlay"]) == row["status"], row
 
 
-# ---- FR-SEARCH-7: the compatibility Hit against SRV-TUTOR's Protocol ---------------------------------------
-
-
-def test_hit_satisfies_the_tutor_protocol() -> None:
-    store = need("reader.search.store")
-    from typing import get_type_hints
-
-    from reader.tutor import jobs as tutor_jobs
-
-    loc = "spn:" + "a" * 64
-    hits = [store.Hit(material_sha256="a" * 64, page=1, span_id=f"{loc}:p1:0-{n}",
-                      span_ids=[f"{loc}:p1:0-{n}"], snippet="s", score=1.0 - n / 10, dense_rank=n,
-                      fts_rank=None)
-            for n in (3, 1, 2)]
-    protocol = {name for name in vars(tutor_jobs.Hit) if not name.startswith("_")}
-    assert protocol == {"span_id", "span_ids"}
-    hints = get_type_hints(store.Hit)
-    assert hints["span_id"] is str and hints["span_ids"] == list[str]
-    assert tutor_jobs.candidate_span_ids(hits) == [h.span_id for h in hits]  # locators in rank order
+# FR-SEARCH-7: the Hit contract test against SRV-TUTOR's Protocol is removed with the tutor's search() path
+# (kl_tutor_find.legacy_search, V.kl-tutor-find); search() keeps serving POST /api/search.
 
 
 # ---- FR-SEARCH-1, INV-SEARCH-8: the service protocol with a fake encoder --------------------------------

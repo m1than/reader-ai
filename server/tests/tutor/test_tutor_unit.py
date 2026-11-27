@@ -3,7 +3,7 @@ sizing, the system prompt, cost derivation, the state map and the DoD hook.
 
 @trace FR-TUTOR-3 FR-TUTOR-5 FR-TUTOR-6 FR-TUTOR-7 FR-TUTOR-8 FR-TUTOR-10 FR-TUTOR-13
 @trace INV-TUTOR-2 INV-TUTOR-3
-@trace VEC-TUTOR-1 VEC-TUTOR-2 VEC-TUTOR-3 VEC-TUTOR-4 VEC-TUTOR-5
+@trace VEC-TUTOR-1 VEC-TUTOR-2 VEC-TUTOR-3 VEC-TUTOR-4 VEC-TUTOR-5 VEC-TUTOR-9
 """
 
 from __future__ import annotations
@@ -12,7 +12,6 @@ import hashlib
 import json
 import math
 import re
-from dataclasses import dataclass
 from decimal import Decimal
 from pathlib import Path
 from typing import Any
@@ -29,14 +28,25 @@ INJECTION = fixture("injection.yaml")
 COST = fixture("cost.yaml")
 STATUS = fixture("status-map.yaml")["cases"]
 CATALOGUE = fixture("errors.yaml")["codes"]
+FIND_SOURCES = fixture("find-sources.yaml")
+LEGACY = "a" * 64 + ":3"
 
 
 def _sent() -> list[Any]:
     answer = need("reader.tutor.answer")
     return [
-        answer.Source(alias, value["span"], 60 + i, value["text"])
-        for i, (alias, value) in enumerate(ANSWERS["sent"].items())
+        answer.Source(alias, value["span"], value["page"], value["text"], value["quote_sha256"])
+        for alias, value in ANSWERS["sent"].items()
     ]
+
+
+def _citation(source: Any, title: str) -> dict[str, Any]:
+    """FR-TUTOR-8 (revision): the sent span's id, page and stored hash, the material title; no hash beside a
+    non-locator id."""
+    out = {"span": source.span_id, "page": source.page, "material_title": title}
+    if source.span_id.startswith("spn:"):
+        out["quote_sha256"] = source.quote_sha256
+    return out
 
 
 # ---- bounds and the catalogue
@@ -47,7 +57,9 @@ def test_bounds_match_the_spec() -> None:
     b = bounds()
     assert params.QUESTION_CHARS_MAX == b["question_chars_max"]
     assert params.QUESTION_BYTES_MAX == b["question_bytes_max"]
-    assert params.RETRIEVE_K == b["retrieve_k"]
+    # ADR-0039 revision: find on the tutor channel takes no k; SRV-SEARCH policy sets the response size.
+    assert "retrieve_k" not in b
+    assert not hasattr(params, "RETRIEVE_K")
     assert params.SPAN_BYTES_MAX == b["span_bytes_max"]
     assert params.CELL_BYTES_MAX == b["cell_bytes_max"]
     assert params.QUESTION_CELL_BYTES_MAX == b["question_cell_bytes_max"]
@@ -130,10 +142,19 @@ def test_answer_vectors(case: dict[str, Any]) -> None:
             answer.parse(raw)
         assert failure.value.code == expect["error"]
         return
-    checked = answer.check(answer.parse(raw), _sent())
+    sent = _sent()
+    checked = answer.check(answer.parse(raw), sent)
     assert [list(b.kept) for b in checked.blocks] == [b["kept"] for b in expect["blocks"]]
     assert [b.supported for b in checked.blocks] == [b["supported"] for b in expect["blocks"]]
     assert checked.grounded is expect["grounded"]
+    title = ANSWERS["material_title"]
+    by_alias = {s.alias: s for s in sent}
+    for block, want in zip(checked.blocks, expect["blocks"], strict=True):
+        cited = answer.citations(block.kept, sent, title)
+        assert cited == [_citation(by_alias[a], title) for a in block.kept]  # every case follows the rule
+        if "citations" in want:
+            assert cited == want["citations"]
+        assert all(set(c) == {"span", "page", "material_title", "quote_sha256"} for c in cited)
 
 
 def test_parse_bounds() -> None:
@@ -160,7 +181,7 @@ def test_parse_bounds() -> None:
 def test_quote_words_bound() -> None:
     answer = need("reader.tutor.answer")
     text = " ".join(f"w{i}" for i in range(40))
-    source = answer.Source("s1", "a" * 64 + ":0", 1, text)
+    source = answer.Source("s1", f"spn:{'a' * 64}:p1:0-10", 1, text)
     for n, ok in ((4, False), (5, True), (30, True), (31, False)):
         quote = " ".join(f"w{i}" for i in range(n))
         out = {"blocks": [{"text": "x", "spans": ["s1"], "quote": quote}], "insufficient": False}
@@ -169,17 +190,25 @@ def test_quote_words_bound() -> None:
 
 # ---- INV-TUTOR-2: grounding by code, for any output
 
-_ALIAS = st.sampled_from(["s1", "s2", "s3", "s9", "s0", "S1", "a" * 64 + ":1", "b" * 64 + ":7", "", "s1 "])
+_ALIAS = st.sampled_from(["s1", "s2", "s3", "s4", "s9", "s0", "S1", "a" * 64 + ":1", "b" * 64 + ":7", "", "s1 "])
+_HEX = st.text(alphabet="0123456789abcdef", min_size=64, max_size=64)
 _BLOCK = st.fixed_dictionaries(
-    {"text": st.text(min_size=1, max_size=50), "spans": st.lists(_ALIAS, max_size=3), "quote": st.text(max_size=80)}
+    {"text": st.one_of(st.text(min_size=1, max_size=50), _HEX), "spans": st.lists(_ALIAS, max_size=3),
+     "quote": st.one_of(st.text(max_size=80), _HEX)}
 )
 
 
 @settings(max_examples=300, deadline=None)
-@given(blocks=st.lists(_BLOCK, min_size=1, max_size=5), insufficient=st.booleans(), pick=st.integers(0, 40))
-def test_grounding_property(blocks: list[dict[str, Any]], insufficient: bool, pick: int) -> None:
+@given(blocks=st.lists(_BLOCK, min_size=1, max_size=5), insufficient=st.booleans(), pick=st.integers(0, 40),
+       legacy=st.booleans())
+def test_grounding_property(blocks: list[dict[str, Any]], insufficient: bool, pick: int, legacy: bool) -> None:
+    """INV-TUTOR-2 at the check-function level; the revision: a citation's hash is the sent span's, whatever the
+    output holds, and over a sent set that mixes locators and a legacy id (as if FR-TUTOR-5's filter were
+    bypassed) no citation carries quote_sha256 beside the legacy id."""
     answer = need("reader.tutor.answer")
     sent = _sent()
+    if legacy:
+        sent.append(answer.Source("s4", LEGACY, 70, "A legacy span text that a bypassed filter let through.", "f" * 64))
     by_alias = {s.alias: s for s in sent}
     # Sometimes plant a real excerpt so supported blocks occur.
     words = sent[0].text.split()
@@ -193,6 +222,15 @@ def test_grounding_property(blocks: list[dict[str, Any]], insufficient: bool, pi
             first = by_alias[block.kept[0]]
             assert answer.normalize(block.quote) in answer.normalize(first.text)
             assert 5 <= len(answer.normalize(block.quote).split()) <= 30
+        for citation, alias in zip(answer.citations(block.kept, sent, "T"), block.kept, strict=True):
+            source = by_alias[alias]
+            assert (citation["span"], citation["page"], citation["material_title"]) == (
+                source.span_id, source.page, "T")
+            if "quote_sha256" in citation:
+                assert citation["span"].startswith("spn:")
+                assert citation["quote_sha256"] == source.quote_sha256
+            else:
+                assert not source.span_id.startswith("spn:")
     assert checked.grounded == (not insufficient and all(b.supported for b in checked.blocks))
 
 
@@ -312,46 +350,89 @@ def test_no_source_is_sources_unavailable() -> None:
 # ---- FR-TUTOR-5 / -6: primaries before neighbours, so only bytes bind
 
 
-@dataclass(frozen=True)
-class _Hit:
-    span_id: str
-    span_ids: list[str]
+def _loc(page: int) -> str:
+    return f"spn:{'a' * 64}:p{page}:0-10"
 
 
-def _hits(n_hits: int, per_chunk: int, primary_at: int) -> list[_Hit]:
-    """n_hits disjoint chunks of per_chunk spans each; the primary is the chunk's span number primary_at."""
-    out = []
-    for h in range(n_hits):
-        ids = [f"{'a' * 64}:{h * per_chunk + i}" for i in range(per_chunk)]
-        out.append(_Hit(ids[primary_at], ids))
-    return out
+def _card(card_id: str, nxt: list[str], layer: str = "L1") -> dict[str, Any]:
+    return {"id": card_id, "layer": layer, "next": nxt}
 
 
-@pytest.mark.parametrize("span_text", ["a b c", "w " * 200], ids=["small-spans", "bytes-bind"])
+@pytest.mark.parametrize("case", FIND_SOURCES["cases"], ids=lambda c: c["name"])
+def test_find_sources_vectors(case: dict[str, Any]) -> None:
+    """VEC-TUTOR-9: a find response's cards → the candidate span ids, in order."""
+    jobs = need("reader.tutor.jobs")
+    ids = FIND_SOURCES["ids"]
+    cards = [_card(ids[c["id"]], [ids[n] for n in c["next"]], c["layer"]) for c in case["cards"]]
+    assert jobs.candidate_ids(cards) == [ids[k] for k in case["expect"]]
+
+
+def test_legacy_ids_in_a_find_response_are_never_candidates() -> None:
+    """FR-TUTOR-5/-8 (revision): a legacy `<sha>:<seq>` id as a card id or a next id is dropped before loading,
+    so no alias can name it and no citation can carry quote_sha256 beside it."""
+    jobs = need("reader.tutor.jobs")
+    legacy_next = "b" * 64 + ":9"
+    cards = [_card(LEGACY, [_loc(1)]), _card(_loc(2), [legacy_next, _loc(3)])]
+    found = jobs.candidate_ids(cards)
+    assert found == [_loc(2), _loc(1), _loc(3)]
+    assert LEGACY not in found and legacy_next not in found
+
+
+@pytest.mark.parametrize("span_text", ["a b c", "w " * 1000], ids=["small-spans", "bytes-bind"])
 def test_every_primary_is_sent_before_any_neighbour(span_text: str) -> None:
+    """FR-TUTOR-5/-6 (revision): 25 L1 cards, each with its next span; the primaries come first, so the byte
+    budget drops neighbours of the lowest ranks before any primary."""
     jobs = need("reader.tutor.jobs")
     answer = need("reader.tutor.answer")
     params = need("reader.tutor.params")
-    hits = _hits(8, 9, primary_at=4)
-    ordered = jobs.candidate_span_ids(hits)
-    assert ordered[:8] == [h.span_id for h in hits]  # every primary, in rank order
-    assert ordered[8:16] == [s for s in hits[0].span_ids if s != hits[0].span_id]  # then the top hit's 8 neighbours
-    assert len(ordered) == 72
-    spans = [answer.Span(s, 60, span_text) for s in ordered[: params.SOURCES_MAX]]
+    cards = [_card(_loc(2 * i + 1), [_loc(2 * i + 2), f"sec:{'a' * 64}:1"]) for i in range(25)]
+    ordered = jobs.candidate_ids(cards)
+    primaries = [c["id"] for c in cards]
+    assert ordered[:25] == primaries  # every primary, in response order
+    assert ordered[25:] == [c["next"][0] for c in cards]  # then each card's next span, in the same order
+    spans = [answer.Span(s, 60, span_text, "e" * 64) for s in ordered[: params.SOURCES_MAX]]
     prompt = answer.build_prompt("q", None, spans)
     sent = [s.span_id for s in prompt.sources]
-    assert sent[:8] == [h.span_id for h in hits]  # all 8 primaries, whatever the budget drops
     if span_text == "a b c":
-        assert len(sent) == 72  # small spans: neither the alias cap nor the bytes bind
+        assert sent == ordered  # small spans: neither the alias cap nor the bytes bind
     else:
-        assert 8 <= len(sent) < 72  # 72 x ~400 bytes > the sources budget: neighbours of the lowest ranks dropped
+        assert sent[:25] == primaries[: len(sent)]
+        assert len(sent) < 50  # 50 x ~1,000 bytes > the sources budget: neighbours dropped first
         assert len(prompt.text.encode()) <= params.PROMPT_BYTES_MAX
 
 
-def test_shared_spans_keep_their_first_alias() -> None:
+# ---- FR-TUTOR-5 (revision): the judge pin and the import boundary
+
+
+def test_shipped_gate_is_never_judge_while_the_tutor_has_no_judge() -> None:
+    """kl_open_points 2: the tutor's default deps carry no judge exactly while the shipped gate never asks for one;
+    the test fails when either changes alone."""
     jobs = need("reader.tutor.jobs")
-    a, b = "x" * 64 + ":1", "x" * 64 + ":2"
-    assert jobs.candidate_span_ids([_Hit(a, [a, b]), _Hit(b, [a, b])]) == [a, b]
+    from reader.search import policy
+
+    shipped = json.loads(policy.POLICY_FILE.read_text(encoding="utf-8"))
+    never = shipped["gate"]["mode"] == "never_judge"
+    assert never == (jobs.default_deps().judge is None)
+    assert never and jobs.default_deps().judge is None  # this revision: both
+
+
+def test_default_deps_reach_find_and_the_bound_policy() -> None:
+    """FR-TUTOR-5 (revision): production retrieval is SRV-SEARCH's find with the process's bound (policy,
+    version) pair."""
+    jobs = need("reader.tutor.jobs")
+    from reader.search import find, policy
+
+    made = jobs.default_deps()
+    assert made.find is find.find
+    assert made.policy is policy.current
+
+
+def test_no_tutor_module_imports_the_search_store() -> None:
+    """FR-TUTOR-5 (revision): the tutor reaches SRV-SEARCH only through find, never `reader.search.store`."""
+    root = REPO / "server" / "src" / "reader" / "tutor"
+    pattern = re.compile(r"reader\.search\.store|from reader\.search import[^\n]*\bstore\b")
+    offenders = [p.name for p in root.rglob("*.py") if pattern.search(p.read_text(encoding="utf-8"))]
+    assert offenders == []
 
 
 def test_prompt_bytes_max_is_inclusive(monkeypatch: pytest.MonkeyPatch) -> None:

@@ -1,5 +1,5 @@
 """Shared fixtures for SRV-TUTOR tests: the spec and its vectors, a migrated database with a lesson, a material and
-its spans, a fake search, a fake Provider port, and an api client with a session.
+its spans, a fake find, a fake Provider port, and an api client with a session.
 
 The module under test (`reader.tutor`) is imported only through `need()` inside tests, so a missing module fails
 each test (Red) instead of the collection.
@@ -246,39 +246,37 @@ async def execute(engine: Any, sql: str, **params: Any) -> None:
 # ---- fakes -----------------------------------------------------------------------------------------------------
 
 
-@dataclass(frozen=True)
-class FakeHit:
-    span_id: str  # the chunk's primary span
-    page: int
-    span_ids: list[str]  # every span the chunk overlaps, in chunk order (SRV-SEARCH Hit)
+async def locators(conn: Any, owner_id: uuid.UUID, material_sha256: str) -> dict[int, str]:
+    """seq → locator of the owner's active pack of the material (the ids `find` returns)."""
+    from reader.ingest import views
 
-
-@dataclass(frozen=True)
-class FakeResult:
-    results: list[FakeHit]
-    degraded: bool = False
+    pack = await views.active_pack(conn, owner_id, material_sha256)
+    assert pack is not None
+    return {s.seq: str(s.locator) for s in await views.pack_spans(conn, pack)}
 
 
 @dataclass
-class FakeSearch:
-    """SRV-SEARCH's search(engine, owner_id, query, k, material_sha256) over the world's spans: by default one
-    one-span chunk per seq, in seq order; `chunks` gives (primary seq, chunk seqs) per hit instead."""
+class FakeFind:
+    """SRV-SEARCH's find(caller, channel, query, *, deps, …) (FR-SEARCH-22) over the caller's active pack of the
+    corpus's material scope: one L1 card per `cards` entry (seq, next seq or None), its id the span's locator and
+    its `next` the next span's locator then a section id, as StoreCorpus serves them. `raw` gives the cards as
+    they are instead (ids that are not the pack's, other layers). Every call is recorded with its keywords."""
 
-    seqs: list[int] = field(default_factory=lambda: [0, 1, 2])
+    cards: list[tuple[int, int | None]] = field(default_factory=lambda: [(0, 1), (1, 2), (2, None)])
     degraded: bool = False
-    chunks: list[tuple[int, list[int]]] | None = None
-    calls: list[tuple[uuid.UUID, str, int, str | None]] = field(default_factory=list)
+    raw: list[dict[str, Any]] | None = None
+    calls: list[dict[str, Any]] = field(default_factory=list)
 
-    async def __call__(
-        self, engine: Any, owner_id: uuid.UUID, query: str, k: int = 10, material_sha256: str | None = None
-    ) -> FakeResult:
-        self.calls.append((owner_id, query, k, material_sha256))
-        chunks = self.chunks if self.chunks is not None else [(seq, [seq]) for seq in self.seqs]
-        hits = [
-            FakeHit(f"{material_sha256}:{primary}", SPANS[primary][0], [f"{material_sha256}:{s}" for s in seqs])
-            for primary, seqs in chunks
-        ][:k]
-        return FakeResult(hits, self.degraded)
+    async def __call__(self, caller: Any, channel: str, query: str, **kw: Any) -> dict[str, Any]:
+        self.calls.append({"caller": caller, "channel": channel, "query": query, **kw})
+        if self.raw is not None:
+            return {"cards": self.raw, "degraded": self.degraded}
+        corpus = kw["deps"].corpus
+        ids = await locators(corpus.conn, caller.user_id, corpus.material_sha256)
+        section = f"sec:{corpus.material_sha256}:1"
+        cards = [{"id": ids[seq], "layer": "L1", "next": ([] if nxt is None else [ids[nxt]]) + [section]}
+                 for seq, nxt in self.cards]
+        return {"cards": cards, "degraded": self.degraded}
 
 
 def answer_json(blocks: list[dict[str, Any]] | None = None, insufficient: bool = False) -> str:
@@ -318,13 +316,23 @@ class FakeProvider:
         return StageResult(reply.text, usage, reply.sdk_usd, "claude-sonnet-5-5", reply.stop_reason)
 
 
-def deps(w: World, provider: Any, search: Any | None = None) -> Any:
+def policy_pair() -> tuple[Any, str]:
+    """SRV-SEARCH's shipped policy and its version without the judge slots' config (the process's `current()`
+    reads reader.yaml from READER_CONFIG, which the tests do not set)."""
+    from reader.search import policy
+
+    loaded = policy.policy()
+    return loaded, policy.policy_version(loaded, slots={})
+
+
+def deps(w: World, provider: Any, find: Any | None = None, **kw: Any) -> Any:
     jobs = need("reader.tutor.jobs")
     return jobs.Deps(
         provider=lambda _engine: contextlib.nullcontext(provider),
-        search=search or FakeSearch(),
+        find=find or FakeFind(),
         blobs_root=w.blobs,
         config=lambda: w.config,
+        **{"policy": policy_pair, **kw},
     )
 
 

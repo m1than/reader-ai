@@ -386,7 +386,12 @@ requirements:
       none is applied. `reader.search.corpus.StoreCorpus(conn, policy)` is the production `Corpus` port: it leaves
       out of the scan every pack whose L1 the channel may not serve this caller, returns L1 cards with the span's
       full text (find serves the cut) and, as neighbours, an L1 card's next span and section from the same
-      `Book`. The compatibility `Hit` has no `chunk_id`; its page and snippet come from
+      `Book`. **V.kl-tutor-find (kl_tutor_find.corpus_scope and legacy_search, promoted 2026-11-28):**
+      `StoreCorpus(conn, policy, material_sha256=None)`: a corpus scoped to one material (the tutor's; routes never
+      set it) passes it to `store.candidates` and skips every active pack of another material, before its Book or
+      entitlement is read (test_search_db.py, two active materials and a `load_book` spy); the tutor no longer calls
+      `search()` and SRV-TUTOR's `Hit` Protocol is gone, so the Hit contract test is removed; `search()` keeps
+      serving `POST /api/search` until V.kl-live. The compatibility `Hit` has no `chunk_id`; its page and snippet come from
       `views.active_span_texts`. test_search_db.py, test_search_unit.py (Hit contract), test_search_props.py.
   - id: FR-SEARCH-8
     text: >-
@@ -1476,8 +1481,9 @@ proposed_defers:
   - "Dropping search_chunks and search_embeds: a migration after V.kl-live."
   - "A response cache: not built; reproducibility rests on brain_version, policy_version and recorded judge outputs."
 
-# ---- Paired with SRV-TUTOR's ADR-0039 revision (V.kl-tutor-find), DRAFT, not approved; it lands with that revision's
-# Red tests. Approved texts above stay in force until then.
+# ---- Paired with SRV-TUTOR's ADR-0039 revision (V.kl-tutor-find), approved with it (2026-11-28). policy_change
+# (unit 2), corpus_scope and legacy_search (unit 3) are promoted into FR-SEARCH-7 / proposed_bounds with their tests;
+# judge_ship_condition is kl_open_points 5 (c).
 kl_tutor_find:
   corpus_scope:
     text: >-

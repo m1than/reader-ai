@@ -1,0 +1,43 @@
+# VEC-TUTOR-9 — a find response's cards → the tutor's candidate span ids, in order (SRV-TUTOR FR-TUTOR-5,
+# ADR-0039 revision, V.kl-tutor-find). Synthetic ids, no text. Rule: the ids of the L1 cards in response order, then,
+# in the same order, each L1 card's first `next` id that is a span locator (`spn:`), a span already taken not
+# repeated; non-L1 cards ignored; any id that is not a locator (a legacy `<sha>:<seq>` id, a `sec:` or `src:` id,
+# a malformed `spn:` id) dropped before loading (fail-closed, FR-TUTOR-8).
+# A, B, C, D, E name locators of one material: spn:<64 × a>:p<page>:0-10.
+ids:
+  A: "spn:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:p1:0-10"
+  B: "spn:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:p2:0-10"
+  C: "spn:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:p3:0-10"
+  D: "spn:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:p4:0-10"
+  E: "spn:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:p5:0-10"
+  SEC: "sec:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:1/2"
+  SRC: "src:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  LEGACY: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:7"
+  BAD: "spn:not-a-locator"
+# Cards name ids by key; `next` lists ids by key. Expected candidates are keys.
+cases:
+  - name: primaries-then-next
+    cards: [{id: A, layer: L1, next: [B, SEC]}, {id: C, layer: L1, next: [D, SEC]}]
+    expect: [A, C, B, D]
+  - name: a-next-already-a-primary-is-not-repeated
+    cards: [{id: A, layer: L1, next: [B, SEC]}, {id: B, layer: L1, next: [C, SEC]}]
+    expect: [A, B, C]
+  - name: repeated-card-and-shared-next
+    cards: [{id: A, layer: L1, next: [C]}, {id: B, layer: L1, next: [C]}, {id: A, layer: L1, next: [C]}]
+    expect: [A, B, C]
+  - name: non-l1-cards-ignored
+    cards: [{id: SRC, layer: L0, next: [SEC]}, {id: SEC, layer: L2, next: [A]}, {id: B, layer: L1, next: [C]}]
+    expect: [B, C]
+  - name: a-sec-next-is-ignored-and-only-the-first-locator-next-counts
+    cards: [{id: A, layer: L1, next: [SEC, B, C]}]
+    expect: [A, B]
+  - name: a-card-without-next
+    cards: [{id: E, layer: L1, next: []}, {id: D, layer: L1, next: [E]}]
+    expect: [E, D]
+  - name: legacy-and-malformed-ids-dropped
+    # the filter runs last: a dropped card's locator next still counts, a legacy next is not a span locator
+    cards: [{id: LEGACY, layer: L1, next: [A]}, {id: BAD, layer: L1, next: [B]}, {id: C, layer: L1, next: [LEGACY]}]
+    expect: [C, A, B]
+  - name: no-cards
+    cards: []
+    expect: []

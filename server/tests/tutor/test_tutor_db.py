@@ -1,4 +1,4 @@
-"""SRV-TUTOR [db]: the `tutor.answer` handler with a fake search and Provider, two stalled calls through the real
+"""SRV-TUTOR [db]: the `tutor.answer` handler with a fake find and Provider, two stalled calls through the real
 SRV-AGENT adapter, the routes, isolation, stale rows, spend bounds and logs.
 
 @trace FR-TUTOR-1 FR-TUTOR-2 FR-TUTOR-3 FR-TUTOR-4 FR-TUTOR-5 FR-TUTOR-7 FR-TUTOR-8 FR-TUTOR-9 FR-TUTOR-10
@@ -20,9 +20,9 @@ import pytest
 from .conftest import (
     MAT,
     SPANS,
+    FakeFind,
     FakeJobs,
     FakeProvider,
-    FakeSearch,
     Pg,
     Reply,
     answer_json,
@@ -30,7 +30,9 @@ from .conftest import (
     deps,
     execute,
     insert_question,
+    locators,
     need,
+    policy_pair,
     question_row,
     rows,
     run_handler,
@@ -51,8 +53,12 @@ async def test_answer_is_validated_and_stored_with_citations_from_the_database(p
     params = need("reader.tutor.params")
     w = await world(pg, tmp_path)
     qid = await insert_question(w, cell_id="f01-explain")
-    provider, search = FakeProvider(), FakeSearch()
-    await run_handler(w, qid, deps(w, provider, search))
+    provider, find = FakeProvider(), FakeFind()
+    await run_handler(w, qid, deps(w, provider, find))
+    async with w.engine.connect() as conn:
+        ids = await locators(conn, w.users["ivan"], MAT)
+    hashes = dict(await rows(w.engine, "SELECT locator, quote_sha256 FROM material_spans WHERE owner_id = :o",
+                             o=w.users["ivan"]))
     state, stored, grounded, code, model = await question_row(w, qid)
     assert (state, grounded, code, model) == ("answered", True, None, "claude-sonnet-5-5")
     system, sha = answer.system_prompt()
@@ -65,11 +71,21 @@ async def test_answer_is_validated_and_stored_with_citations_from_the_database(p
             "text": "Miners search for a nonce.",
             "supported": True,
             "quote": "Miners vary the nonce until the hash",
-            "citations": [{"span": f"{MAT}:0", "page": 61, "material_title": "Book of ivan"}],
+            "citations": [{"span": ids[0], "page": 61, "material_title": "Book of ivan",
+                           "quote_sha256": hashes[ids[0]]}],
         }
     ]
-    # FR-TUTOR-5: one search over the course's material; FR-TUTOR-7: one call with the tutor's options.
-    assert search.calls == [(w.users["ivan"], "Why do miners vary the nonce?", params.RETRIEVE_K, MAT)]
+    # FR-TUTOR-5 (revision): one find on channel tutor over the course's material, no budget, no k, no judge
+    # context, no judge; FR-TUTOR-7: one call with the tutor's options.
+    (found,) = find.calls
+    assert (found["caller"].user_id, found["caller"].roles, found["caller"].provider) == (
+        w.users["ivan"], ("owner",), True)
+    assert (found["channel"], found["query"]) == ("tutor", "Why do miners vary the nonce?")
+    assert set(found) == {"caller", "channel", "query", "deps"}  # no budget, k, filters or judge_ctx
+    assert found["deps"].judge is None
+    assert found["deps"].corpus.material_sha256 == MAT
+    assert found["deps"].corpus.policy is found["deps"].policy  # one (policy, version) pair
+    assert found["deps"].policy_version() == policy_pair()[1]
     (call,) = provider.calls
     assert (call.owner_id, call.handle, call.run_id, call.lesson_id) == (w.users["ivan"], "ivan", qid, w.lessons["ivan"])
     assert (call.stage, call.task, call.attempt) == ("tutor", "tutor", 1)
@@ -100,27 +116,36 @@ async def test_degraded_search_is_recorded_and_unsupported_blocks_kept(pg: Pg, t
         {"text": "Invented.", "spans": ["s9", "s1"], "quote": "miners choose the reward freely here"},
     ]
     provider = FakeProvider([Reply(text=answer_json(blocks))])
-    await run_handler(w, qid, deps(w, provider, FakeSearch(degraded=True)))
+    await run_handler(w, qid, deps(w, provider, FakeFind(degraded=True)))
+    async with w.engine.connect() as conn:
+        ids = await locators(conn, w.users["ivan"], MAT)
     state, stored, grounded, _, _ = await question_row(w, qid)
     assert (state, grounded, stored["retrieval"]) == ("answered", False, "degraded")
     assert [b["supported"] for b in stored["blocks"]] == [True, False]
-    assert [c["span"] for c in stored["blocks"][1]["citations"]] == [f"{MAT}:0"]
+    assert [c["span"] for c in stored["blocks"][1]["citations"]] == [ids[0]]
 
 
 async def test_no_source_fails_without_a_model_call(pg: Pg, tmp_path: Path) -> None:
     w = await world(pg, tmp_path)
     qid = await insert_question(w)
     provider = FakeProvider()
-    await run_handler(w, qid, deps(w, provider, FakeSearch(seqs=[])))
+    await run_handler(w, qid, deps(w, provider, FakeFind(cards=[])))
     assert (await question_row(w, qid))[0::3] == ("failed", "sources_unavailable")
     assert provider.calls == []
-    # A course without a material: no search at all.
+    # Cards whose ids load nothing (an L2 card, a locator of no active span): no source either.
+    unloadable = [{"id": f"sec:{MAT}:1", "layer": "L2", "next": []},
+                  {"id": f"spn:{MAT}:p999:0-10", "layer": "L1", "next": []}]
+    qid1 = await insert_question(w, question="Unloadable?")
+    await run_handler(w, qid1, deps(w, provider, FakeFind(raw=unloadable)))
+    assert (await question_row(w, qid1))[0::3] == ("failed", "sources_unavailable")
+    assert provider.calls == []
+    # A course without a material: no find at all.
     await execute(w.engine, "UPDATE courses SET material_sha256 = NULL WHERE owner_id = :o", o=w.users["ivan"])
-    search = FakeSearch()
+    find = FakeFind()
     qid2 = await insert_question(w, question="Another one?")
-    await run_handler(w, qid2, deps(w, provider, search))
+    await run_handler(w, qid2, deps(w, provider, find))
     assert (await question_row(w, qid2))[0::3] == ("failed", "sources_unavailable")
-    assert search.calls == []
+    assert find.calls == []
     assert provider.calls == []
 
 
@@ -209,7 +234,8 @@ def _real(w: Any, scripts: list[Any], tmp: Path, deadline_s: float = 0.3) -> tup
     provider = AgentProvider(w.engine, w.config, FakeProxyClient(cli), cli=cli, home_root=tmp)
     d = jobs.Deps(
         provider=lambda _engine: contextlib.nullcontext(provider),
-        search=FakeSearch(),
+        find=FakeFind(),
+        policy=policy_pair,
         blobs_root=w.blobs,
         config=lambda: w.config,
         deadline_s=deadline_s,
@@ -318,7 +344,9 @@ async def test_ask_queues_a_question_and_enqueues_its_job(pg: Pg, tmp_path: Path
 
 @pytest.mark.parametrize(
     "question",
-    ["", "   ", "x" * 1001, "😀" * 800, "a\x00b", "bell\x07", "esc\x1b[0m", None, 5],
+    # FR-TUTOR-1 (revision): 1,000 times U+0958 is 1,000 code points and 3,000 bytes, but 2,000 code points after NFC,
+    # which find's input check counts (FR-SEARCH-22).
+    ["", "   ", "x" * 1001, "😀" * 800, "a\x00b", "bell\x07", "esc\x1b[0m", None, 5, "क़" * 1000],
 )
 async def test_invalid_questions(pg: Pg, tmp_path: Path, question: Any) -> None:
     w = await world(pg, tmp_path)
@@ -328,6 +356,17 @@ async def test_invalid_questions(pg: Pg, tmp_path: Path, question: Any) -> None:
     assert (r.status_code, r.json()) == (400, {"error": "question_invalid"})
     assert jobs.enqueued == []
     assert await scalar(w.engine, "SELECT count(*) FROM tutor_questions") == 0
+
+
+async def test_a_lone_surrogate_is_question_invalid(pg: Pg, tmp_path: Path) -> None:
+    """FR-TUTOR-1 (revision), pinned: find refuses a lone surrogate (FR-SEARCH-22), so the ask does too."""
+    w = await world(pg, tmp_path)
+    jobs = FakeJobs()
+    async with client(w, jobs=jobs) as c:
+        r = await c.post(f"/api/lessons/{w.lessons['ivan']}/ask", content=b'{"question": "a\\ud800b"}',
+                         headers={"Content-Type": "application/json"})
+    assert (r.status_code, r.json()) == (400, {"error": "question_invalid"})
+    assert jobs.enqueued == []
 
 
 async def test_question_limits_accept_newlines_tabs_and_1000_characters(pg: Pg, tmp_path: Path) -> None:

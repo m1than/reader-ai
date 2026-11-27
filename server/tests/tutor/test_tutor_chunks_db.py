@@ -1,8 +1,8 @@
-"""SRV-TUTOR [db], revision 2026-11-23 after the first live run: a hit sends its whole chunk (primary span first,
-then the chunk's other spans, deduplicated across hits, one alias each), and GET reports a question's usage.
+"""SRV-TUTOR [db], revision 2026-11-23 after the first live run, and the ADR-0039 revision (V.kl-tutor-find): a
+find response sends every L1 card's span, then each card's next span (deduplicated, one alias each), so a fact one
+span beside a card can be cited; GET reports a question's usage.
 
-The world's spans are seq 0, 1 and 2; the coordinator's case "span_ids [1, 2, 3], span_id 2, quote only in span 1"
-is seq [0, 1, 2], primary 1, quote only in seq 0.
+The world's spans are seq 0, 1 and 2; a fake find returns cards (seq, next seq).
 
 @trace FR-TUTOR-2 FR-TUTOR-5 FR-TUTOR-6 FR-TUTOR-8
 """
@@ -18,9 +18,9 @@ import pytest
 from .conftest import (
     MAT,
     SPANS,
+    FakeFind,
     FakeJobs,
     FakeProvider,
-    FakeSearch,
     Pg,
     Reply,
     answer_json,
@@ -28,6 +28,7 @@ from .conftest import (
     deps,
     execute,
     insert_question,
+    locators,
     question_row,
     run_handler,
     world,
@@ -36,29 +37,32 @@ from .conftest import (
 pytestmark = pytest.mark.anyio
 
 
-async def test_a_hit_sends_its_whole_chunk_primary_first(pg: Pg, tmp_path: Path) -> None:
+async def test_a_card_sends_its_next_span_after_the_primaries(pg: Pg, tmp_path: Path) -> None:
     w = await world(pg, tmp_path)
     qid = await insert_question(w)
-    # The quote is only in seq 0, a neighbour of the primary span: s2 after the primary-first ordering.
-    blocks = [{"text": "Miners search for a nonce.", "spans": ["s2"], "quote": "Miners vary the nonce until the hash"}]
+    # The quote is only in seq 1, the next span of the card for seq 0: s3 after the primaries 0 and 2.
+    blocks = [{"text": "The target moves.", "spans": ["s3"], "quote": "The target is adjusted every 2016 blocks"}]
     provider = FakeProvider([Reply(text=answer_json(blocks))])
-    await run_handler(w, qid, deps(w, provider, FakeSearch(chunks=[(1, [0, 1, 2])])))
+    await run_handler(w, qid, deps(w, provider, FakeFind(cards=[(0, 1), (2, None)])))
+    async with w.engine.connect() as conn:
+        ids = await locators(conn, w.users["ivan"], MAT)
     sent = json.loads(provider.calls[0].prompt)["sources"]
     assert [s["id"] for s in sent] == ["s1", "s2", "s3"]
-    assert [s["text"] for s in sent] == [SPANS[1][1], SPANS[0][1], SPANS[2][1]]
-    assert [s["page"] for s in sent] == [SPANS[1][0], SPANS[0][0], SPANS[2][0]]
+    assert [s["text"] for s in sent] == [SPANS[0][1], SPANS[2][1], SPANS[1][1]]
+    assert [s["page"] for s in sent] == [SPANS[0][0], SPANS[2][0], SPANS[1][0]]
     state, stored, grounded, _, _ = await question_row(w, qid)
     assert (state, grounded) == ("answered", True)
-    assert stored["blocks"][0]["citations"] == [{"span": f"{MAT}:0", "page": SPANS[0][0], "material_title": "Book of ivan"}]
+    assert [(c["span"], c["page"], c["material_title"]) for c in stored["blocks"][0]["citations"]] == [
+        (ids[1], SPANS[1][0], "Book of ivan")]
 
 
-async def test_spans_shared_by_hits_are_sent_once_primaries_first(pg: Pg, tmp_path: Path) -> None:
+async def test_spans_shared_by_cards_are_sent_once_primaries_first(pg: Pg, tmp_path: Path) -> None:
     w = await world(pg, tmp_path)
     qid = await insert_question(w)
     provider = FakeProvider()
-    await run_handler(w, qid, deps(w, provider, FakeSearch(chunks=[(1, [0, 1]), (2, [1, 2]), (0, [0])])))
+    await run_handler(w, qid, deps(w, provider, FakeFind(cards=[(1, 2), (2, None), (0, 1)])))
     sent = json.loads(provider.calls[0].prompt)["sources"]
-    # primaries 1, 2, 0 in rank order; the neighbours (0 and 1) were already taken
+    # primaries 1, 2, 0 in response order; the next spans (2 and 1) were already taken
     assert [s["text"] for s in sent] == [SPANS[1][1], SPANS[2][1], SPANS[0][1]]
     assert [s["id"] for s in sent] == ["s1", "s2", "s3"]
 
@@ -72,13 +76,13 @@ async def test_a_citation_of_a_dropped_alias_is_removed(
 
     w = await world(pg, tmp_path)
     qid = await insert_question(w)
-    texts = [SPANS[1][1], SPANS[0][1], SPANS[2][1]]
-    spans = [answer_module.Span(f"{MAT}:{i}", 60, t) for i, t in zip((1, 0, 2), texts, strict=True)]
+    texts = [SPANS[0][1], SPANS[2][1], SPANS[1][1]]
+    spans = [answer_module.Span(f"{MAT}:{i}", 60, t) for i, t in zip((0, 2, 1), texts, strict=True)]
     two = len(answer_module.build_prompt("Why do miners vary the nonce?", None, spans[:2]).text.encode())
     monkeypatch.setattr(params, "PROMPT_BYTES_MAX", two)  # room for exactly two sources
     blocks = [{"text": "About the target.", "spans": ["s3"], "quote": "The target is adjusted every 2016 blocks"}]
     provider = FakeProvider([Reply(text=answer_json(blocks))])
-    await run_handler(w, qid, deps(w, provider, FakeSearch(chunks=[(1, [0, 1, 2])])))
+    await run_handler(w, qid, deps(w, provider, FakeFind(cards=[(0, 1), (2, None)])))
     assert [s["id"] for s in json.loads(provider.calls[0].prompt)["sources"]] == ["s1", "s2"]
     state, stored, grounded, _, _ = await question_row(w, qid)
     assert (state, grounded) == ("answered", False)

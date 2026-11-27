@@ -17,9 +17,9 @@ import pytest
 
 from .conftest import (
     SPANS,
+    FakeFind,
     FakeJobs,
     FakeProvider,
-    FakeSearch,
     Pg,
     Reply,
     client,
@@ -168,19 +168,19 @@ async def test_no_text_in_logs_when_the_output_is_invalid(
 
 
 @dataclass
-class RaisingSearch(FakeSearch):
+class RaisingFind(FakeFind):
     async def __call__(self, *args: Any, **kwargs: Any) -> Any:
-        raise RuntimeError("search failed for CANARY-SEARCH-77c2 and CANARY-QUESTION-5d4e")
+        raise RuntimeError("find failed for CANARY-SEARCH-77c2 and CANARY-QUESTION-5d4e")
 
 
-async def test_no_text_in_logs_when_search_raises(
+async def test_no_text_in_logs_when_find_raises(
     pg: Pg, tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
     w = await world(pg, tmp_path)
     qid = await insert_question(w, question="Why CANARY-QUESTION-5d4e?")
     provider = FakeProvider()
     with caplog.at_level(logging.DEBUG), pytest.raises(RuntimeError):
-        await run_handler(w, qid, deps(w, provider, RaisingSearch()))
+        await run_handler(w, qid, deps(w, provider, RaisingFind()))
     assert provider.calls == []
     assert (await question_row(w, qid))[0] == "queued"  # SRV-EVENTS judges the job; a read then finalises the row
     text = "\n".join(r.getMessage() for r in caplog.records)
