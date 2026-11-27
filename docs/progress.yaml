@@ -2180,7 +2180,15 @@ tasks:
         Paired: SRV-OBS slice_empty in reader.judge_skip (VEC-OBS-1), SRV-INGEST FR-INGEST-45 note, OPS-DOD
         operation search.find. Deviation (cost): the owner channel's judge ctx has no daily budget until SRV-MCP's
         per-user cap (kl_open_points 5); the shipped gate never_judge makes no judge call until judge-gate.
-        Remaining: the coordinator's code review of unit 5 and the merge; NFR-SEARCH-1, -2, -4..-7 (paid bench)",
+        Code review of 0eddd7d (3 blocking) fixed with Red a26d3cd then Green 3651df4: the embed job raises
+        IngestNotReady while its pack has no committed row and the import enqueues through enqueue_current
+        (a dead key is requeued; FR-INGEST-13's text corrected); the restore route ensures through the api's
+        Jobs after its commit; pinned converter order where pack ids disagree, collected/sealed current overlays
+        left alone, no embed call on refusals. Non-blocking applied (e267c0d): has-children set, embed_facts
+        skips collected overlays, legacy params marked, owner notes (tutor span context, NFR-SEARCH-3 open
+        measurement); not applied: moving the no_lane lines, corpus exclusion/full-text pins, license-only
+        corpus read. Remaining: the coordinator's code review of unit 5 and the merge; NFR-SEARCH-1, -2,
+        -4..-7 (paid bench)",
       needs: [V.kl-ingest-packs, V.spike.judge-gate, V.kl-agent-judges, V.kl-obs-spans],
       what: "SRV-SEARCH revision (~800–1,200 lines): the B6 cascade (routes, facets file, greedy selection under a token
         budget with stated bounds, 1-hop expansion, one judge.find job last on the worker-judge lane), policy_version,
