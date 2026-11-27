@@ -193,6 +193,9 @@ requirements:
       existing hash and report is unchanged), the locator for an r3 pack (FR-INGEST-33). The rest of the SRV-INGEST
       note for this module (the pack id in `scan_inputs_sha256`) is not part of this change. The [db] fixtures seal
       their ingest as an active r2 pack (server/tests/ingest/packseed.py). [db] test_freshness_active_pack_db.py.
+      **Promoted revision (r3_gates_revision, unit fresh):** this id's text in `proposed_revisions` (a locator
+      sample entry carries its stored `quote_sha256`; the sampler asserts the hash) extends the text above.
+      test_freshness_active_pack_db.py, test_units.py.
   - id: FR-FRESH-3
     text: >-
       Scan (stage a). One SRV-AGENT call, task `freshness_scan`, stage `scan`, `thinking_off`, no tools, its own
@@ -220,6 +223,8 @@ requirements:
       `scan_inputs_sha256` equals that of any earlier report of the same material with stored `claims` (whatever that
       report's final status) copies its `claims` and `scan_bibliography`, sets `scan_reused_from`, and records no scan
       cost (no provider call).
+      **Promoted revision (r3_gates_revision, unit fresh):** this id's text in `proposed_revisions` (a claim's
+      locator carries its span's `quote_sha256`) extends the text above. test_freshness_active_pack_db.py.
   - id: FR-FRESH-4
     text: >-
       Topics. The outline titles of level ≤ 2 in outline order, the first `topics_max`, each sanitised and cut to
@@ -353,6 +358,10 @@ requirements:
       date_source: model, kind, why, covers: [section id]}]`, every citation `{url, host, title}`. `topics` are
       FR-FRESH-4's `[{id, title}]` read from the report's ingest when the report has a verdict, else null. `dropped`
       is `{reason: count}`.
+      **Promoted revision (r3_gates_revision, unit fresh):** this id's text in `proposed_revisions` (the read
+      shape is unchanged; a stored claim's `quote_sha256` is not returned) applies. Recorded: its read-shape test
+      over an r3 scan sits in test_freshness_active_pack_db.py (beside the r3 pack fixture), not in
+      test_freshness_db.py.
   - id: FR-FRESH-11
     text: >-
       Routes (session, owner role, the material's owner only; anyone else gets the 404 `not_found` of a material that
