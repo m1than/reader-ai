@@ -1920,7 +1920,7 @@ tasks:
       approval: { usd: 12.51, funding: test_budget_usd, by: owner, date: 2026-11-27,
         was: "12.00, 2026-11-26, staged",
         why: "stage-1 measured cost +15% from the CLI's cache writes of each span at 2x the input price; prefixes
-          cap $4.01 -> $4.72 (re-projection $4.29 + 10%), other caps unchanged" }
+          cap $4.01 -> $4.72 (re-projection $4.29 + 10%), other caps unchanged" },
       ask: "The owner runs spikes/retrieval-ablation/paid.sh. stage1 done 2026-11-26: $0.4493, cache ratio 0.9899,
         822/822. Next: `paid.sh prefixes` (8,282 calls, re-projected $4.29, cap $4.72, ≈ 62 min at concurrency 4),
         then `paid.sh summaries`; the agent runs v12.sh; then `paid.sh judge` and `paid.sh factcheck`",
