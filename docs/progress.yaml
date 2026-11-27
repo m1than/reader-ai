@@ -1983,10 +1983,16 @@ tasks:
         rev first part). Green deviations recorded in SRV-INGEST: span locator columns are nullable with a seal
         trigger check (other modules' [db] fixtures write bare ingests); the migration's reader.yaml profiles start
         with null license/language until the reconcile; SRV-SEARCH ensure is a declared no-op seam
-        (packs.SEARCH_ENSURE). Not built yet: restore, rollback, anchors-missing and run-through cases of
-        FR-INGEST-39 (with unit 3), PackGuard (waits for SRV-AGENT). Remaining: unit 3 converter r3 and artifact
-        format 2; unit 4 seq map, re-anchoring, resolver, FR-INGEST-41 (owner's ADR-0039 amendment note landed);
-        unit 5 GC and purge; unit 6 facets.",
+        (packs.SEARCH_ENSURE). Unit 3 done: seq map (ingest.seqmap), re-anchoring (ingest.reanchor), the total
+        resolver reader.ingest.spanref, FR-INGEST-41's one-shot `reader-ingest --migrate-citations` (targets read
+        from SRV-TUTOR's reader.tutor.citations.REWRITERS, paired, empty until then), restore and rollback
+        (FR-INGEST-39 to -43, INV-INGEST-15, VEC-INGEST-10/-11). Code review of unit 2: its 7 blocking items fixed
+        (row guards check old and new pack/overlay; deleted materials registered with a pending row; reconcile one
+        transaction per pack; locator fullmatch; shareable() fails closed on a null license; pending-branch test).
+        REMAINING GATE: start_reconcile and the sweep are not wired into SRV-EVENTS' worker start (paired change);
+        it must land before any consumer of profile_for_pack or active_view merges. PackGuard waits for SRV-AGENT.
+        Remaining units: 4 converter r3 and artifact format 2; 5 GC and purge (with the restore-vs-GC races);
+        6 facets.",
       what: "SRV-INGEST revision (~1,200–1,850 lines with the citation readers): span identity = ADR-0039 P2 locator
         (offsets into the page's canonical span text; empty text as a zero-length range with an ordinal; file and
         line range for non-PDF) + quote hash. Order: converter revision -> re-conversion -> seq-to-locator map, 1:1

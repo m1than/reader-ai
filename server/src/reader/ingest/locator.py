@@ -135,14 +135,14 @@ def format(loc: Locator) -> str:  # the spec names the pair parse/format
 
 
 def parse(span_id: str) -> Locator:
-    match = _PDF.match(span_id)
+    match = _PDF.fullmatch(span_id)  # fullmatch: `$` alone accepts a trailing newline
     if match is not None:
         start, end = int(match["start"]), int(match["end"])
         ordinal = None if match["ord"] is None else int(match["ord"])
         if start > end or (ordinal is None) == (start == end):
             raise LocatorError()
         return Locator(match["sha"], page=int(match["page"]), start=start, end=end, ordinal=ordinal)
-    match = _FILE.match(span_id)
+    match = _FILE.fullmatch(span_id)
     if match is None:
         raise LocatorError()
     a, b = int(match["a"]), int(match["b"])
@@ -157,7 +157,7 @@ def parse(span_id: str) -> Locator:
 
 def is_legacy_id(span_id: str) -> bool:
     """FR-INGEST-17's retired `<material_sha256>:<seq>` form, accepted by the resolver and the migration."""
-    return _LEGACY.match(span_id) is not None
+    return _LEGACY.fullmatch(span_id) is not None
 
 
 def outline_paths(levels: Sequence[int]) -> list[str]:

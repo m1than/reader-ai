@@ -596,13 +596,19 @@ requirements:
       anchor_maps, anchor_runs, citation_migrations; listed in `tables`) with their triggers (FR-INGEST-35, -36,
       -38). It registers each existing `ingests` row as a sealed base pack of its converter version with a sealed
       profile overlay and writes one first manifest entry per owner naming those packs with their profile overlay
-      only (FR-INGEST-40's legacy registration, built here). `ingests` rows are never deleted (tombstones,
+      only (FR-INGEST-40's legacy registration, built here); a **soft-deleted** material's pack and profile are
+      registered but left out of that entry, with a `pending_activations` {profile} row instead, so its restore
+      activates it (FR-INGEST-39; code review of unit 2, blocking 2). The span and outline guards refuse an UPDATE
+      when either the old or the new row's pack is sealed, and the overlay-row guards the same for the old or new
+      overlay (blocking 1: an UPDATE of `ingest_id` could move a row into a sealed pack). `ingests` rows are never deleted (tombstones,
       FR-INGEST-35), so the `ON DELETE CASCADE` of `material_spans` and `material_outline` never fires and the
       RESTRICT keys of `freshness_reports` and `study_plans` stay valid. The downgrade drops only what it added and
       refuses when a material holds more than one ingest. [db] test_packs_db.py: the new columns, constraints and
       triggers; on a database holding an r2 ingest (downgraded to ingest_0003, rows written, upgraded again) one
       sealed pack with locators equal to FR-INGEST-33 over its rows and one manifest entry naming the pack with its
-      profile overlay only; the guarded downgrade.
+      profile overlay only, a deleted material's pack absent from it with its pending {profile} row; an UPDATE
+      moving a span of a bare ingest into a sealed pack refused (test_overlays_db.py: a tag row moved into a sealed
+      overlay refused); the guarded downgrade.
   - id: FR-INGEST-15
     text: >-
       `reader.ingest.routes.ROUTES` hold three routes. Each needs a session (SRV-AUTH), and each handler checks that
@@ -1251,7 +1257,9 @@ requirements:
       [unit, property] server/tests/ingest/test_locator_unit.py over VEC-INGEST-8: the cases above,
       page_text[start:end] equal to every span's text, the parse/format round trip, each malformed id refused (`p0`,
       leading zeros, start > end, `#` on a non-empty range, missing `#` on an empty one, 63-hex sha, raw `:` in a
-      path, `..` segment), and a Hypothesis property over generated pages.
+      path, `..` segment), and a Hypothesis property over generated pages. The parser matches the whole string
+      (code review of unit 2, blocking 5): a trailing newline is refused (VEC-INGEST-8 cases for a locator, a
+      file locator and a legacy id).
   - id: FR-INGEST-34
     text: >-
       **Quote hash.** Every span of a base pack stores `quote_sha256` = sha256 of the UTF-8 bytes of its stored
@@ -1339,8 +1347,10 @@ requirements:
         SRV-SEARCH's `ensure` re-embeds; the new vectors activate when they seal. A pack that replaces another pack
         of the same material (FR-INGEST-39) gets a profile overlay carrying the owner-set values (`set_by: owner`) of
         the replaced pack's active profile overlay, so G1 decisions survive a converter upgrade.
-      - **Reconcile at worker start** (`reader.ingest.packs.reconcile(conn, owner_id, …)`, inline in the worker-start
-        pass, no job; rule work, 0 model calls): for every pack in the owner's head entry it computes the profile
+      - **Reconcile at worker start** (`reader.ingest.packs.reconcile(engine, owner_id, …)`, inline in the
+        worker-start pass, no job; rule work, 0 model calls; **one transaction per head pack**, as the sweep, so it
+        never holds an appended `(owner_id, parent_seq)` key while it waits on the next pack's lock — code review of
+        unit 2, blocking 4): for every pack in the owner's head entry it computes the profile
         overlay id from the rule values (reader.yaml `materials[]` or the upload row) plus the owner-set values of
         the head profile, and the tags overlay id from the current facets file and tagger version (only when a span
         facet is enabled). For each kind whose computed id differs from the head's: an existing **sealed** overlay
@@ -1360,7 +1370,11 @@ requirements:
         role, reliability, as_of} from the head entry's profile overlay when the pack is in the head, else the
         profile overlay its pending activation names, else the one its import built. It is the only profile read for
         other modules (SRV-SEARCH FR-SEARCH-5, -6, -9 use it; the name is agreed with SRV-SEARCH and differs from the
-        `pack_profiles` table) and is listed in `reader.ingest.manifest.VIEWS` as `profile_for_pack`.
+        `pack_profiles` table) and is listed in `reader.ingest.manifest.VIEWS` as `profile_for_pack`. Its consumers
+        decide sharing by `reader.ingest.packs.shareable(profile)`, true only for `license: shareable`: a null license
+        (a migrated reader.yaml material before its first reconcile) is never shareable (fail closed; blocking 6).
+        **Remaining gate:** `start_reconcile` and the sweep are not yet wired into SRV-EVENTS' worker start; that
+        paired change must land before any consumer of `profile_for_pack` or `active_view` merges.
       - The import builds the profile overlay, and the tags overlay when the facets file enables at least one
         span-level facet (FR-INGEST-37; none today), seals them in its own run transaction (rule work, 0 model
         calls) and calls `request_activation(…, {profile, tags?})` there; the embed job builds the vector overlay,
@@ -1373,7 +1387,11 @@ requirements:
       head profile, else the pending one, else the import's; reconcile A → B → A → B reuses overlays A and B and ends
       with B in the head, a second run with no change appends nothing, a language change activates the new profile
       at once and calls the ensure seam once while the head keeps its vectors overlay, a material with no reader.yaml
-      entry and an unreadable reader.yaml leave the head profile unchanged. The replacing pack's carried owner
+      entry and an unreadable reader.yaml leave the head profile unchanged; the pending branch pinned by a pack
+      outside the head whose pending row names a second profile; two head packs reconciled while another session
+      holds the second pack's lock and activates it both complete (no deadlock); `start_reconcile` applies a
+      language change and sweeps a stored waiting row; `shareable` is false for a null and a personal-use license
+      (blocking 4, 6, 7). The replacing pack's carried owner
       values (two packs) are tested with the seq map and re-anchoring (unit 4), the tags reconcile with the facets
       file (unit 6).
   - id: FR-INGEST-38

@@ -199,10 +199,11 @@ TRIGGERS = (
     " FOR EACH ROW EXECUTE FUNCTION ingest_ingests_guard()",
     """CREATE FUNCTION ingest_pack_rows_guard() RETURNS trigger
     LANGUAGE plpgsql AS $$
-    DECLARE ingest uuid;
+    DECLARE ingest uuid; dest uuid;
     BEGIN
         IF TG_OP = 'INSERT' THEN ingest := NEW.ingest_id; ELSE ingest := OLD.ingest_id; END IF;
-        IF EXISTS (SELECT 1 FROM base_packs WHERE ingest_id = ingest AND state = 'sealed') THEN
+        IF TG_OP = 'UPDATE' THEN dest := NEW.ingest_id; ELSE dest := ingest; END IF;
+        IF EXISTS (SELECT 1 FROM base_packs WHERE ingest_id IN (ingest, dest) AND state = 'sealed') THEN
             IF TG_OP = 'DELETE' AND coalesce(current_setting('reader.pack_delete', true), '') = 'on'
             THEN RETURN OLD; END IF;
             RAISE EXCEPTION 'rows of a sealed pack are immutable';
@@ -232,12 +233,15 @@ TRIGGERS = (
     " FOR EACH ROW EXECUTE FUNCTION ingest_overlays_guard()",
     """CREATE FUNCTION ingest_overlay_rows_guard() RETURNS trigger
     LANGUAGE plpgsql AS $$
-    DECLARE oid text; owner uuid;
+    DECLARE oid text; owner uuid; new_oid text; new_owner uuid;
     BEGIN
         IF TG_OP = 'INSERT' THEN oid := NEW.overlay_id; owner := NEW.owner_id;
         ELSE oid := OLD.overlay_id; owner := OLD.owner_id; END IF;
-        IF EXISTS (SELECT 1 FROM overlays
-                   WHERE owner_id = owner AND overlay_id = oid AND state = 'sealed') THEN
+        IF TG_OP = 'UPDATE' THEN new_oid := NEW.overlay_id; new_owner := NEW.owner_id;
+        ELSE new_oid := oid; new_owner := owner; END IF;
+        IF EXISTS (SELECT 1 FROM overlays WHERE state = 'sealed'
+                   AND ((owner_id = owner AND overlay_id = oid)
+                        OR (owner_id = new_owner AND overlay_id = new_oid))) THEN
             IF TG_OP = 'DELETE' AND coalesce(current_setting('reader.pack_delete', true), '') = 'on'
             THEN RETURN OLD; END IF;
             RAISE EXCEPTION 'rows of a sealed overlay are immutable';
@@ -279,10 +283,10 @@ DOWNGRADE = (
 
 def _backfill(bind: Any) -> None:
     ingests = bind.execute(text(
-        "SELECT i.id, i.owner_id, i.converter_version, m.sha256, m.config_id FROM ingests i"
-        " JOIN materials m ON m.id = i.material_id ORDER BY i.owner_id, m.sha256")).all()
+        "SELECT i.id, i.owner_id, i.converter_version, m.sha256, m.config_id, m.deleted_at IS NOT NULL"
+        " FROM ingests i JOIN materials m ON m.id = i.material_id ORDER BY i.owner_id, m.sha256")).all()
     heads: dict[Any, dict[str, dict[str, str]]] = {}
-    for ingest_id, owner, version, sha, config_id in ingests:
+    for ingest_id, owner, version, sha, config_id, deleted in ingests:
         spans = bind.execute(text(
             "SELECT seq, page, text FROM material_spans WHERE ingest_id = :i ORDER BY page, seq"),
             {"i": ingest_id}).all()
@@ -317,6 +321,12 @@ def _backfill(bind: Any) -> None:
             "INSERT INTO pack_profiles (owner_id, overlay_id, license, language, set_by)"
             " VALUES (:o, :i, :l, :g, 'rule')"),
             {"o": owner, "i": oid, "l": inputs["license"], "g": language})
+        if deleted:  # out of the first entry; a pending {profile} row lets the restore activate it
+            bind.execute(text(
+                "INSERT INTO pending_activations (owner_id, pack_id, material_sha256, overlays)"
+                " VALUES (:o, :p, :s, CAST(:v AS jsonb))"),
+                {"o": owner, "p": pid, "s": sha, "v": json.dumps({"profile": oid})})
+            continue
         heads.setdefault(owner, {})[pid] = {"profile": oid}
     for owner, elements in heads.items():
         entry = manifest.make_entry(elements)

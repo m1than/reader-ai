@@ -267,8 +267,7 @@ async def start_reconcile(jobs: Any) -> None:
             found = await conn.execute(text("SELECT DISTINCT owner_id FROM manifest_entries"))
             owners = [r[0] for r in found]
         for owner in owners:
-            async with jobs.engine.begin() as conn:
-                await packs.reconcile(conn, owner, materials)
+            await packs.reconcile(jobs.engine, owner, materials)
         await manifest.sweep(jobs.engine)
     except Exception as error:  # logged by type; the worker serves jobs anyway
         store.log.warning("ingest start_reconcile_failed %s", type(error).__name__)

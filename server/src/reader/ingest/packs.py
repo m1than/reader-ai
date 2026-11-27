@@ -7,12 +7,12 @@ import hashlib
 import logging
 import os
 import uuid
-from collections.abc import Awaitable, Callable, Iterable, Sequence
+from collections.abc import Awaitable, Callable, Iterable, Mapping, Sequence
 from pathlib import Path
 from typing import Any, Final
 
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncConnection
+from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
 import reader.ingest as ingest
 from reader.ingest import overlays
@@ -124,16 +124,38 @@ async def rule_values(
     return None
 
 
+def shareable(profile: Mapping[str, Any] | None) -> bool:
+    """FR-INGEST-36: sharing needs `license: shareable`; a null or unknown license fails closed."""
+    return profile is not None and profile.get("license") == "shareable"
+
+
 async def reconcile(
-    conn: AsyncConnection, owner_id: uuid.UUID, materials: Sequence[Any] | None,
+    engine: AsyncEngine, owner_id: uuid.UUID, materials: Sequence[Any] | None,
     ensure: SearchEnsure | None = None,
 ) -> None:
-    """FR-INGEST-36: each head pack's profile overlay follows the current rule values (no tags enabled)."""
+    """FR-INGEST-36: each head pack's profile overlay follows the current rule values (no tags enabled).
+
+    One transaction per head pack, so an appended (owner_id, parent_seq) key is never held while the next
+    pack's lock is awaited."""
+    from reader.ingest import manifest
+
+    async with engine.connect() as conn:
+        pids = [e["pack_id"] for e in (await manifest.active_view(conn, owner_id)).entry["packs"]]
+    for pid in pids:
+        async with engine.begin() as conn:
+            await _reconcile_pack(conn, owner_id, pid, materials, ensure)
+
+
+async def _reconcile_pack(
+    conn: AsyncConnection, owner_id: uuid.UUID, pid: str, materials: Sequence[Any] | None,
+    ensure: SearchEnsure | None,
+) -> None:
     from reader.ingest import manifest
 
     view = await manifest.active_view(conn, owner_id)
     for element in view.entry["packs"]:
-        pid = element["pack_id"]
+        if element["pack_id"] != pid:
+            continue
         sha = await material_of(conn, owner_id, pid)
         rule = None if sha is None else await rule_values(conn, sha, materials)
         head = element["overlays"].get("profile")

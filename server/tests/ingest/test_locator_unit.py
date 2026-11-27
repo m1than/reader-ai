@@ -93,6 +93,7 @@ def test_legacy_id_is_not_a_locator() -> None:
     m = loc()
     assert m.is_legacy_id(f"{SHA}:12")
     assert not m.is_legacy_id(f"spn:{SHA}:p1:0-1")
+    assert not m.is_legacy_id(f"{SHA}:12\n")  # the whole string (code review of unit 2, blocking 5)
 
 
 _nfc_text = st.text(

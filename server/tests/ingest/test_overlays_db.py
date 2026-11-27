@@ -136,8 +136,8 @@ async def test_reconcile_reuses_overlays_and_keeps_vectors(pg: Pg, tmp_path: Pat
 
         async def run(language: str) -> Any:
             config = load_config(write_config(w, tmp_path, language))
-            async with w.engine.begin() as conn:
-                await packs.reconcile(conn, owner, config.materials, ensure=ensure)
+            await packs.reconcile(w.engine, owner, config.materials, ensure=ensure)
+            async with w.engine.connect() as conn:
                 return await need("reader.ingest.manifest").active_view(conn, owner)
 
         first = await run("ru")  # unchanged: nothing appended, no ensure
@@ -154,7 +154,101 @@ async def test_reconcile_reuses_overlays_and_keeps_vectors(pg: Pg, tmp_path: Pat
         assert (await run("en")).seq == 4  # no_change
 
         for config in (None, load_config(write_config(w, tmp_path, None))):
-            async with w.engine.begin() as conn:  # unreadable reader.yaml, or no entry for the material
-                materials = None if config is None else config.materials
-                await packs.reconcile(conn, owner, materials, ensure=ensure)
+            # unreadable reader.yaml, or no entry for the material
+            materials = None if config is None else config.materials
+            await packs.reconcile(w.engine, owner, materials, ensure=ensure)
         assert await w.scalar("SELECT max(seq) FROM manifest_entries") == 4
+
+
+async def test_reconcile_never_deadlocks_with_an_activation(pg: Pg, tmp_path: Path) -> None:
+    """Code review of unit 2, blocking 4: another session holds the second pack's lock and activates it."""
+    import asyncio
+
+    from reader.config import load_config
+
+    packs, manifest = need("reader.ingest.packs"), need("reader.ingest.manifest")
+    async with world(pg, tmp_path) as w:
+        owner = w.users["ivan"]
+        a, b = await imported(w), await imported(w, "b" * 64)
+        await activate(w, a)
+        await activate(w, b)
+        hi = max(a, b)
+        config = load_config(write_config(w, tmp_path, "en"))  # the profiles change
+        other = await w.engine.connect()
+        await other.begin()
+        await packs.lock_packs(other, [hi])
+        v2 = await vectors(other, owner, hi, model="m2")
+        await manifest.request_activation(other, owner, hi, {"vectors": v2})
+        task = asyncio.create_task(packs.reconcile(w.engine, owner, config.materials))
+        await asyncio.sleep(1.0)  # the reconcile has committed the first pack and waits on hi's lock
+        assert await manifest.try_activate(other, owner, hi) == "appended"
+        await other.commit()
+        await other.close()
+        await asyncio.wait_for(task, 20)
+        async with w.engine.connect() as conn:
+            view = await manifest.active_view(conn, owner)
+        assert {e["pack_id"]: e["overlays"]["vectors"] for e in view.entry["packs"]}[hi] == v2
+
+
+async def test_start_reconcile_and_shareable(pg: Pg, tmp_path: Path, monkeypatch: Any) -> None:
+    packs, manifest, jobs = (need(f"reader.ingest.{m}") for m in ("packs", "manifest", "jobs"))
+    assert not packs.shareable(None) and not packs.shareable({"license": None})
+    assert not packs.shareable({"license": "personal-use"}) and packs.shareable({"license": "shareable"})
+    async with world(pg, tmp_path) as w:
+        owner = w.users["ivan"]
+        pack = await imported(w)
+        await activate(w, pack)
+        b = await imported(w, "b" * 64)
+
+        async def lost(*_: Any, **__: Any) -> None:
+            raise manifest.ManifestError("manifest_conflict")
+
+        with monkeypatch.context() as patch:
+            patch.setattr(manifest, "_insert", lost)
+            async with w.engine.begin() as conn:
+                assert await manifest.try_activate(conn, owner, b) == "manifest_conflict"
+        write_config(w, tmp_path, "en")  # READER_CONFIG names this file
+        await jobs.start_reconcile(w.jobs)
+        async with w.engine.connect() as conn:
+            view = await manifest.active_view(conn, owner)
+            profile = await packs.profile_for_pack(conn, owner, pack)
+        assert profile is not None and profile["language"] == "en"
+        assert {e["pack_id"] for e in view.entry["packs"]} == {pack, b}  # the stored row was swept
+        assert await w.scalar("SELECT count(*) FROM pending_activations") == 0
+
+
+async def test_span_tags_cannot_move_into_a_sealed_overlay(pg: Pg, tmp_path: Path) -> None:
+    """Code review of unit 2, blocking 1: the overlay-row guard checks the new row's overlay too."""
+    overlays = need("reader.ingest.overlays")
+    async with world(pg, tmp_path) as w:
+        pack, owner = await imported(w), w.users["ivan"]
+        ids = []
+        async with w.engine.begin() as conn:
+            for version in ("t/1", "t/2"):
+                oid = overlays.overlay_id("tags", pack, {}, version)
+                await overlays.begin(conn, owner, oid, kind="tags", pack_id=pack, inputs={},
+                                     builder_version=version)
+                ids.append(oid)
+            await conn.execute(text(
+                "INSERT INTO span_tags (owner_id, overlay_id, pack_id, locator, facet, value, by, confidence,"
+                " tagger_version) VALUES (:o, :i, :p, 'spn:x', 'license', 'shareable', 'rule', 1, 't/1')"),
+                {"o": owner, "i": ids[0], "p": pack})
+            await overlays.seal(conn, owner, ids[1])
+        async with w.engine.connect() as conn:
+            await conn.begin()
+            with pytest.raises(DBAPIError, match="immutable"):
+                await conn.execute(text("UPDATE span_tags SET overlay_id = :s WHERE overlay_id = :b"),
+                                   {"s": ids[1], "b": ids[0]})
+            await conn.rollback()
+
+
+async def test_profile_for_pack_reads_the_pending_profile(pg: Pg, tmp_path: Path) -> None:
+    """Code review of unit 2, blocking 7: a pack outside the head whose pending row names a second profile."""
+    packs, overlays, manifest = (need(f"reader.ingest.{m}") for m in ("packs", "overlays", "manifest"))
+    async with world(pg, tmp_path) as w:
+        pack, owner = await imported(w), w.users["ivan"]
+        async with w.engine.begin() as conn:
+            rule = await packs.profile_for_pack(conn, owner, pack)
+            second = await overlays.build_profile(conn, owner, pack, {**rule, "role": "secondary"})
+            await manifest.request_activation(conn, owner, pack, {"profile": second})
+            assert (await packs.profile_for_pack(conn, owner, pack))["role"] == "secondary"

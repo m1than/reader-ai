@@ -40,6 +40,8 @@ files:
 
 # Ids the parser must refuse with locator_invalid. "{sha}" stands for material_sha256.
 malformed:
+  - "spn:{sha}:p1:0-1\n"
+  - "spn:{sha}:notes.md:L1-2\n"
   - "spn:{sha}:p0:0-1"
   - "spn:{sha}:p01:0-1"
   - "spn:{sha}:p1:01-2"

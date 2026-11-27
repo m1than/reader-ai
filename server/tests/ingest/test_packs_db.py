@@ -101,6 +101,32 @@ async def test_triggers_keep_sealed_packs_immutable(pg: Pg, tmp_path: Path) -> N
         assert await w.scalar("SELECT count(*) FROM ingests") == 1
 
 
+async def test_an_update_cannot_move_a_row_into_a_sealed_pack(pg: Pg, tmp_path: Path) -> None:
+    """Code review of unit 2, blocking 1: the guard checks the new row's pack too."""
+    async with world(pg, tmp_path) as w:
+        await imported(w)
+        owner, sealed = w.users["ivan"], await w.scalar("SELECT ingest_id FROM base_packs")
+        async with w.engine.begin() as conn:
+            m = (await conn.execute(text(
+                "INSERT INTO materials (owner_id, sha256, config_id, page_count) VALUES (:o, :s, 'x', 1)"
+                " RETURNING id"), {"o": owner, "s": "c" * 64})).scalar_one()
+            bare = (await conn.execute(text(
+                "INSERT INTO ingests (owner_id, material_id, converter_version, artifact_id, span_count,"
+                " outline_count, outline_source, pages_without_text)"
+                " VALUES (:o, :m, 'v', :a, 1, 0, 'headings', '{}') RETURNING id"), {"o": owner, "m": m, "a": "d" * 64})).scalar_one()
+            await conn.execute(text(
+                "INSERT INTO material_spans (ingest_id, owner_id, seq, page, kind, text, x0, y0, x1, y1)"
+                " VALUES (:i, :o, 9999, 1, 'text', 'injected', 0, 0, 1, 1)"), {"i": bare, "o": owner})
+        async with w.engine.connect() as conn:
+            await conn.begin()
+            with pytest.raises(DBAPIError, match="immutable"):
+                await conn.execute(text("UPDATE material_spans SET ingest_id = :s WHERE ingest_id = :i"),
+                                   {"s": sealed, "i": bare})
+            await conn.rollback()
+        assert await w.scalar("SELECT count(*) FROM material_spans WHERE locator IS NULL AND ingest_id = :i",
+                              i=sealed) == 0
+
+
 async def test_building_pack_is_not_in_the_active_view(pg: Pg, tmp_path: Path) -> None:
     manifest = need("reader.ingest.manifest")
     async with world(pg, tmp_path) as w:
@@ -148,6 +174,13 @@ async def test_migration_registers_the_legacy_ingest(pg: Pg, tmp_path: Path) -> 
                 "INSERT INTO materials (owner_id, sha256, config_id, page_count)"
                 " VALUES (:o, :s, 'synthetic', 2) RETURNING id"),
                 {"o": owner, "s": MATERIAL_SHA})).scalar_one()
+            gone = (await conn.execute(text(  # a soft-deleted material: registered, not in the entry
+                "INSERT INTO materials (owner_id, sha256, config_id, page_count, deleted_at)"
+                " VALUES (:o, :s, 'gone', 1, now()) RETURNING id"), {"o": owner, "s": "c" * 64})).scalar_one()
+            await conn.execute(text(
+                "INSERT INTO ingests (owner_id, material_id, converter_version, artifact_id, span_count,"
+                " outline_count, outline_source, pages_without_text) VALUES (:o, :m, :v, :a, 0, 0,"
+                " 'headings', '{}')"), {"o": owner, "m": gone, "v": R2, "a": "d" * 64})
             ingest = (await conn.execute(text(
                 "INSERT INTO ingests (owner_id, material_id, converter_version, artifact_id, span_count,"
                 " outline_count, outline_source, pages_without_text) VALUES (:o, :m, :v, :a, :n, 0,"
@@ -163,7 +196,14 @@ async def test_migration_registers_the_legacy_ingest(pg: Pg, tmp_path: Path) -> 
         async with w.engine.connect() as conn:
             await conn.run_sync(up)
             await conn.commit()
-        rows = await w.rows("SELECT pack_id, state, ingest_id FROM base_packs")
+        gone_pack = expected_pack_id("c" * 64, R2)
+        pending = await w.rows("SELECT pack_id, overlays FROM pending_activations")
+        gone_profile = await w.scalar(PROFILE_SQL + " AND pack_id = :p", p=gone_pack)
+        assert [tuple(r) for r in pending] == [(gone_pack, {"profile": gone_profile})]
+        async with w.engine.begin() as conn:  # the deleted material leaves the rest of this test's view
+            await conn.execute(text("DELETE FROM pending_activations"))
+        rows = await w.rows("SELECT pack_id, state, ingest_id FROM base_packs WHERE pack_id <> :g",
+                            g=gone_pack)
         assert [tuple(r) for r in rows] == [(expected_pack_id(MATERIAL_SHA, R2), "sealed", ingest)]
         stored = await w.rows("SELECT page, text, locator, quote_sha256 FROM material_spans"
                               " ORDER BY page, seq")
@@ -173,7 +213,7 @@ async def test_migration_registers_the_legacy_ingest(pg: Pg, tmp_path: Path) -> 
             assert [s[2] for s in on_page] == locator.page_locators(MATERIAL_SHA, page, texts)
         assert all(s[3] == locator.quote_sha256(s[1]) for s in stored)
         entries = await w.rows("SELECT seq, parent_seq, entry FROM manifest_entries")
-        profile = await w.scalar(PROFILE_SQL)
+        profile = await w.scalar(PROFILE_SQL + " AND pack_id = :p", p=rows[0][0])
         assert [tuple(e) for e in entries] == [(1, 0, {"packs": [{"pack_id": rows[0][0],
                                                                     "overlays": {"profile": profile}}],
                                                          "registry_view": None})]
