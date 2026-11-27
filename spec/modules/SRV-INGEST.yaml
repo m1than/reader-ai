@@ -543,6 +543,14 @@ requirements:
       test_ingest_db.py, test_ingest_host.py.
   - id: FR-INGEST-13
     text: >-
+      **Paired change, SRV-SEARCH ADR-0039 revision (V.kl-search-find phase 2, unit 4b):** the import's
+      `search.embed` enqueue carries `reader.search.jobs.args_for(owner, its pack)` = {owner_id, pack_id,
+      overlay_id} (FR-SEARCH-5's key [owner_id, overlay_id], the overlay id from FR-INGEST-36's function over the
+      language of the profile the run named), not the ingest-based args; the upload view's and Retry's embed key
+      (`uploads.embed_key`) is `reader.search.jobs.embed_key(instance owner, sha256)`, None while the material has
+      no buildable pack (FR-INGEST-31's busy check then has no embed key to find running); `packs.SEARCH_ENSURE`
+      is bound to `reader.search.jobs.ensure_material` (restore and profile reconcile enqueue the current key
+      through the worker's queue, skipped in the api, which has none). test_ingest_db.py, test_manage_db.py.
       The job kind `ingest.import` is declared in `reader.ingest.jobs.KINDS`.
       - **args:** `{material_sha256, converter_version, artifact_id, material_id}`.
       - **key:** `[material_sha256, converter_version]`.

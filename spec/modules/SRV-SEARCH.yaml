@@ -203,6 +203,12 @@ requirements:
       skipped. Each chunk records `page`, `chunk_no` (its position in page order, then window order), `char_start`,
       `char_stop`, its text, the span seqs it covers, and its primary seq: the covered span with the largest overlap,
       the first such span on a tie. The function is pure and deterministic. [unit]
+      **Promoted revision (ADR-0039, phase 2, unit 4b):** this id's text in `proposed_revisions` (span windows)
+      replaces the text above. Recorded: `reader.search.chunking.windows(text, size, overlap, min_len, prefix)`;
+      "merged into the previous one" moves the previous window's stop to the short window's stop; a later window is
+      at least overlap + 1 characters, so with 1,200 / 200 / 80 nothing merges and every passage is ≤ 1,200; a span
+      whose text is only whitespace has no window. `chunk_spans` is removed (spikes/tutor-chunks/measure.py, a
+      recorded measurement, no longer imports). test_search_unit.py, test_search_props.py.
   - id: FR-SEARCH-4
     text: >-
       **Tables.** Migration `reader/search/migrations/0001_search.py` (revision `search_0001`, branch label `search`,
@@ -300,6 +306,20 @@ requirements:
       `search_embeds` row exists, or V.kl-search-find's vector overlays (the r3 bump is held until then). The [db]
       fixtures seal their ingest as an active r2 pack (server/tests/ingest/packseed.py). [db]
       test_search_active_pack_db.py.
+      **Promoted revision (ADR-0039, phase 2, unit 4b):** this id's text in `proposed_revisions` (the vector
+      overlay build) replaces everything above; the legacy chunk job is gone (search_chunks / search_embeds rows
+      are only deleted by forget_legacy). Recorded: `reader.search.jobs` holds `EmbedArgs`, `vector_inputs`,
+      `overlay_for`, `args_for`, `buildable` (per pack) over `buildable_pack` (per material: the head entry's pack,
+      else, for a material not deleted, the newest live pack by `packs.version_rank`, ties by pack id) and
+      `handle_embed`; `overlays.begin` is called after the embed calls, so every write stays among the run
+      transaction's last statements (FR-EVENTS-4), and its `overlay_collected` refusal maps to
+      `overlay_superseded`; the handler annotates its job root with the pack's `reader.ingest_id` and
+      `reader.material_sha256` (FR-OBS-5 e), since the args carry neither (SRV-OBS paired: `JOB_ARGS` of
+      `search.embed` is empty); the `embed.batch` spans and `ingest.chunk`'s `reader.chunks` (now the window count)
+      are kept. `after_end` enqueues `obs.runs` for the pack's ingest with end 1 + the pack's sealed vector
+      overlays. Paired (SRV-INGEST): the import enqueues `args_for(owner, its pack)`; `uploads.embed_key` returns
+      `search.jobs.embed_key(owner, sha256)`; `packs.SEARCH_ENSURE` is bound to `search.jobs.ensure_material`.
+      test_search_db.py, test_search_unit.py, test_search_active_pack_db.py.
   - id: FR-SEARCH-6
     text: >-
       **Full-text configuration.** A material's `fts_config` comes from its reader.yaml `materials[].language`, looked up
@@ -307,6 +327,9 @@ requirements:
       reader.yaml entry (removed after import) gets `simple`. A language change gives a new `params_sha256`, so the next
       `ensure` embeds the material again; the old chunks stay and are ignored by FR-SEARCH-7's filter, so the material
       is not searchable until the new key is embedded (owner note). [db]
+      **Promoted revision (ADR-0039, phase 2, unit 4b):** this id's text in `proposed_revisions` (language from
+      `profile_for_pack`, the query path from the active overlay's rows) replaces the text above;
+      `reader.search.jobs.fts_config_of(conn, owner_id, pack_id)`; `store.fts_config_of` is removed.
   - id: FR-SEARCH-7
     text: >-
       **Hybrid ranking.** `search(owner_id, query, k, material_sha256=None)` searches only chunks whose `model` and
@@ -340,6 +363,19 @@ requirements:
       The api and the worker reach the service at `http://embed:8100`; `READER_EMBED_URL` overrides it (tests and the
       [local] bench, as SRV-AUTH's READER_DB_* variables; the bench publishes the service on 127.0.0.1 for its run
       only). [db] with a fake embed service.
+      **Promoted revision (ADR-0039, phase 2, unit 4b):** this id's text in `proposed_revisions` (span
+      candidates over the active vector overlays, the compatibility `search()`) replaces the text above. Recorded:
+      `reader.search.store.candidates(conn, owner_id, query, *, limit, use_rrf, rrf_k, w_dense, material_sha256,
+      exclude_packs, filters)` returns `SpanHit`s (locator, pack, material, score, dense and fts ranks, `covers`:
+      the `l:<lexeme>` elements the span's windows share with the query) with the query's lexemes and the head
+      entry's brain_version; the full-text list keeps the top `limit` windows over all configurations by
+      (ts_rank_cd desc, locator) before the per-span best; request filters are facet tags of the span in the
+      pack's active `tags` overlay (SQL `EXISTS` per filter); every route filter is null in the initial policy, so
+      none is applied. `reader.search.corpus.StoreCorpus(conn, policy)` is the production `Corpus` port: it leaves
+      out of the scan every pack whose L1 the channel may not serve this caller, returns L1 cards with the span's
+      full text (find serves the cut) and, as neighbours, an L1 card's next span and section from the same
+      `Book`. The compatibility `Hit` has no `chunk_id`; its page and snippet come from
+      `views.active_span_texts`. test_search_db.py, test_search_unit.py (Hit contract), test_search_props.py.
   - id: FR-SEARCH-8
     text: >-
       **The route.** `POST /api/search` with JSON `{"q": str, "k": int?, "material": str?}` (a body, so the query never
@@ -350,6 +386,11 @@ requirements:
       that cannot be loaded (search needs each material's language, FR-SEARCH-6) answers 503 `config_unavailable`,
       not 500 (code review round 2). It logs the
       parameters' lengths and the result count, never `q`, on success and on every error path. [db]
+      Phase 2 (unit 4b), with FR-SEARCH-7, -10, -20's promoted revisions (this id's own revision, with /api/find
+      and /api/open, is promoted in unit 5): items are the compatibility `Hit` (no `chunk_id`, locator span ids);
+      search reads no reader.yaml any more, so a broken one no longer answers 503 (the `config_unavailable` branch
+      stays for a policy file that cannot be read); a `material` filter naming a material without an active pack
+      answers 404 `not_found`.
   - id: FR-SEARCH-9
     text: >-
       **Status and ensure.** `search_status(owner_id, material_sha256)` returns `none | queued | running | ready | dead`
@@ -366,6 +407,14 @@ requirements:
       is guarded by the worker's start-hook handler (a failure is logged by module). This recovers an enqueue that
       never happened: the V.live run of 2026-11-23 imported the pilot before SRV-INGEST enqueued `search.embed`
       (FR-INGEST-13), and nothing else would enqueue it without docker exec. [db]
+      **Promoted revision (ADR-0039, phase 2, unit 4b):** this id's text in `proposed_revisions` (status and
+      ensure on overlay keys) replaces the text above. Recorded: `search_status` and `ensure(queue, owner_id,
+      material_sha256)` keep their CLI shape; the function SRV-INGEST's restore and profile reconcile call is
+      `ensure_material(conn, owner_id, material_sha256)` (bound as `packs.SEARCH_ENSURE`): it enqueues through the
+      worker's queue and, in a process without a worker (the api's restore route), logs `enqueue_skipped` and
+      leaves the key to the worker-start hook; VEC-SEARCH-4's overlay state `sealed` (not in the head entry) maps
+      to `queued` for job none or succeeded (the activation waits in SRV-INGEST's pending row), else to the job
+      status. test_search_db.py, test_search_unit.py.
   - id: FR-SEARCH-10   # paired change for SRV-INGEST revision 2 (ADR-0029)
     text: >-
       **Full-text configuration of uploaded materials.** A material imported from an upload (SRV-INGEST
@@ -378,6 +427,8 @@ requirements:
       fixed at upload (no route changes it), so an uploaded material's `params_sha256` never changes after import.
       [db] an uploaded `ru` material embeds with `russian`, an `other` one with `simple`; a missing or broken
       reader.yaml does not block an uploaded material's lookup.
+      **Promoted revision (ADR-0039, phase 2, unit 4b):** this id's text in `proposed_revisions` replaces the text
+      above: the language comes from the profile overlay SRV-INGEST built from the upload. test_search_uploads.py.
   - id: FR-SEARCH-20   # paired change for SRV-INGEST FR-INGEST-31 (V/manage)
     text: >-
       **Deleted materials leave results.** Both of search/store.py's candidate queries (dense and full text) join
@@ -389,6 +440,9 @@ requirements:
       hit is in material A: after A is deleted the hit is gone and B's results are unchanged; the material filter
       on A → 404; after restore the first result set returns exactly; no row of search_chunks or search_embeds
       changed across the cycle.
+      **Promoted revision (ADR-0039, phase 2, unit 4b):** this id's text in `proposed_revisions` (removal through
+      the manifest) replaces the text above for search and the candidates; `find` and `open` over a restored
+      material are covered with unit 5's routes. test_search_manage.py.
   - id: FR-SEARCH-21   # paired change for SRV-INGEST FR-INGEST-44, -45 (V.kl-ingest-packs, ADR-0039 P6)
     text: >-
       **Forgetting a legacy ingest.** `reader.search.store.forget_legacy(conn, owner_id, ingest_id)` deletes the
@@ -646,15 +700,23 @@ invariants:
     text: >-
       **Owner isolation.** For any two owners and any query, `search(owner A, …)` never returns a chunk whose `owner_id`
       is B, through either list or the fusion. Property test over random corpora split between owners. [db]
+      **Promoted revision (phase 2, unit 4b):** this id's text in `proposed_revisions` (over search_span_vectors and
+      the active views, two owners of the same bytes) replaces the text above; `open` and the judge request are
+      covered by test_open_db.py and unit 5. test_search_props.py.
   - id: INV-SEARCH-2
     text: >-
       **Citations resolve.** Every result's `span_id` and every entry of `span_ids` names a row of `material_spans` of the
       same ingest whose page equals the result's page, and the chunk text is a substring of the page text built by
       FR-SEARCH-3 from those spans. Property test over generated span sets. [db]
+      **Promoted revision (phase 2, unit 4b):** this id's text in `proposed_revisions` (locator form) replaces the
+      text above; for candidates and the compatibility `search()` every emitted locator resolves through
+      `spanref.resolve` to an active span of the same page. test_search_props.py.
   - id: INV-SEARCH-3
     text: >-
       **Idempotent embedding.** Running `search.embed` twice for the same key leaves exactly one set of chunks and one
       `search_embeds` row; the embed service is called only on the first run. [db]
+      **Promoted revision (phase 2, unit 4b):** this id's text in `proposed_revisions` (one row set and one sealed
+      overlay per [owner_id, overlay_id]; two owners of the same bytes) replaces the text above. test_search_db.py.
   - id: INV-SEARCH-4
     text: >-
       **Total, deterministic order.** For any corpus and query, two calls return identical results in identical order;
@@ -674,6 +736,8 @@ invariants:
       **No operator injection.** For any query string (including `&`, `|`, `!`, `:*`, `<->`, quotes and backslashes),
       building the full-text query never raises and matches exactly the chunks that share at least one of the query's
       lexemes. Property test plus VEC-SEARCH-5. [db]
+      **Promoted revision (phase 2, unit 4b):** this id's text in `proposed_revisions` (over span windows and the
+      coverage elements) replaces the text above. test_search_props.py, test_search_db.py.
   - id: INV-SEARCH-8
     text: >-
       **A query never waits more than one batch.** With a fake encoder that takes T per passage batch, a query sent while
@@ -766,19 +830,19 @@ nfr:
 
 vectors:
   - id: VEC-SEARCH-1
-    source: hand-computed (weighted) reciprocal rank fusion, k = 60 (REF-SEARCH-4); cases without `w_dense` use 1
+    source: hand-computed (weighted) reciprocal rank fusion, k = 60 (REF-SEARCH-4); cases without `w_dense` use 1; phase 2 unit 4b, the test pins policy.json's rrf_k and w_dense to the fixture's and params' values
     file: spec/fixtures/SRV-SEARCH/rrf.yaml
   - id: VEC-SEARCH-2
-    source: synthetic spans; windows computed by hand with small parameters (algorithm of spikes/embeddings-local/bench.py chunk_pages over spans)
+    source: synthetic span texts; windows within one span computed by hand with small parameters, a merge case and a prefix case (FR-SEARCH-3 revised, phase 2 unit 4b)
     file: spec/fixtures/SRV-SEARCH/chunking.yaml
   - id: VEC-SEARCH-3
     source: spikes/embeddings-local/questions-v2.yaml, owner-accepted 2026-11-21 (agent's own wording, page numbers only)
     file: spec/fixtures/SRV-SEARCH/pilot-questions-v2.yaml
   - id: VEC-SEARCH-4
-    source: status map from the search.embed job status and the search_embeds row (SRV-EVENTS statuses)
+    source: status map from the search.embed job status (SRV-EVENTS statuses) and the vector overlay's state (none, building, sealed, active, collected); revised in phase 2 unit 4b
     file: spec/fixtures/SRV-SEARCH/status-map.yaml
   - id: VEC-SEARCH-5
-    source: synthetic English chunks and queries with partial term overlap (OR semantics, operator characters)
+    source: synthetic English spans (one window each) and queries with partial term overlap (OR semantics, operator characters), with the query lexemes and per-span covers of FR-SEARCH-25; revised in phase 2 unit 4b
     file: spec/fixtures/SRV-SEARCH/fts-or.yaml
   - id: VEC-SEARCH-6
     source: hand-computed budgeted greedy cases (ratio choice, best-single branch, fill, zero-gain fill, k stop, the k-costliest-fit gain order, ties, pass 2 on a marginal objective)
@@ -961,6 +1025,11 @@ proposed_errors: [query_invalid, budget_invalid, k_invalid, filter_invalid, id_i
   policy_invalid, channel_invalid, overlay_superseded]
 
 proposed_revisions:
+  # The reviewed ADR-0039 texts of the revised ids. Phase 2, unit 4b: FR-SEARCH-3, -5, -6, -7, -9, -10, -20,
+  # INV-SEARCH-1, -2, -3, -7 and VEC-SEARCH-1, -2, -4, -5 are PROMOTED with their Red tests: each one's entry in
+  # requirements / invariants / vectors names this text as normative (replacing its earlier text there) and records
+  # its phase-2 deviations; the text stays here verbatim, as reviewed, instead of being re-typed. FR-SEARCH-8,
+  # INV-SEARCH-4, NFR-SEARCH-1, -2, -4 are still proposed (unit 5 and the paid bench).
   - id: FR-SEARCH-3
     text: >-
       **Span windows (replaces chunking across spans).** The unit of retrieval is the L1 span of an active base pack

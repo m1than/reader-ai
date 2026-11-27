@@ -1,9 +1,8 @@
-"""SRV-SEARCH [db]: the legacy chunk path reads through SRV-INGEST's active view (FR-SEARCH-5's paired change,
-ADR-0039 / SRV-INGEST INV-INGEST-16, V.kl-active-view-readers).
+"""SRV-SEARCH [db]: candidates read the active pack's vector overlay only, and the embed activates a pack
+awaiting activation (FR-SEARCH-5, ADR-0039 revision, phase 2 unit 4b).
 
-One material holds two embedded packs (its fixture's r2 import and an r3 re-conversion): search ranks the
-active pack's chunks only, never both, with the span ids the view mints; an embedded pack awaiting activation
-becomes active through the embed's `try_activate`.
+One material holds two packs (its fixture's r2 import over backfilled locators and an r3 re-conversion): only
+the buildable pack is embedded, search ranks the head entry's pack only and every span id is a locator.
 
 @trace FR-SEARCH-5
 """
@@ -37,7 +36,7 @@ async def w(
         await built.engine.dispose()
 
 
-async def test_two_embedded_packs_search_the_active_pack_only(w: World) -> None:
+async def test_only_the_head_entrys_pack_is_searched(w: World) -> None:
     store = need("reader.search.store")
     locator = need("reader.ingest.locator")
     ivan = w.users["ivan"]
@@ -45,23 +44,31 @@ async def test_two_embedded_packs_search_the_active_pack_only(w: World) -> None:
     await embed_material(w, r2_ingest, MAT_EN)
     async with w.engine.begin() as conn:
         r3 = await add_pack(conn, ivan, MAT_EN, R3, [(1, "text", t) for t in R3_TEXTS])
+
+    found = (await store.search(w.engine, ivan, "blockchain chain of blocks", k=10)).results
+    r2_loc = locator.page_locators(MAT_EN, 1, [R2_SPANS[0][1]])[0]
+    assert [(h.span_id, h.span_ids) for h in found] == [(r2_loc, [r2_loc])]  # the legacy pack, by locator
+
+    async with w.engine.begin() as conn:  # the r3 pack enters the head entry without vectors: dark
+        await activate_pack(conn, ivan, r3)
+    assert (await store.search(w.engine, ivan, "blockchain chain of blocks", k=10)).results == []
     async with w.engine.connect() as conn:
         (r3_pack,) = [p for p in await need("reader.ingest.views").live_packs(conn, ivan) if p.pack_id == r3]
-    await embed_material(w, r3_pack.ingest_id, MAT_EN)  # no pending activation: the r3 pack stays inactive
+    await embed_material(w, r3_pack.ingest_id, MAT_EN)
+    # the r3 overlay is sealed, but its activation waits for SRV-INGEST's seq map of the legacy pack
+    from .conftest import scalar
 
-    found = (await store.search(w.engine, ivan, "blockchain chain of blocks", k=10)).results
-    assert [h.span_id for h in found] == [f"{MAT_EN}:0"]  # the r2 pack's chunk only, its legacy id
-
-    async with w.engine.begin() as conn:
-        await activate_pack(conn, ivan, r3)
-    found = (await store.search(w.engine, ivan, "blockchain chain of blocks", k=10)).results
-    loc = locator.page_locators(MAT_EN, 1, R3_TEXTS)[0]
-    assert [(h.span_id, h.span_ids) for h in found] == [(loc, [loc])]  # the r3 chunk, its locator
+    assert await scalar(w.engine, "SELECT reason FROM pending_activations WHERE pack_id = :p", p=r3) == (
+        "seqmap_missing")
+    assert await scalar(w.engine, "SELECT count(*) FROM overlays WHERE pack_id = :p AND kind = 'vectors'"
+                        " AND state = 'sealed'", p=r3) == 1
+    assert (await store.search(w.engine, ivan, "blockchain chain of blocks", k=10)).results == []
 
 
 async def test_the_embed_activates_a_pack_awaiting_activation(w: World) -> None:
     manifest = need("reader.ingest.manifest")
     views = need("reader.ingest.views")
+    locator = need("reader.ingest.locator")
     ivan = w.users["ivan"]
     r2_ingest = await add_material(w, "ivan", MAT_EN, R2_SPANS, config_id="book-en")
     async with w.engine.begin() as conn:  # as a fresh import: out of the head, a pending activation
@@ -74,6 +81,5 @@ async def test_the_embed_activates_a_pack_awaiting_activation(w: World) -> None:
     await embed_material(w, r2_ingest, MAT_EN)
     async with w.engine.connect() as conn:
         assert (await views.active_pack(conn, ivan, MAT_EN)) == pack
-    assert [h.span_id for h in (await store.search(w.engine, ivan, "blockchain", k=10)).results] == [
-        f"{MAT_EN}:0"
-    ]
+    r2_loc = locator.page_locators(MAT_EN, 1, [R2_SPANS[0][1]])[0]
+    assert [h.span_id for h in (await store.search(w.engine, ivan, "blockchain", k=10)).results] == [r2_loc]

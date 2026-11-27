@@ -1,13 +1,13 @@
-"""SRV-SEARCH [db]: tables, the embed job, full-text configuration, hybrid search, the route, status, ensure.
+"""SRV-SEARCH [db]: tables, the embed job on vector overlays, full-text configuration, candidates, the legacy
+search(), the route, status and ensure (ADR-0039 revision, phase 2 unit 4b).
 
 @trace FR-SEARCH-4 FR-SEARCH-5 FR-SEARCH-6 FR-SEARCH-7 FR-SEARCH-8 FR-SEARCH-9
-@trace INV-SEARCH-1 INV-SEARCH-2 INV-SEARCH-3 INV-SEARCH-4 INV-SEARCH-5 INV-SEARCH-7 VEC-SEARCH-5
+@trace INV-SEARCH-3 INV-SEARCH-5 VEC-SEARCH-5
 """
 
 from __future__ import annotations
 
 import logging
-import time
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -27,10 +27,11 @@ from .conftest import (
     Pg,
     World,
     add_material,
-    current_fts,
+    embed_args,
     embed_material,
     fixture,
     need,
+    run_embed,
     scalar,
     world,
 )
@@ -39,12 +40,11 @@ pytestmark = pytest.mark.anyio
 
 FILL_RU = " Здесь больше ничего не сказано ни о чём другом, это просто заполнитель для абзаца."
 FILL_EN = " Nothing further is said here about anything else in this paragraph."
+SPV = "SELECT count(*) FROM search_span_vectors"
 
 RU_SPANS = [
     (1, "Блокчейн хранит цепочку блоков, каждый блок ссылается на предыдущий по хешу."),
     (1, "Майнер проверяет транзакции и получает награду за новый блок."),
-    # each page's text is at least 80 characters (CHUNK_MIN), so every page gives one chunk; FILL_* pad short
-    # texts with words that share no lexeme with any query here
     (2, "Кошелёк хранит закрытые ключи владельца и подписывает ими переводы, не раскрывая их сети."),
     (3, "Смарт-контракт исполняется виртуальной машиной сети, и каждый узел повторяет его вычисление."),
 ]
@@ -89,6 +89,25 @@ async def _ingested(w: World, handle: str = "ivan", sha: str = MAT_RU, spans: An
     return ingest
 
 
+async def _head_vectors(w: World, handle: str, sha: str) -> str | None:
+    from reader.ingest import manifest, views
+
+    async with w.engine.connect() as conn:
+        pack = await views.active_pack(conn, w.users[handle], sha)
+        view = await manifest.active_view(conn, w.users[handle])
+    assert pack is not None
+    named = {e["pack_id"]: e["overlays"] for e in view.entry["packs"]}
+    value = named[pack.pack_id].get("vectors")
+    return None if value is None else str(value)
+
+
+async def _raises(w: World, args: Any) -> str:
+    errors = need("reader.search.errors")
+    with pytest.raises(errors.SearchError) as raised:
+        await run_embed(w, args)
+    return str(raised.value.code)
+
+
 # ---- FR-SEARCH-4 ------------------------------------------------------------------------------------------
 
 
@@ -103,324 +122,381 @@ async def test_migration_creates_the_tables_and_extension(w: World) -> None:
     for col in names:
         assert col in cols.split(","), col
     assert await scalar(w.engine, "SELECT to_regclass('search_embeds') IS NOT NULL") is True
-    indexes = "SELECT count(*) FROM pg_indexes WHERE tablename = 'search_chunks' AND indexdef ILIKE :p"
-    assert await scalar(w.engine, indexes, p="%gin%") == 1
-    # declared deviation: an exact scan, no vector index
-    assert await scalar(w.engine, indexes, p="%hnsw%") == 0
+    indexes = "SELECT count(*) FROM pg_indexes WHERE tablename = :t AND indexdef ILIKE :p"
+    for table in ("search_chunks", "search_span_vectors"):
+        assert await scalar(w.engine, indexes, t=table, p="%gin%") == 1
+        # declared deviation: an exact scan, no vector index
+        assert await scalar(w.engine, indexes, t=table, p="%hnsw%") == 0
 
 
-async def test_fts_config_is_text_with_a_check(w: World) -> None:
-    from sqlalchemy import text
-    from sqlalchemy.exc import IntegrityError
-
-    assert await scalar(
-        w.engine,
-        "SELECT data_type FROM information_schema.columns WHERE table_name='search_chunks'"
-        " AND column_name='fts_config'",
-    ) == "text"
-    with pytest.raises(IntegrityError):
-        async with w.engine.begin() as conn:
-            await conn.execute(
-                text(
-                    "INSERT INTO search_chunks (owner_id, ingest_id, material_sha256, model, params_sha256,"
-                    " fts_config, page, chunk_no, char_start, char_stop, span_seqs, primary_seq, text,"
-                    " embedding)"
-                    " VALUES (:o, gen_random_uuid(), :s, 'm', 'p', 'german', 1, 0, 0, 1, '{0}', 0, 'x',"
-                    " array_fill(0.0::real, ARRAY[1024])::vector)"
-                ),
-                {"o": w.users["ivan"], "s": MAT_RU},
-            )
+# ---- FR-SEARCH-5, -6, INV-SEARCH-3: the vector overlay build ----------------------------------------------
 
 
-# ---- FR-SEARCH-5, INV-SEARCH-3 ----------------------------------------------------------------------------
+async def test_a_build_seals_one_overlay_and_activates_it(
+    w: World, embed_server: EmbedServer, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from reader.ingest import manifest
 
+    calls: list[tuple[str, Any]] = []
+    real_request, real_try = manifest.request_activation, manifest.try_activate
 
-async def test_embed_job_writes_chunks_and_one_embeds_row(w: World, embed_server: EmbedServer) -> None:
-    ingest = await _ingested(w)
-    chunks = await scalar(w.engine, "SELECT count(*) FROM search_chunks WHERE ingest_id = :i", i=ingest)
-    assert chunks == 3  # pages 1, 2, 3 (each page's text under 1200 chars)
-    assert await scalar(w.engine, "SELECT count(*) FROM search_embeds WHERE ingest_id = :i", i=ingest) == 1
-    assert await scalar(w.engine, "SELECT chunk_count FROM search_embeds WHERE ingest_id = :i", i=ingest) == 3
-    assert await scalar(w.engine, "SELECT DISTINCT fts_config FROM search_chunks") == "russian"
-    passage_calls = [n for k, n in embed_server.encoder.calls if k == "passage"]
-    assert passage_calls and max(passage_calls) <= 8
-    calls = len(embed_server.encoder.calls)
-    await embed_material(w, ingest, MAT_RU)  # same key again: no new embed call, no duplicate rows
-    assert len(embed_server.encoder.calls) == calls
-    assert await scalar(w.engine, "SELECT count(*) FROM search_chunks WHERE ingest_id = :i", i=ingest) == 3
+    async def request(conn: Any, owner: Any, pid: str, named: Any) -> None:
+        calls.append(("request", dict(named)))
+        await real_request(conn, owner, pid, named)
 
+    async def try_(conn: Any, owner: Any, pid: str) -> Any:
+        calls.append(("try", pid))
+        return await real_try(conn, owner, pid)
 
-async def test_more_chunks_than_one_batch(w: World, embed_server: EmbedServer) -> None:
-    pages = [(p, f"страница {p}." + FILL_RU) for p in range(1, 13)]  # 12 pages, one chunk each
-    await _ingested(w, spans=pages)
-    assert await scalar(w.engine, "SELECT count(*) FROM search_chunks") == 12
-    passage_calls = [n for k, n in embed_server.encoder.calls if k == "passage"]
-    assert passage_calls == [8, 4]
-
-
-async def test_ingest_not_ready_at_once(w: World) -> None:
-    jobs = need("reader.search.jobs")
-    errors = need("reader.search.errors")
-    from reader.jobs.model import JobContext
-
-    args = jobs.embed_args(MAT_RU, uuid.uuid4(), fts_config="russian")
-    started = time.monotonic()
-    with pytest.raises(errors.IngestNotReady):
-        async with w.engine.begin() as conn:
-            await jobs.handle_embed(args, conn, JobContext(job_id=1, key="k", attempts=0))
-    assert time.monotonic() - started < 5  # no in-handler poll holds the worker slot
-    # then the import commits under that id, and the job succeeds
+    monkeypatch.setattr(manifest, "request_activation", request)
+    monkeypatch.setattr(manifest, "try_activate", try_)
     ingest = await add_material(w, "ivan", MAT_RU, RU_SPANS)
-    args = jobs.embed_args(MAT_RU, ingest, fts_config="russian")
+    args = await embed_args(w, w.users["ivan"], MAT_RU)
+    assert set(args.model_dump()) == {"owner_id", "pack_id", "overlay_id"}
+    jobs_before = await scalar(w.engine, "SELECT count(*) FROM job_keys")
+    await run_embed(w, args)
+    assert calls == [("request", {"vectors": args.overlay_id}), ("try", args.pack_id)]
+    assert await scalar(w.engine, SPV + " WHERE overlay_id = :v AND owner_id = :o", v=args.overlay_id,
+                        o=w.users["ivan"]) == 4  # four short spans, one window each
+    assert await scalar(w.engine, "SELECT DISTINCT fts_config FROM search_span_vectors") == "russian"
+    state = "SELECT state || ' ' || kind FROM overlays WHERE overlay_id = :v"
+    assert await scalar(w.engine, state, v=args.overlay_id) == "sealed vectors"
+    assert await _head_vectors(w, "ivan", MAT_RU) == args.overlay_id
+    assert await scalar(w.engine, "SELECT count(*) FROM pending_activations") == 0
+    assert await scalar(w.engine, "SELECT count(*) FROM job_keys") == jobs_before  # enqueues nothing
+    passages = [n for k, n in embed_server.encoder.calls if k == "passage"]
+    assert passages and max(passages) <= 8
+    # INV-SEARCH-3: a rerun of the key makes no embed call, keeps one row set and repeats the two calls only
+    seen = len(embed_server.encoder.calls)
+    await run_embed(w, args)
+    assert len(embed_server.encoder.calls) == seen
+    assert await scalar(w.engine, SPV) == 4
+    assert calls[2:] == [("request", {"vectors": args.overlay_id}), ("try", args.pack_id)]
+    del ingest
+
+
+async def test_windows_and_batches(w: World, embed_server: EmbedServer) -> None:
+    long = " ".join(f"слово{k}" for k in range(400))[:2500]
+    spans = [(p, f"страница {p}." + FILL_RU) for p in range(1, 11)] + [(11, long), (12, "")]
+    await _ingested(w, spans=spans)
+    windows = "SELECT char_start, char_stop FROM search_span_vectors WHERE window_no > 0 OR char_stop >= 1200"
+    async with w.engine.connect() as conn:
+        rows = sorted(tuple(r) for r in await conn.execute(text(windows)))
+    assert rows == [(0, 1200), (1000, 2200), (2000, 2500)]  # the long span's windows; the empty span has none
+    assert await scalar(w.engine, SPV) == 13
+    assert [n for k, n in embed_server.encoder.calls if k == "passage"] == [8, 5]
+
+
+async def test_two_owners_of_the_same_bytes_build_their_own_rows(w: World) -> None:
+    store = need("reader.search.store")
+    await _ingested(w, "ivan")
+    await _ingested(w, "anna")
+    ivan = await embed_args(w, w.users["ivan"], MAT_RU)
+    anna = await embed_args(w, w.users["anna"], MAT_RU)
+    assert (ivan.pack_id, ivan.overlay_id) == (anna.pack_id, anna.overlay_id)
+    by_owner = "SELECT count(*) FROM search_span_vectors WHERE owner_id = :o"
+    assert await scalar(w.engine, by_owner, o=w.users["ivan"]) == 4
+    assert await scalar(w.engine, by_owner, o=w.users["anna"]) == 4
     async with w.engine.begin() as conn:
-        await jobs.handle_embed(args, conn, JobContext(job_id=2, key="k", attempts=1))
-    assert await scalar(w.engine, "SELECT count(*) FROM search_embeds") == 1
+        assert await store.forget_overlay(conn, w.users["anna"], anna.overlay_id) == 4
+    assert await scalar(w.engine, by_owner, o=w.users["ivan"]) == 4
 
 
-async def test_superseded_ingest_and_params_mismatch_are_permanent(w: World) -> None:
+async def test_predicate_failures_are_overlay_superseded(w: World) -> None:
+    from ingest.packseed import R3, add_pack
+
     jobs = need("reader.search.jobs")
-    errors = need("reader.search.errors")
-    from reader.jobs.model import JobContext
+    await add_material(w, "ivan", MAT_RU, RU_SPANS)
+    owner = w.users["ivan"]
+    head = await embed_args(w, owner, MAT_RU)
+    wrong = jobs.EmbedArgs(owner_id=owner, pack_id=head.pack_id, overlay_id="f" * 64)
+    assert await _raises(w, wrong) == "overlay_superseded"
+    async with w.engine.begin() as conn:  # a newer sealed pack outside the head entry
+        newer = await add_pack(conn, owner, MAT_RU, R3, [(1, "text", "Новый текст про блок." + FILL_RU)])
+        assert (await jobs.buildable_pack(conn, owner, MAT_RU)).pack_id == head.pack_id
+        newer_args = await jobs.args_for(conn, owner, newer)
+    assert await _raises(w, newer_args) == "overlay_superseded"
+    assert await scalar(w.engine, SPV) == 0
+    await run_embed(w, head)  # the head entry's pack is buildable although a newer sealed pack exists
+    assert await scalar(w.engine, SPV) == 4
+    async with w.engine.begin() as conn:  # a collected overlay id is never built again
+        await conn.execute(text("UPDATE overlays SET collected_at = now() WHERE overlay_id = :v"),
+                           {"v": head.overlay_id})
+    assert await _raises(w, head) == "overlay_superseded"
 
-    ingest = await add_material(w, "ivan", MAT_RU, RU_SPANS)
-    stale = jobs.embed_args(MAT_RU, uuid.uuid4(), fts_config="russian")
-    with pytest.raises(errors.SearchError) as raised:
-        async with w.engine.begin() as conn:
-            await jobs.handle_embed(stale, conn, JobContext(job_id=1, key="k", attempts=0))
-    assert raised.value.code == "ingest_superseded"
-    wrong_language = jobs.embed_args(MAT_RU, ingest, fts_config="english")
-    with pytest.raises(errors.SearchError) as raised:
-        async with w.engine.begin() as conn:
-            await jobs.handle_embed(wrong_language, conn, JobContext(job_id=2, key="k", attempts=0))
-    assert raised.value.code == "params_mismatch"
-    for cls in (errors.SearchError,):
-        assert cls not in jobs.JOB_KINDS[0].transient
+
+async def test_newest_live_pack_by_converter_order_outside_the_head(w: World) -> None:
+    from ingest.packseed import R2, R3, add_pack
+
+    jobs = need("reader.search.jobs")
+    ingest = await add_material(w, "ivan", MAT_EN, [(1, "Miners validate blocks." + FILL_EN)],
+                                config_id="book-en")
+    owner = w.users["ivan"]
+    async with w.engine.begin() as conn:
+        newer = await add_pack(conn, owner, MAT_EN, R3, [(1, "text", "Blocks link by hash." + FILL_EN)])
+        from reader.ingest import manifest
+
+        await manifest.remove_material(conn, owner, MAT_EN)  # no pack of the material in the head entry
+        await conn.execute(text("UPDATE materials SET deleted_at = NULL WHERE owner_id = :o"), {"o": owner})
+        pack = await jobs.buildable_pack(conn, owner, MAT_EN)
+    assert pack is not None and pack.pack_id == newer and pack.converter_version == R3 != R2
+    del ingest
 
 
-async def test_unhealthy_embed_service_raises_embed_unavailable(
+async def test_try_activate_refusals_roll_back_and_waits_commit(
     w: World, monkeypatch: pytest.MonkeyPatch
 ) -> None:
+    from reader.ingest import manifest
+
+    await add_material(w, "ivan", MAT_RU, RU_SPANS)
+    args = await embed_args(w, w.users["ivan"], MAT_RU)
+    real = manifest.try_activate
+    for refusal in ("pack_purged", "pack_collected", "not_sealed"):
+        async def refused(conn: Any, owner: Any, pid: str, code: str = refusal) -> str:
+            return code
+
+        monkeypatch.setattr(manifest, "try_activate", refused)
+        assert await _raises(w, args) == "overlay_superseded"
+        assert await scalar(w.engine, SPV) == 0
+        assert await scalar(w.engine, "SELECT count(*) FROM overlays WHERE kind = 'vectors'") == 0
+        assert await scalar(w.engine, "SELECT count(*) FROM pending_activations") == 0
+
+    async def waiting(conn: Any, owner: Any, pid: str) -> str:
+        await real(conn, owner, pid)
+        return "seqmap_missing"
+
+    monkeypatch.setattr(manifest, "try_activate", waiting)
+    await run_embed(w, args)
+    assert await scalar(w.engine, SPV) == 4
+    state = "SELECT state FROM overlays WHERE overlay_id = :v"
+    assert await scalar(w.engine, state, v=args.overlay_id) == "sealed"  # a waiting reason commits
+
+
+async def test_a_purge_committed_during_the_build_leaves_no_row(
+    w: World, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from reader.search import embed_client
+
+    await add_material(w, "ivan", MAT_RU, RU_SPANS)
+    args = await embed_args(w, w.users["ivan"], MAT_RU)
+    real = embed_client.embed
+
+    async def embed_and_purge(kind: str, texts: Any, timeout: float) -> Any:  # noqa: ASYNC109
+        async with w.engine.begin() as other:  # a second connection commits the purge mid-build
+            await other.execute(text("UPDATE base_packs SET purged_at = now() WHERE pack_id = :p"),
+                                {"p": args.pack_id})
+        return await real(kind, texts, timeout)
+
+    monkeypatch.setattr(embed_client, "embed", embed_and_purge)
+    assert await _raises(w, args) == "overlay_superseded"
+    assert await scalar(w.engine, SPV + " WHERE overlay_id = :v", v=args.overlay_id) == 0
+
+
+async def test_fts_config_comes_from_the_pack_profile(w: World) -> None:
+    from ingest.packseed import R3, add_pack
+    from reader.ingest import overlays
+
     jobs = need("reader.search.jobs")
-    errors = need("reader.search.errors")
-    from reader.jobs.model import JobContext
-
-    monkeypatch.setenv("READER_EMBED_URL", "http://127.0.0.1:9")
-    monkeypatch.setattr(jobs, "HEALTH_WAIT_S", 0.5)
-    ingest = await add_material(w, "ivan", MAT_RU, RU_SPANS)
-    with pytest.raises(errors.EmbedUnavailable):
-        async with w.engine.begin() as conn:
-            await jobs.handle_embed(
-                jobs.embed_args(MAT_RU, ingest, fts_config="russian"), conn, JobContext(1, "k", 0)
-            )
-    assert await scalar(w.engine, "SELECT count(*) FROM search_chunks") == 0
+    await add_material(w, "ivan", MAT_RU, RU_SPANS)  # the head entry's profile: ru
+    await add_material(w, "anna", MAT_RU, RU_SPANS, config_id="no-entry")  # no profile at all: simple
+    owner = w.users["ivan"]
+    async with w.engine.begin() as conn:
+        head = (await jobs.buildable_pack(conn, owner, MAT_RU)).pack_id
+        assert await jobs.fts_config_of(conn, owner, head) == "russian"
+        assert await jobs.fts_config_of(conn, w.users["anna"], head) == "simple"
+        newer = await add_pack(conn, owner, MAT_RU, R3, [(1, "text", "Новый текст." + FILL_RU)])
+        await overlays.build_profile(conn, owner, newer, {"language": "en"})  # the import's, never activated
+        assert await jobs.fts_config_of(conn, owner, newer) == "english"
 
 
-async def test_model_mismatch_is_permanent(w: World, embed_server: EmbedServer) -> None:
-    jobs = need("reader.search.jobs")
-    errors = need("reader.search.errors")
-    from reader.jobs.model import JobContext
+async def test_a_language_change_is_a_new_overlay_and_the_old_one_serves(w: World) -> None:
+    from reader.ingest import manifest, overlays, views
 
-    embed_server.server.model_id = "BAAI/bge-m3@other"
-    ingest = await add_material(w, "ivan", MAT_RU, RU_SPANS)
-    with pytest.raises(errors.SearchError) as raised:
-        async with w.engine.begin() as conn:
-            await jobs.handle_embed(
-                jobs.embed_args(MAT_RU, ingest, fts_config="russian"), conn, JobContext(1, "k", 0)
-            )
-    assert raised.value.code == "model_mismatch"
-
-
-# ---- FR-SEARCH-6 ------------------------------------------------------------------------------------------
-
-
-async def test_fts_config_follows_the_material_language(w: World) -> None:
-    await _ingested(w, sha=MAT_EN, spans=[(1, "Miners validate blocks and earn rewards." + FILL_EN)])
-    assert await scalar(w.engine, "SELECT DISTINCT fts_config FROM search_chunks") == "english"
     store = need("reader.search.store")
+    await _ingested(w, sha=MAT_EN, spans=[(1, "Miners validate blocks and earn rewards." + FILL_EN)])
+    owner = w.users["ivan"]
+    first = await embed_args(w, owner, MAT_EN)
+    assert await scalar(w.engine, "SELECT DISTINCT fts_config FROM search_span_vectors") == "english"
+    async with w.engine.begin() as conn:  # the profile's language changes (as SRV-INGEST's reconcile does)
+        pack = await views.active_pack(conn, owner, MAT_EN)
+        assert pack is not None
+        oid = await overlays.build_profile(conn, owner, pack.pack_id, {"language": "ru"})
+        await manifest.request_activation(conn, owner, pack.pack_id, {"profile": oid})
+        assert await manifest.try_activate(conn, owner, pack.pack_id) == "appended"
+    second = await embed_args(w, owner, MAT_EN)
+    assert second.overlay_id != first.overlay_id  # a new vector overlay id; the old overlay stays active
     async with w.engine.connect() as conn:
-        assert await store.fts_config_of(conn, MAT_EN) == "english"
-        assert await store.fts_config_of(conn, "c" * 64) == "simple"
+        found = await store.candidates(conn, owner, "miners", limit=50)
+    assert found.hits and await _head_vectors(w, "ivan", MAT_EN) == first.overlay_id
+    await run_embed(w, second)
+    assert await _head_vectors(w, "ivan", MAT_EN) == second.overlay_id
+    assert await scalar(w.engine, "SELECT fts_config FROM search_span_vectors WHERE overlay_id = :v LIMIT 1",
+                        v=second.overlay_id) == "russian"
 
 
-# ---- FR-SEARCH-7, INV-SEARCH-1, -2, -4 --------------------------------------------------------------------
+# ---- FR-SEARCH-7: candidates and the legacy search() -------------------------------------------------------
 
 
-async def test_hybrid_search_returns_cited_chunks(w: World) -> None:
+async def test_candidates_are_dense_spans_of_active_packs(w: World) -> None:
     store = need("reader.search.store")
     await _ingested(w)
-    result = await store.search(w.engine, w.users["ivan"], "кошелёк ключи", k=10)
-    assert not result.degraded
-    top = result.results[0]
-    assert top.page == 2
-    assert top.span_id == f"{MAT_RU}:2"
-    assert top.span_ids == [f"{MAT_RU}:2"]
-    assert top.dense_rank == 1
-    # FR-SEARCH-7: the slice serves the dense order (hybrid measured below dense-only on v2), so no fts rank
+    async with w.engine.connect() as conn:
+        found = await store.candidates(conn, w.users["ivan"], "кошелёк ключи", limit=50)
+    assert not found.degraded and found.hits
+    top = found.hits[0]
+    assert top.locator.startswith(f"spn:{MAT_RU}:p2:")
+    assert [h.dense_rank for h in found.hits] == list(range(1, len(found.hits) + 1))
+    assert all(h.fts_rank is None for h in found.hits)
+    assert [h.score for h in found.hits] == sorted((h.score for h in found.hits), reverse=True)
+    assert "l:ключ" in top.covers and found.lexemes >= {"ключ"}
+
+
+async def test_a_span_is_scored_by_its_best_window(w: World) -> None:
+    store = need("reader.search.store")
     params = need("reader.search.params")
-    assert params.HYBRID is False
-    assert all(r.fts_rank is None for r in result.results)
-    assert [r.dense_rank for r in result.results] == list(range(1, len(result.results) + 1))
+    filler = " ".join(f"шум{k}" for k in range(300))[:2300]
+    await _ingested(w, spans=[(1, filler + " кошелёк ключи"), (2, "Другой текст про блок." + FILL_RU)])
+    async with w.engine.connect() as conn:
+        found = await store.candidates(conn, w.users["ivan"], "кошелёк ключи", limit=50)
+        vector = await store.embed_query("кошелёк ключи")
+        rows = (await conn.execute(text(
+            "SELECT locator, window_no, embedding <=> CAST(:q AS vector) FROM search_span_vectors"),
+            {"q": store.vector_literal(vector)})).all()
+    best: dict[str, float] = {}
+    for loc, _, d in rows:
+        best[loc] = min(best.get(loc, 2.0), float(d))
+    assert len({r[0] for r in rows}) == 2 and len(rows) > 2 and params.CHUNK_SIZE == 1200  # a long span
+    assert {h.locator: h.score for h in found.hits} == pytest.approx({k: 1 - v for k, v in best.items()})
+    assert found.hits[0].locator.startswith(f"spn:{MAT_RU}:p1:")
+
+
+async def test_rrf_and_the_degraded_full_text(w: World, monkeypatch: pytest.MonkeyPatch) -> None:
+    store = need("reader.search.store")
+    await _ingested(w)
+    async with w.engine.connect() as conn:
+        fused = await store.candidates(conn, w.users["ivan"], "кошелёк ключи", limit=50, use_rrf=True)
+    assert any(h.fts_rank is not None for h in fused.hits) and fused.hits[0].dense_rank is not None
+    monkeypatch.setenv("READER_EMBED_URL", "http://127.0.0.1:9")
+    async with w.engine.connect() as conn:
+        down = await store.candidates(conn, w.users["ivan"], "кошелёк ключи", limit=50)
+        ranks = {r[0]: float(r[1]) for r in await conn.execute(text(
+            "SELECT locator, max(ts_rank_cd(fts, to_tsquery('russian', 'кошелёк | ключи')))"
+            " FROM search_span_vectors GROUP BY locator"))}
+    assert down.degraded and down.hits
+    assert all(h.dense_rank is None for h in down.hits)
+    assert [h.score for h in down.hits] == [ranks[h.locator] for h in down.hits]
+
+
+async def test_filters_and_exclusions_apply_before_the_scan(w: World) -> None:
+    from reader.ingest import manifest, overlays, views
+
+    store = need("reader.search.store")
+    await _ingested(w)
+    await _ingested(w, sha=MAT_EN, spans=[(1, "кошелёк ключи кошелёк ключи" + FILL_RU)])
+    owner = w.users["ivan"]
+    async with w.engine.begin() as conn:  # tag one Russian span form=definition in an active tags overlay
+        pack = await views.active_pack(conn, owner, MAT_RU)
+        assert pack is not None
+        spans = await views.pack_spans(conn, pack)
+        inputs = {"tagger": "test"}
+        oid = overlays.overlay_id("tags", pack.pack_id, inputs, "tags/1")
+        await overlays.begin(conn, owner, oid, kind="tags", pack_id=pack.pack_id, inputs=inputs,
+                             builder_version="tags/1")
+        await conn.execute(text(
+            "INSERT INTO span_tags (owner_id, overlay_id, pack_id, locator, facet, value, by, confidence,"
+            " tagger_version) VALUES (:o, :v, :p, :l, 'form', 'definition', 'owner', 1, 't')"),
+            {"o": owner, "v": oid, "p": pack.pack_id, "l": spans[0].locator})
+        await overlays.seal(conn, owner, oid)
+        seq, top = await manifest.head(conn, owner)
+        elements = {e["pack_id"]: dict(e["overlays"]) for e in top["packs"]}
+        elements[pack.pack_id]["tags"] = oid
+        await manifest.append(conn, owner, seq, manifest.make_entry(elements), "test_fixture")
+        en = await views.active_pack(conn, owner, MAT_EN)
+        assert en is not None
+        form = {"form": "definition"}
+        tagged = await store.candidates(conn, owner, "кошелёк ключи", limit=50, filters=form)
+        excluded = await store.candidates(conn, owner, "кошелёк ключи", limit=50, exclude_packs=[en.pack_id])
+        only = await store.candidates(conn, owner, "кошелёк ключи", limit=50, material_sha256=MAT_EN)
+    assert [h.locator for h in tagged.hits] == [spans[0].locator]  # the nearer English span never appears
+    assert excluded.hits and {h.material_sha256 for h in excluded.hits} == {MAT_RU}
+    assert only.hits and {h.material_sha256 for h in only.hits} == {MAT_EN}
+
+
+async def test_store_corpus_is_finds_candidates_port(w: World) -> None:
+    corpus_mod = need("reader.search.corpus")
+    find = need("reader.search.find")
+    policy = need("reader.search.policy").policy()
+    await _ingested(w)
+    caller = find.Caller(w.users["ivan"], ("owner",))
+    async with w.engine.connect() as conn:
+        deps = find.Deps(corpus=corpus_mod.StoreCorpus(conn, policy), policy=policy,
+                         policy_version=lambda: "p" * 64)
+        owner = await find.find(caller, "owner", "кошелёк ключи", deps=deps)
+        mcp = await find.find(caller, "mcp", "кошелёк ключи", deps=deps)
+        corpus = corpus_mod.StoreCorpus(conn, policy)
+        route = find.route_for(policy, "owner", "thematic", findings=False)
+        found = await corpus.candidates(caller, "owner", route, "кошелёк ключи", {}, ())
+        near = await corpus.neighbours(caller, "owner", found.cards[:1])
+    assert owner["cards"] and owner["cards"][0]["id"].startswith(f"spn:{MAT_RU}:p2:")
+    assert owner["cards"][0]["layer"] == "L1" and owner["degraded"] is False
+    assert mcp["cards"] == []  # a personal-use pack's L1 never reaches mcp: the pack is left out of the scan
+    top = found.cards[0]
+    assert [c.id for c in near[top.id]] == list(top.next) and top.covers
+    assert top.text in {s for _, s in RU_SPANS}  # full span text; find serves the cut
+
+
+async def test_search_returns_locator_hits(w: World) -> None:
+    store = need("reader.search.store")
+    from reader.ingest import views
+
+    await _ingested(w)
+    result = await store.search(w.engine, w.users["ivan"], "кошелёк ключи", k=10)
+    assert not result.degraded and result.results
+    top = result.results[0]
+    assert top.page == 2 and top.span_ids == [top.span_id] and top.span_id.startswith("spn:")
+    assert set(top.to_json()) == {"material_sha256", "page", "span_id", "span_ids", "snippet", "score",
+                                  "dense_rank", "fts_rank"}
+    async with w.engine.connect() as conn:  # every span id is an active span's locator on the hit's page
+        texts = await views.active_span_texts(conn, w.users["ivan"], [h.span_id for h in result.results])
+    assert [texts[h.span_id][0] for h in result.results] == [h.page for h in result.results]
     assert len(top.snippet) <= 300
 
 
-def test_fusion_weight_is_the_dev_set_choice() -> None:
-    import json
-
-    from .conftest import FIXTURES
-
-    params = need("reader.search.params")
-    chosen = json.loads((FIXTURES / "results" / "fusion-weight-v1.json").read_text())["chosen_w_dense"]
-    assert chosen == params.W_DENSE
+# ---- VEC-SEARCH-5, INV-SEARCH-7 over windows --------------------------------------------------------------
 
 
-async def test_search_is_owner_isolated(w: World) -> None:
-    store = need("reader.search.store")
-    await _ingested(w, "ivan")
-    await _ingested(w, "anna", sha=MAT_EN, spans=[(1, "кошелёк ключи кошелёк" + FILL_RU)])
-    result = await store.search(w.engine, w.users["ivan"], "кошелёк ключи", k=50)
-    assert result.results
-    assert all(r.material_sha256 == MAT_RU for r in result.results)
-    other = await store.search(w.engine, w.users["anna"], "кошелёк ключи", k=50)
-    assert all(r.material_sha256 == MAT_EN for r in other.results)
-
-
-async def test_citations_resolve_to_spans_on_the_page(w: World) -> None:
-    store = need("reader.search.store")
-    ingest = await _ingested(w)
-    result = await store.search(w.engine, w.users["ivan"], "блок хеш майнер", k=10)
-    for r in result.results:
-        for sid in r.span_ids:
-            sha, seq = sid.split(":")
-            page = await scalar(
-                w.engine,
-                "SELECT page FROM material_spans WHERE ingest_id = :i AND seq = :q",
-                i=ingest,
-                q=int(seq),
-            )
-            assert sha == MAT_RU and page == r.page
-
-
-async def test_order_is_total_and_deterministic(w: World) -> None:
-    store = need("reader.search.store")
-    same = [(p, "одинаковый текст про блок" + FILL_RU) for p in range(1, 6)]
-    await _ingested(w, spans=same)
-    first = await store.search(w.engine, w.users["ivan"], "блок", k=10)
-    second = await store.search(w.engine, w.users["ivan"], "блок", k=10)
-    assert [r.chunk_id for r in first.results] == [r.chunk_id for r in second.results]
-    ids = [r.chunk_id for r in first.results]
-    assert ids == sorted(ids)  # equal distances and ranks fall back to the chunk id
-
-
-async def test_degraded_when_the_embed_service_is_down(w: World, monkeypatch: pytest.MonkeyPatch) -> None:
-    store = need("reader.search.store")
-    await _ingested(w)
-    monkeypatch.setenv("READER_EMBED_URL", "http://127.0.0.1:9")
-    result = await store.search(w.engine, w.users["ivan"], "кошелёк", k=5)
-    assert result.degraded
-    assert result.results and all(r.dense_rank is None for r in result.results)
-
-
-async def test_material_filter_through_search_and_route(w: World) -> None:
-    store = need("reader.search.store")
-    await _ingested(w)
-    await _ingested(w, sha=MAT_EN, spans=[(1, "кошелёк ключи по-английски" + FILL_RU)])
-    both = await store.search(w.engine, w.users["ivan"], "кошелёк ключи", k=50)
-    assert {r.material_sha256 for r in both.results} == {MAT_RU, MAT_EN}
-    only = await store.search(w.engine, w.users["ivan"], "кошелёк ключи", k=50, material_sha256=MAT_EN)
-    assert only.results
-    assert {r.material_sha256 for r in only.results} == {MAT_EN}
-    async with client(w) as c:
-        r = await c.post("/api/search", json={"q": "кошелёк ключи", "k": 50, "material": MAT_RU})
-    assert r.status_code == 200, r.text
-    assert {x["material_sha256"] for x in r.json()["results"]} == {MAT_RU}
-
-
-async def test_only_the_current_key_is_served(w: World) -> None:
-    store = need("reader.search.store")
-    jobs = need("reader.search.jobs")
-    params = need("reader.search.params")
-    from reader.jobs.model import JobContext
-
-    ingest = await _ingested(w)  # key 1: russian
-    # the owner changes the material's language to en: the russian chunks are no longer current
-    config = w.config_path.read_text(encoding="utf-8")
-    w.config_path.write_text(config.replace("language: ru", "language: en"), encoding="utf-8")
-    stale = await store.search(w.engine, w.users["ivan"], "кошелёк ключи", k=50)
-    assert stale.results == []
-    args = jobs.embed_args(MAT_RU, ingest, fts_config="english")
-    async with w.engine.begin() as conn:  # key 2, embedded later: newest row, and matching
-        await jobs.handle_embed(args, conn, JobContext(2, "k", 0))
-    params_of = "SELECT params_sha256 FROM search_chunks WHERE id = :i"
-    fresh = await store.search(w.engine, w.users["ivan"], "кошелёк ключи", k=50)
-    assert fresh.results
-    for hit in fresh.results:
-        assert await scalar(w.engine, params_of, i=hit.chunk_id) == params.params_sha256("english")
-    # back to ru: key 1 is current again although key 2's row is newer (params match, not the newest row)
-    w.config_path.write_text(config, encoding="utf-8")
-    again = await store.search(w.engine, w.users["ivan"], "кошелёк ключи", k=50)
-    assert again.results
-    for hit in again.results:
-        assert await scalar(w.engine, params_of, i=hit.chunk_id) == params.params_sha256("russian")
-
-
-async def test_span_id_is_the_primary_span(w: World) -> None:
-    store = need("reader.search.store")
-    # page 1: a short span 0 and a long span 1 in one chunk; span 1 overlaps most, so it is primary
-    await _ingested(w, spans=[(1, "Кошелёк:"), (1, "закрытые ключи владельца" + FILL_RU)])
-    result = await store.search(w.engine, w.users["ivan"], "кошелёк ключи", k=1)
-    (hit,) = result.results
-    assert hit.span_ids == [f"{MAT_RU}:0", f"{MAT_RU}:1"]
-    assert hit.span_id == f"{MAT_RU}:1"
-
-
-async def test_full_text_merges_configurations_by_rank_then_id(w: World) -> None:
-    store = need("reader.search.store")
-    word = "bitcoin"  # an ASCII word: the russian configuration stems it with the english stemmer too
-    await _ingested(w, spans=[(1, f"{word} " * 3 + FILL_RU), (2, f"{word} раз" + FILL_RU)])
-    await _ingested(w, sha=MAT_EN, spans=[(1, f"{word} {word}" + FILL_EN), (2, f"just one {word}" + FILL_EN)])
-    async with w.engine.connect() as conn:
-        got = await store.fts_list(conn, w.users["ivan"], word, None)
-        ranks = {
-            r[0]: float(r[1])
-            for r in await conn.execute(
-                text(
-                    "SELECT id, ts_rank_cd(fts, to_tsquery(CAST(fts_config AS regconfig), :w))"
-                    " FROM search_chunks"
-                ),
-                {"w": word},
-            )
-        }
-    assert len(got) == 4
-    config_of = "SELECT fts_config FROM search_chunks WHERE id = :i"
-    assert {await scalar(w.engine, config_of, i=i) for i in got} == {"russian", "english"}
-    assert got == sorted(got, key=lambda i: (-ranks[i], i))
-
-
-# ---- INV-SEARCH-7, VEC-SEARCH-5 ---------------------------------------------------------------------------
-
-
-async def test_full_text_is_or_and_parses_no_operators(w: World) -> None:
+async def test_full_text_is_or_over_windows_with_the_query_elements(
+    w: World, monkeypatch: pytest.MonkeyPatch
+) -> None:
     store = need("reader.search.store")
     data = fixture("fts-or.yaml")
-    spans = [(i + 1, c["text"]) for i, c in enumerate(data["chunks"])]
+    spans = [(i + 1, c["text"]) for i, c in enumerate(data["spans"])]
     await _ingested(w, sha=MAT_EN, spans=spans)
-    page_of = {c["id"]: i + 1 for i, c in enumerate(data["chunks"])}
+    monkeypatch.setenv("READER_EMBED_URL", "http://127.0.0.1:9")  # degraded: the full-text list alone
+    page_of = {c["id"]: i + 1 for i, c in enumerate(data["spans"])}
     for case in data["cases"]:
         async with w.engine.connect() as conn:
-            got = await store.fts_list(conn, w.users["ivan"], case["query"], None)
-        pages = {await scalar(w.engine, "SELECT page FROM search_chunks WHERE id = :i", i=i) for i in got}
+            found = await store.candidates(conn, w.users["ivan"], case["query"], limit=50)
+        pages = {int(h.locator.split(":p")[1].split(":")[0]) for h in found.hits}
         assert pages == {page_of[c] for c in case["expected_ids"]}, case["name"]
+        assert found.lexemes == frozenset(case["lexemes"]), case["name"]
+        covers = {page_of[c]: {f"l:{x}" for x in xs} for c, xs in case["covers"].items()}
+        assert {int(h.locator.split(":p")[1].split(":")[0]): set(h.covers) for h in found.hits} == covers
 
 
 OPERATOR_QUERIES = ["&", "|", "!", ":*", "<->", "'", "\\", "a & b | !c", "''\\''", "x:* <2> y"]
 
 
 @pytest.mark.parametrize("query", OPERATOR_QUERIES)
-async def test_operator_strings_never_raise(w: World, query: str) -> None:
+async def test_operator_strings_never_raise(w: World, query: str, monkeypatch: pytest.MonkeyPatch) -> None:
     store = need("reader.search.store")
     await _ingested(w, sha=MAT_EN, spans=[(1, "a b c x y" + FILL_EN)])
+    for use_rrf in (False, True):
+        async with w.engine.connect() as conn:
+            await store.candidates(conn, w.users["ivan"], query, limit=50, use_rrf=use_rrf)
+    monkeypatch.setenv("READER_EMBED_URL", "http://127.0.0.1:9")
     async with w.engine.connect() as conn:
-        await store.fts_list(conn, w.users["ivan"], query, None)
+        await store.candidates(conn, w.users["ivan"], query, limit=50)
 
 
 # ---- FR-SEARCH-8, INV-SEARCH-5 ----------------------------------------------------------------------------
@@ -428,17 +504,19 @@ async def test_operator_strings_never_raise(w: World, query: str) -> None:
 
 async def test_route_returns_results_for_the_owner(w: World) -> None:
     await _ingested(w)
+    await _ingested(w, sha=MAT_EN, spans=[(1, "кошелёк ключи по-английски" + FILL_RU)])
     async with client(w) as c:
         r = await c.post("/api/search", json={"q": "кошелёк ключи", "k": 3})
-    assert r.status_code == 200, r.text
-    body = r.json()
-    assert body["degraded"] is False
-    assert 1 <= len(body["results"]) <= 3
-    first = body["results"][0]
-    assert set(first) == {
-        "chunk_id", "material_sha256", "page", "span_id", "span_ids", "snippet", "score", "dense_rank",
-        "fts_rank",
-    }
+        assert r.status_code == 200, r.text
+        body = r.json()
+        assert body["degraded"] is False and 1 <= len(body["results"]) <= 3
+        assert set(body["results"][0]) == {
+            "material_sha256", "page", "span_id", "span_ids", "snippet", "score", "dense_rank", "fts_rank"
+        }
+        only = await c.post("/api/search", json={"q": "кошелёк ключи", "k": 50, "material": MAT_RU})
+        assert {x["material_sha256"] for x in only.json()["results"]} == {MAT_RU}
+        unknown = await c.post("/api/search", json={"q": "кошелёк", "material": "c" * 64})
+        assert (unknown.status_code, unknown.json()) == (404, {"error": "not_found"})
 
 
 async def test_route_is_owner_only_and_validates(w: World) -> None:
@@ -452,15 +530,12 @@ async def test_route_is_owner_only_and_validates(w: World) -> None:
             assert set(r.json()) == {"error"}
 
 
-async def test_broken_reader_yaml_is_503_config_unavailable(w: World) -> None:
+async def test_a_broken_reader_yaml_no_longer_blocks_search(w: World) -> None:
     await _ingested(w)
     async with client(w) as c:
         w.config_path.write_text("version: 1\nusers: [ : broken\n", encoding="utf-8")
         r = await c.post("/api/search", json={"q": "кошелёк"})
-        assert (r.status_code, r.json()) == (503, {"error": "config_unavailable"})
-        w.config_path.unlink()
-        r = await c.post("/api/search", json={"q": "кошелёк"})
-        assert (r.status_code, r.json()) == (503, {"error": "config_unavailable"})
+        assert r.status_code == 200 and r.json()["results"]
 
 
 async def test_no_text_in_logs(
@@ -474,9 +549,8 @@ async def test_no_text_in_logs(
         await c.post("/api/search", json={"q": canary * 200})
         monkeypatch.setenv("READER_EMBED_URL", "http://127.0.0.1:9")
         await c.post("/api/search", json={"q": f"{canary} блок"})
-        # a forced SQL error with the canary in the bound parameters
-        async with w.engine.begin() as conn:
-            await conn.execute(text("ALTER TABLE search_chunks RENAME COLUMN fts TO fts_gone"))
+        async with w.engine.begin() as conn:  # a forced SQL error with the canary in the bound parameters
+            await conn.execute(text("ALTER TABLE search_span_vectors RENAME COLUMN fts TO fts_gone"))
         failed = await c.post("/api/search", json={"q": f"{canary} блок"})
         assert failed.status_code >= 500
     assert canary not in caplog.text
@@ -488,7 +562,8 @@ async def test_no_text_in_logs(
 # ---- FR-SEARCH-9 ------------------------------------------------------------------------------------------
 
 
-async def test_status_and_ensure(w: World, pg: Pg, monkeypatch: pytest.MonkeyPatch) -> None:
+@asynccontextmanager
+async def _queue(w: World, pg: Pg) -> AsyncIterator[Any]:
     jobs = need("reader.search.jobs")
     from reader.config import Secret
     from reader.db import DbTarget
@@ -499,66 +574,63 @@ async def test_status_and_ensure(w: World, pg: Pg, monkeypatch: pytest.MonkeyPat
     app = make_app(DbTarget(pg.host, pg.port, pg.user, pg.database, Secret(pg.password)))
     await app.open_async()
     try:
-        queue = Jobs(w.engine, app, Catalog(jobs.JOB_KINDS))
-        assert await jobs.search_status(queue, w.users["ivan"], MAT_RU) == "none"
-        assert await jobs.ensure(queue, w.users["ivan"], MAT_RU) == "no_ingest"
-        ingest = await add_material(w, "ivan", MAT_RU, RU_SPANS)
-        assert await jobs.ensure(queue, w.users["ivan"], MAT_RU) == "queued"
-        assert await jobs.search_status(queue, w.users["ivan"], MAT_RU) == "queued"
-        # a dead key (3 counted attempts) is requeued by ensure with its attempts reset
-        key = jobs._key(jobs.embed_args(MAT_RU, ingest, fts_config="russian"))
-        async with w.engine.begin() as conn:
-            await conn.execute(
-                text("UPDATE job_keys SET outcome = 'dead', attempts = 3 WHERE key = :k"), {"k": key}
-            )
-            await conn.execute(
-                text("UPDATE procrastinate_jobs SET status = 'failed' WHERE lock = :k"), {"k": key}
-            )
-        assert await jobs.search_status(queue, w.users["ivan"], MAT_RU) == "dead"
-        assert await jobs.ensure(queue, w.users["ivan"], MAT_RU) == "queued"
-        assert await scalar(w.engine, "SELECT attempts FROM job_keys WHERE key = :k", k=key) == 0
-        assert await scalar(w.engine, "SELECT outcome FROM job_keys WHERE key = :k", k=key) is None
-        await embed_material(w, ingest, MAT_RU)
-        assert await jobs.search_status(queue, w.users["ivan"], MAT_RU) == "ready"
+        yield Jobs(w.engine, app, Catalog(jobs.JOB_KINDS))
     finally:
         await app.close_async()
 
 
-async def test_worker_start_enqueues_only_never_enqueued_keys(
-    w: World, pg: Pg, monkeypatch: pytest.MonkeyPatch
-) -> None:
-    """FR-SEARCH-9 at worker start: `none` keys are enqueued; dead and existing keys are left alone."""
-    jobs = need("reader.search.jobs")
-    from reader.config import Secret
-    from reader.db import DbTarget
-    from reader.jobs.catalog import Catalog
-    from reader.jobs.queue import Jobs
-    from reader.jobs.worker import make_app
+async def _kill(w: World, key: str) -> None:
+    async with w.engine.begin() as conn:
+        for sql in ("UPDATE job_keys SET outcome = 'dead', attempts = 3 WHERE key = :k",
+                    "UPDATE procrastinate_jobs SET status = 'failed' WHERE lock = :k"):
+            await conn.execute(text(sql), {"k": key})
 
-    app = make_app(DbTarget(pg.host, pg.port, pg.user, pg.database, Secret(pg.password)))
-    await app.open_async()
-    try:
-        queue = Jobs(w.engine, app, Catalog(jobs.JOB_KINDS))
+
+async def test_status_and_ensure_on_overlay_keys(w: World, pg: Pg) -> None:
+    jobs = need("reader.search.jobs")
+    owner = w.users["ivan"]
+    async with _queue(w, pg) as queue:
+        assert await jobs.search_status(queue, owner, MAT_RU) == "none"
+        assert await jobs.ensure(queue, owner, MAT_RU) == "no_ingest"
         await add_material(w, "ivan", MAT_RU, RU_SPANS)
-        dead_ingest = await add_material(w, "anna", MAT_EN, RU_SPANS, config_id="book-en")
-        assert await jobs.ensure(queue, w.users["anna"], MAT_EN) == "queued"
-        dead_key = jobs._key(jobs.embed_args(MAT_EN, dead_ingest, await current_fts(w, MAT_EN)))
+        args = await embed_args(w, owner, MAT_RU)
+        assert await jobs.ensure(queue, owner, MAT_RU) == "queued"
+        key = jobs.job_key(args)
+        assert await scalar(w.engine, "SELECT args FROM job_keys WHERE key = :k", k=key) == args.model_dump(
+            mode="json")
+        await _kill(w, key)
+        assert await jobs.search_status(queue, owner, MAT_RU) == "dead"
+        assert await jobs.ensure(queue, owner, MAT_RU) == "queued"  # a dead key is requeued, attempts reset
+        assert await scalar(w.engine, "SELECT attempts FROM job_keys WHERE key = :k", k=key) == 0
+        await run_embed(w, args)
+        assert await jobs.search_status(queue, owner, MAT_RU) == "ready"
         async with w.engine.begin() as conn:
-            await conn.execute(
-                text("UPDATE job_keys SET outcome = 'dead', attempts = 3 WHERE key = :k"), {"k": dead_key}
-            )
-            await conn.execute(
-                text("UPDATE procrastinate_jobs SET status = 'failed' WHERE lock = :k"), {"k": dead_key}
-            )
-        assert await jobs.search_status(queue, w.users["ivan"], MAT_RU) == "none"
-        assert callable(getattr(jobs, "on_worker_start", None)), "reader.search.jobs declares on_worker_start"
+            await conn.execute(text("UPDATE overlays SET collected_at = now() WHERE overlay_id = :v"),
+                               {"v": args.overlay_id})
+        assert await jobs.search_status(queue, owner, MAT_RU) == "collected"
+
+
+async def test_worker_start_enqueues_buildable_packs_without_a_sealed_overlay(w: World, pg: Pg) -> None:
+    from reader.ingest import manifest
+
+    jobs = need("reader.search.jobs")
+    async with _queue(w, pg) as queue:
+        await add_material(w, "ivan", MAT_RU, RU_SPANS)  # never enqueued: enqueued at start
+        await _ingested(w, "ivan", MAT_EN, [(1, "Miners validate blocks." + FILL_EN)])  # sealed: skipped
+        await add_material(w, "anna", MAT_RU, RU_SPANS)  # a dead key: left dead
+        await add_material(w, "anna", MAT_EN, RU_SPANS, config_id="book-en")  # deleted material: skipped
+        dead = await embed_args(w, w.users["anna"], MAT_RU)
+        assert await jobs.ensure(queue, w.users["anna"], MAT_RU) == "queued"
+        await _kill(w, jobs.job_key(dead))
+        async with w.engine.begin() as conn:
+            await manifest.remove_material(conn, w.users["anna"], MAT_EN)
+            deleted = "UPDATE materials SET deleted_at = now() WHERE owner_id = :o AND sha256 = :s"
+            await conn.execute(text(deleted), {"o": w.users["anna"], "s": MAT_EN})
+        count = "SELECT count(*) FROM job_keys WHERE kind = 'search.embed'"
         await jobs.on_worker_start(queue)
         assert await jobs.search_status(queue, w.users["ivan"], MAT_RU) == "queued"
-        assert await jobs.search_status(queue, w.users["anna"], MAT_EN) == "dead"
-        count = "SELECT count(*) FROM job_keys WHERE kind = 'search.embed'"
+        assert await jobs.search_status(queue, w.users["ivan"], MAT_EN) == "ready"
+        assert await jobs.search_status(queue, w.users["anna"], MAT_RU) == "dead"
         assert await scalar(w.engine, count) == 2
-        await jobs.on_worker_start(queue)  # a second start adds nothing and leaves the dead key dead
+        await jobs.on_worker_start(queue)  # a second start adds nothing
         assert await scalar(w.engine, count) == 2
-        assert await jobs.search_status(queue, w.users["anna"], MAT_EN) == "dead"
-    finally:
-        await app.close_async()

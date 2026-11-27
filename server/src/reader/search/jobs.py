@@ -145,7 +145,7 @@ async def _build(conn: AsyncConnection, args: EmbedArgs, pack: views.Pack, fts_c
             text(
                 "INSERT INTO search_span_vectors (owner_id, overlay_id, pack_id, locator, window_no,"
                 " char_start, char_stop, model, fts_config, fts, embedding) VALUES (:o, :v, :p, :l, :n, :a,"
-                " :b, :m, :f, to_tsvector(CAST(:f AS regconfig), :t), CAST(:e AS vector))"
+                " :b, :m, :f, to_tsvector(CAST(CAST(:f AS text) AS regconfig), :t), CAST(:e AS vector))"
             ),
             [
                 {"o": args.owner_id, "v": args.overlay_id, "p": args.pack_id, "l": loc, "n": w.window_no,

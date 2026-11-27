@@ -87,15 +87,25 @@ async def two_materials(w: World) -> None:
         await embed_material(w, ingest, sha)
 
 
-def ids(result: Any) -> list[tuple[int, str, float]]:
-    return [(h.chunk_id, h.material_sha256, h.score) for h in result.results]
+def ids(result: Any) -> list[tuple[str, str, float]]:
+    return [(h.span_id, h.material_sha256, h.score) for h in result.results]
 
 
 async def search_rows(w: World) -> list[Any]:
     async with w.engine.connect() as conn:
-        chunks = (await conn.execute(text("SELECT * FROM search_chunks ORDER BY id"))).all()
-        embeds = (await conn.execute(text("SELECT * FROM search_embeds ORDER BY ingest_id"))).all()
-    return [tuple(map(str, r)) for r in (*chunks, *embeds)]
+        rows = (await conn.execute(text(
+            "SELECT * FROM search_span_vectors ORDER BY owner_id, overlay_id, locator, window_no"))).all()
+    return [tuple(map(str, r)) for r in rows]
+
+
+async def remove(w: World, handle: str, sha: str) -> None:
+    """A delete as SRV-INGEST records it: the material leaves the head entry and is soft-deleted."""
+    from reader.ingest import manifest
+
+    async with w.engine.begin() as conn:
+        await manifest.remove_material(conn, w.users[handle], sha)
+        deleted = "UPDATE materials SET deleted_at = now() WHERE owner_id = :o AND sha256 = :s"
+        await conn.execute(text(deleted), {"o": w.users[handle], "s": sha})
 
 
 async def test_a_deleted_material_leaves_results_and_its_restore_brings_them_back(w: World) -> None:
@@ -132,10 +142,7 @@ async def test_the_full_text_list_excludes_a_deleted_material_too(
     store = need("reader.search.store")
     await two_materials(w)
     owner = w.users["ivan"]
-    async with w.engine.begin() as conn:
-        await conn.execute(
-            text("UPDATE materials SET deleted_at = now() WHERE sha256 = :s"), {"s": MAT_RU}
-        )
+    await remove(w, "ivan", MAT_RU)
     monkeypatch.setenv("READER_EMBED_URL", "http://127.0.0.1:9")  # embed down: the full-text list alone
     degraded = await store.search(w.engine, owner, QUERY, k=10)
     assert degraded.degraded and degraded.results
@@ -149,10 +156,7 @@ async def test_another_owners_deleted_material_does_not_hide_mine(w: World) -> N
     await two_materials(w)
     ingest = await add_material(w, "anna", MAT_RU, A_SPANS, config_id="book-ru")
     await embed_material(w, ingest, MAT_RU)
-    async with w.engine.begin() as conn:
-        await conn.execute(
-            text("UPDATE materials SET deleted_at = now() WHERE owner_id = :o"), {"o": w.users["anna"]}
-        )
+    await remove(w, "anna", MAT_RU)
     mine = await store.search(w.engine, w.users["ivan"], QUERY, k=10)
     assert MAT_RU in {h.material_sha256 for h in mine.results}
     theirs = await store.search(w.engine, w.users["anna"], QUERY, k=10)

@@ -1,9 +1,11 @@
-"""SRV-SEARCH [db] property tests: owner isolation, citations, total order, no operator injection.
+"""SRV-SEARCH [db] property tests over span windows: owner isolation, citations, total order, no operator
+injection (ADR-0039 revision, phase 2 unit 4b).
 
 @trace INV-SEARCH-1 INV-SEARCH-2 INV-SEARCH-4 INV-SEARCH-7 FR-SEARCH-3 FR-SEARCH-7
 
-Each example empties the search and test-only ingest tables, builds generated corpora (one English material
-per owner), embeds them through the real job handler and the fake embed service, and checks the invariant.
+Each example empties the search and test-only ingest tables, builds generated corpora (the same English
+material sha256 for both owners, so they share a pack id and an overlay id), embeds them through the real job
+handler and the fake embed service, and checks the invariant on the candidates and the legacy search().
 """
 
 from __future__ import annotations
@@ -17,23 +19,13 @@ from hypothesis import HealthCheck, given, settings
 from hypothesis import strategies as st
 from sqlalchemy import text
 
-from .conftest import (
-    EmbedServer,
-    Pg,
-    World,
-    add_material,
-    embed_material,
-    hash_vector,
-    need,
-    reset,
-    world,
-)
+from .conftest import EmbedServer, Pg, World, add_material, embed_material, need, reset, world
 
 pytestmark = pytest.mark.anyio
 
 WORDS = ("block", "chain", "miner", "wallet", "key", "hash", "node", "ledger", "token", "fork")
 FILL = " Nothing further is said here about anything else in this paragraph."
-SHA = {"ivan": "c" * 64, "anna": "d" * 64}
+SHA = "c" * 64
 PROPS = settings(
     max_examples=15, deadline=None, suppress_health_check=[HealthCheck.function_scoped_fixture]
 )
@@ -59,22 +51,28 @@ async def w(
         await built.engine.dispose()
 
 
-async def _build(w: World, corpus: list[tuple[str, int, list[str]]]) -> dict[str, Any]:
-    """One English material per owner that has spans; spans in page order. Returns owner → ingest id."""
+async def _build(w: World, corpus: list[tuple[str, int, list[str]]]) -> list[str]:
+    """The same material for each owner that has spans; spans in page order. Returns the owners built."""
     await reset(w)
-    ingests: dict[str, Any] = {}
+    built = []
     for owner in ("ivan", "anna"):
-        own = [(page, " ".join(words) + FILL) for o, page, words in corpus if o == owner]
-        spans = sorted(own, key=lambda s: s[0])
-        if spans:
-            ingests[owner] = await add_material(w, owner, SHA[owner], spans, config_id="book-en")
-            await embed_material(w, ingests[owner], SHA[owner])
-    return ingests
+        own = sorted([(page, " ".join(words) + FILL) for o, page, words in corpus if o == owner],
+                     key=lambda s: s[0])
+        if own:
+            await embed_material(w, await add_material(w, owner, SHA, own, config_id="book-en"), SHA)
+            built.append(owner)
+    return built
 
 
 async def _rows(w: World, sql: str, **params: Any) -> list[Any]:
     async with w.engine.connect() as conn:
         return list(await conn.execute(text(sql), params))
+
+
+async def _candidates(w: World, owner: str, query: str, **kw: Any) -> Any:
+    store = need("reader.search.store")
+    async with w.engine.connect() as conn:
+        return await store.candidates(conn, w.users[owner], query, limit=50, **kw)
 
 
 @PROPS
@@ -84,36 +82,31 @@ async def test_owner_isolation(w: World, corpus: list[tuple[str, int, list[str]]
     await _build(w, corpus)
     for owner in ("ivan", "anna"):
         uid = w.users[owner]
+        own = {str(r[0]) for r in await _rows(
+            w, "SELECT locator FROM search_span_vectors WHERE owner_id = :o", o=uid)}
+        found = await _candidates(w, owner, query)
+        fused = await _candidates(w, owner, query, use_rrf=True)
         result = await store.search(w.engine, uid, query, k=50)
-        async with w.engine.connect() as conn:
-            fts = await store.fts_list(conn, uid, query, None)
-            dense = await store.dense_list(conn, uid, hash_vector(query), None)
-        ids = {r.chunk_id for r in result.results} | set(fts) | set(dense)
-        rows = await _rows(w, "SELECT owner_id FROM search_chunks WHERE id = ANY(:i)", i=list(ids))
-        owners = {r[0] for r in rows}
-        assert owners <= {uid}, owner
-        assert all(r.material_sha256 == SHA[owner] for r in result.results)
+        emitted = {h.locator for h in [*found.hits, *fused.hits]} | {h.span_id for h in result.results}
+        assert emitted <= own, owner
 
 
 @PROPS
 @given(corpus=corpora, query=queries)
 async def test_citations_resolve(w: World, corpus: list[tuple[str, int, list[str]]], query: str) -> None:
+    from reader.ingest import views
+
     store = need("reader.search.store")
-    ingests = await _build(w, corpus)
-    for owner, ingest in ingests.items():
-        result = await store.search(w.engine, w.users[owner], query, k=50)
-        rows = await _rows(w, "SELECT seq, page, text FROM material_spans WHERE ingest_id = :i", i=ingest)
-        spans = {int(r[0]): (int(r[1]), str(r[2])) for r in rows}
+    for owner in await _build(w, corpus):
+        uid = w.users[owner]
+        found = await _candidates(w, owner, query)
+        result = await store.search(w.engine, uid, query, k=50)
+        async with w.engine.connect() as conn:
+            texts = await views.active_span_texts(conn, uid, [h.locator for h in found.hits])
+        assert set(texts) == {h.locator for h in found.hits}
         for hit in result.results:
-            seqs = [int(s.split(":")[1]) for s in hit.span_ids]
-            assert all(s.split(":")[0] == SHA[owner] for s in hit.span_ids)
-            assert all(spans[q][0] == hit.page for q in seqs)
-            assert int(hit.span_id.split(":")[1]) in seqs
-            page_text = " ".join(
-                " ".join(body.split()) for q, (page, body) in sorted(spans.items()) if page == hit.page
-            )
-            (chunk,) = await _rows(w, "SELECT text FROM search_chunks WHERE id = :i", i=hit.chunk_id)
-            assert chunk[0] in page_text
+            page, body = texts[hit.span_id]
+            assert hit.page == page and hit.span_ids == [hit.span_id] and body.startswith(hit.snippet)
 
 
 @PROPS
@@ -121,34 +114,12 @@ async def test_citations_resolve(w: World, corpus: list[tuple[str, int, list[str
 async def test_order_is_total_and_deterministic(
     w: World, corpus: list[tuple[str, int, list[str]]], query: str
 ) -> None:
-    store = need("reader.search.store")
     await _build(w, corpus)
-    uid = w.users["ivan"]
-    first = await store.search(w.engine, uid, query, k=50)
-    second = await store.search(w.engine, uid, query, k=50)
-    assert [h.chunk_id for h in first.results] == [h.chunk_id for h in second.results]
-    async with w.engine.connect() as conn:
-        dense = await store.dense_list(conn, uid, hash_vector(query), None)
-        fts = await store.fts_list(conn, uid, query, None)
-        vector = store.vector_literal(hash_vector(query))
-        distance = {
-            int(r[0]): float(r[1])
-            for r in await conn.execute(
-                text("SELECT id, embedding <=> CAST(:q AS vector) FROM search_chunks WHERE id = ANY(:i)"),
-                {"q": vector, "i": dense},
-            )
-        }
-        rank = {
-            int(r[0]): float(r[1])
-            for r in await conn.execute(
-                text(
-                    "SELECT id, ts_rank_cd(fts, CAST(:t AS tsquery)) FROM search_chunks WHERE id = ANY(:i)"
-                ),
-                {"t": need("reader.search.fusion").tsquery_text(sorted(set(query.split()))), "i": fts},
-            )
-        }
-    assert dense == sorted(dense, key=lambda i: (round(distance[i], 9), i))  # (distance, id)
-    assert fts == sorted(fts, key=lambda i: (-rank[i], i))  # (ts_rank_cd desc, id)
+    for kw in ({}, {"use_rrf": True}):
+        assert await _candidates(w, "ivan", query, **kw) == await _candidates(w, "ivan", query, **kw)
+    plain = await _candidates(w, "ivan", query)
+    keys = [(-round(h.score, 9), h.locator) for h in plain.hits]
+    assert keys == sorted(keys)  # equal distances fall back to the locator
 
 
 operator_text = st.lists(
@@ -162,18 +133,28 @@ async def test_full_text_matches_shared_lexemes_and_never_raises(
     w: World, corpus: list[tuple[str, int, list[str]]], query: str
 ) -> None:
     store = need("reader.search.store")
+    errors = need("reader.search.errors")
     await _build(w, corpus)
     uid = w.users["ivan"]
-    async with w.engine.connect() as conn:
-        got = await store.fts_list(conn, uid, query, None)
+
+    async def down(_query: str) -> list[float]:
+        raise errors.EmbedUnavailable()
+
+    real = store.embed_query
+    store.embed_query = down  # the degraded path: the full-text list alone
+    try:
+        found = await _candidates(w, "ivan", query)
+    finally:
+        store.embed_query = real
     expected = {
-        int(r[0])
+        str(r[0])
         for r in await _rows(
             w,
-            "SELECT id FROM search_chunks WHERE owner_id = :o"
+            "SELECT locator FROM search_span_vectors WHERE owner_id = :o"
             " AND tsvector_to_array(fts) && tsvector_to_array(to_tsvector('english', :q))",
             o=uid,
             q=query,
         )
     }
-    assert set(got) == expected
+    assert {h.locator for h in found.hits} == expected
+    assert found.degraded

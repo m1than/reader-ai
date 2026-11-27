@@ -2152,10 +2152,18 @@ tasks:
         review of fb7b926: 2 blocking fixed with tests (L2 titles count in the per-material allowance and a node
         past it is titled by its outline number where L1 is not served, a heading-only walk; the slice-limit case
         with a 999-character query kills slice_limit_cap_only), plus the Book built in linear time (8.06 s to
-        0.02 s at 45,000 spans and 20,000 nodes). Remaining: unit 4b (the embed job on overlays with seal ->
-        request_activation -> try_activate, candidates over search_span_vectors as the production Corpus, the
-        legacy search() Hit contract, status/ensure on overlay keys, the ingest/uploads/obs paired key changes;
-        FR-SEARCH-3, -5..-10, -20 revisions), unit 5 (judge.find
+        0.02 s at 45,000 spans and 20,000 nodes). Unit 4b done: FR-SEARCH-3, -5, -6, -7, -9, -10, -20,
+        INV-SEARCH-1, -2, -3, -7, VEC-SEARCH-1, -2, -4, -5 promoted (the reviewed texts stay in proposed_revisions,
+        each requirement entry names its text as normative and records deviations): span windows, the embed job
+        on vector overlays (seal -> request_activation -> try_activate in the run transaction, refusals roll
+        back, purge-during-build test), store.candidates over search_span_vectors, corpus.StoreCorpus as find's
+        Corpus, the legacy search() Hit with span_ids [locator] (contract test against tutor.jobs.Hit), status /
+        ensure / worker start on [owner_id, overlay_id], ensure_material bound as SRV-INGEST's SEARCH_ENSURE;
+        paired: ingest import enqueue, uploads.embed_key, obs runs/attributes (SRV-INGEST FR-INGEST-13, SRV-OBS
+        FR-OBS-20 notes; VEC-OBS-3 key regenerated). Process deviation: the 4b code was committed WIP (a1826b7)
+        before its tests because the review interruption asked for a clean commit; tests and spec followed in
+        the next commit. test_search_local.py (the chunk bench) is skipped until NFR-SEARCH-1/-2/-4 are
+        promoted. Remaining: unit 5 (judge.find
         waiter with the process-wide LISTEN, owner judge_ctx, /api/find and /api/open, FR-SEARCH-28, -33,
         INV-SEARCH-11, -14; binding the policy load into api and worker start and obs.versions.POLICY)",
       needs: [V.kl-ingest-packs, V.spike.judge-gate, V.kl-agent-judges, V.kl-obs-spans],

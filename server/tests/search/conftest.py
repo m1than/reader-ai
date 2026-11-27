@@ -269,9 +269,25 @@ async def add_material(
             )
         from ingest.packseed import seal  # FR-SEARCH-5: the ingest's pack, active (searched) by default
 
-        await seal(conn, owner, ingest, sha)
+        pid = await seal(conn, owner, ingest, sha)
+        language = LANGUAGES.get(config_id or "")
+        if language is not None:  # FR-SEARCH-6: the language reaches search through the profile overlay
+            await _head_profile(conn, owner, pid, {"language": language})
     result: uuid.UUID = ingest
     return result
+
+
+LANGUAGES = {"book-ru": "ru", "book-en": "en"}  # reader.yaml's languages in CONFIG
+
+
+async def _head_profile(conn: Any, owner: uuid.UUID, pid: str, values: dict[str, Any]) -> None:
+    from reader.ingest import manifest, overlays
+
+    oid = await overlays.build_profile(conn, owner, pid, values)
+    seq, top = await manifest.head(conn, owner)
+    elements = {e["pack_id"]: dict(e["overlays"]) for e in top["packs"]}
+    elements[pid]["profile"] = oid
+    await manifest.append(conn, owner, seq, manifest.make_entry(elements), "test_fixture")
 
 
 async def set_profile(w: World, handle: str, sha: str, license_: str, language: str = "en") -> None:
@@ -297,28 +313,28 @@ async def scalar(engine: Any, sql: str, **params: Any) -> Any:
         return (await conn.execute(text(sql), params)).scalar()
 
 
-async def embed_material(w: World, ingest: uuid.UUID, sha: str) -> None:
-    """Run the `search.embed` handler for one ingest inside one transaction, as the worker does."""
+async def embed_args(w: World, owner: uuid.UUID, sha: str) -> Any:
+    """The material's current `search.embed` args (its buildable pack's current vector overlay)."""
+    jobs = need("reader.search.jobs")
+    async with w.engine.connect() as conn:
+        args = await jobs.current_args(conn, owner, sha)
+    assert args is not None
+    return args
+
+
+async def run_embed(w: World, args: Any) -> None:
+    """Run the `search.embed` handler inside one transaction, as the worker does."""
     jobs = need("reader.search.jobs")
     from reader.jobs.model import JobContext
 
-    args = jobs.embed_args(sha, ingest, fts_config=await current_fts(w, sha))
     async with w.engine.begin() as conn:
         await jobs.handle_embed(args, conn, JobContext(job_id=1, key="test", attempts=0))
 
 
-async def current_fts(w: World, sha: str) -> str:
-    params = need("reader.search.params")
-    config_id = await scalar(w.engine, "SELECT config_id FROM materials WHERE sha256 = :s", s=sha)
-    language = {"book-ru": "ru", "book-en": "en"}.get(config_id or "")
-    value: str = params.fts_config_for(language)
-    return value
-
-
-async def page_of(engine: Any, chunk_id: int) -> int:
-    """Test-only: a chunk's page (moved out of reader.search.store, which has no owner-free reads)."""
-    page: int = await scalar(engine, "SELECT page FROM search_chunks WHERE id = :i", i=chunk_id)
-    return page
+async def embed_material(w: World, ingest: uuid.UUID, sha: str) -> None:
+    """Embed the material of an ingest for that ingest's owner (its buildable pack's current overlay)."""
+    owner = await scalar(w.engine, "SELECT owner_id FROM ingests WHERE id = :i", i=ingest)
+    await run_embed(w, await embed_args(w, owner, sha))
 
 
 async def reset(w: World) -> None:
@@ -328,6 +344,6 @@ async def reset(w: World) -> None:
 
     async with w.engine.begin() as conn:
         await conn.execute(text("SET LOCAL session_replication_role = replica"))
-        for table in ("search_chunks", "search_embeds", "manifest_entries", "pending_activations",
-                      "material_spans", "base_packs", "ingests", "materials"):
+        for table in ("search_span_vectors", "pack_profiles", "overlays", "manifest_entries",
+                      "pending_activations", "material_spans", "base_packs", "ingests", "materials"):
             await conn.execute(text(f"DELETE FROM {table}"))

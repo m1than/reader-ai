@@ -55,6 +55,9 @@ async def test_chunk_and_batch_spans(w: World, embed_server: EmbedServer) -> Non
         assert span.parent is not None and span.parent.span_id == root_id
         assert span.status.status_code.name == "OK"
     assert BOOK not in json.dumps([dict(s.attributes) for s in spans])
+    (job,) = [s for s in spans if s.name == "job search.embed"]  # FR-OBS-5 (e): the handler's annotation
+    assert job.attributes["reader.ingest_id"] == str(ingest)
+    assert job.attributes["reader.material_sha256"] == MAT_RU
 
 
 async def test_a_succeeded_embed_is_the_imports_late_end(w: World, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -76,7 +79,9 @@ async def test_a_succeeded_embed_is_the_imports_late_end(w: World, monkeypatch: 
     pages = [(p, f"страница {p}." + FILL) for p in range(1, 13)]
     ingest = await add_material(w, "ivan", MAT_RU, pages)
     with obs_setup("worker"):
-        payload = {"ingest_id": str(ingest), "material_sha256": MAT_RU}
+        async with w.engine.connect() as conn:
+            current = await search_jobs.current_args(conn, w.users["ivan"], MAT_RU)
+        payload = current.model_dump(mode="json")  # {owner_id, pack_id, overlay_id} (SRV-SEARCH FR-SEARCH-5)
         await search_jobs.after_end(w.engine, payload, "dead")  # only a succeeded embed is an end
         assert enqueued == []
         await embed_material(w, ingest, MAT_RU)
@@ -86,7 +91,7 @@ async def test_a_succeeded_embed_is_the_imports_late_end(w: World, monkeypatch: 
     async with w.engine.connect() as conn:
         args = runs.RunsArgs(kind="ingest", id=str(ingest), end=2)
         snap = await runs.snapshot(conn, args, datetime.now(UTC))
-        embedded = (await conn.execute(text("SELECT embedded_at FROM search_embeds WHERE ingest_id = :i"),
-                                       {"i": ingest})).scalar_one()
+        embedded = (await conn.execute(text("SELECT sealed_at FROM overlays WHERE overlay_id = :v"),
+                                       {"v": current.overlay_id})).scalar_one()
     assert snap.metrics["chunks"] == 12 and snap.metrics["pages"] == 12 and snap.end == 2
     assert snap.end_ms == int(embedded.timestamp() * 1000)  # the late end's time, not the import's

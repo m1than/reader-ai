@@ -90,19 +90,19 @@ async def test_import_enqueues_search_embed_for_its_ingest(pg: Pg, tmp_path: Pat
     """FR-INGEST-13 (paired with SRV-SEARCH FR-SEARCH-5): the import enqueues search.embed for its ingest."""
     from sqlalchemy import text
 
-    from reader.search.jobs import embed_args
-    from reader.search.store import fts_config_of
+    from reader.search.jobs import current_args
 
     async with world(pg, tmp_path) as w:
         await receive(w, tar())
         await w.work()
-        ingest_id = await w.scalar("SELECT id FROM ingests")
+        owner = await w.scalar("SELECT owner_id FROM ingests")
         rows = await w.rows("SELECT args, outcome FROM job_keys WHERE kind = 'search.embed'")
         assert len(rows) == 1
         args, outcome = rows[0]
-        async with w.engine.connect() as conn:
-            fts = await fts_config_of(conn, MATERIAL_SHA, ingest_id)
-            expected = embed_args(MATERIAL_SHA, ingest_id, fts).model_dump(mode="json")
+        async with w.engine.connect() as conn:  # SRV-SEARCH FR-SEARCH-5: {owner_id, pack_id, overlay_id}
+            current = await current_args(conn, owner, MATERIAL_SHA)
+            assert current is not None
+            expected = current.model_dump(mode="json")
             todo = (
                 "SELECT count(*) FROM procrastinate_jobs WHERE task_name = 'search.embed' AND status = 'todo'"
             )

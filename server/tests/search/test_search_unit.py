@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 import functools
 import hashlib
+import itertools
 import json
 import subprocess
 import sys
@@ -30,59 +31,41 @@ from .conftest import REPO, EmbedServer, HashEncoder, fixture, need
 # ---- FR-SEARCH-3, VEC-SEARCH-2 ----------------------------------------------------------------------------
 
 
-def test_chunking_matches_the_fixture() -> None:
+def test_windows_match_the_fixture() -> None:
     chunking = need("reader.search.chunking")
     data = fixture("chunking.yaml")
     p = data["params"]
-    spans = [chunking.Span(s["seq"], s["page"], s["text"]) for s in data["spans"]]
-    chunks = chunking.chunk_spans(spans, size=p["size"], overlap=p["overlap"], min_len=p["min"])
-    got = [
-        {
-            "page": c.page, "start": c.char_start, "end": c.char_stop, "text": c.text,
-            "span_seqs": list(c.span_seqs), "primary_seq": c.primary_seq,
-        }
-        for c in chunks
-    ]
-    assert got == data["expected"]
-    assert [c.chunk_no for c in chunks] == list(range(len(chunks)))
+    for case in data["cases"]:
+        got = chunking.windows(case["text"], p["size"], p["overlap"], p["min"], prefix=case.get("prefix"))
+        assert [{"window_no": x.window_no, "start": x.char_start, "stop": x.char_stop, "passage": x.passage}
+                for x in got] == case["expected"], case["name"]
 
 
-def test_chunking_production_parameters_are_the_spikes() -> None:
+def test_window_production_parameters_are_the_spikes() -> None:
     params = need("reader.search.params")
+    chunking = need("reader.search.chunking")
     assert (params.CHUNK_SIZE, params.CHUNK_OVERLAP, params.CHUNK_MIN) == (1200, 200, 80)
+    (short,) = chunking.windows("x" * 79, 1200, 200, 80)  # a span under 80 characters is one window
+    assert (short.char_start, short.char_stop) == (0, 79)
+    prefixed = chunking.windows("y " * 2000, 1200, 200, 80, prefix="Глава 1 / Раздел 2")
+    assert len(prefixed) > 3 and all(len(x.passage) <= 1200 for x in prefixed)
+    assert chunking.windows(" \n\t", 1200, 200, 80) == []
 
 
-def test_primary_span_is_the_largest_overlap() -> None:
+@given(st.text(alphabet="ab \nц", max_size=3000), st.sampled_from([None, "", "Ch 1", "Глава " * 20]))
+def test_windows_cover_the_span_and_stay_within_the_size(body: str, prefix: str | None) -> None:
     chunking = need("reader.search.chunking")
-    spans = [chunking.Span(0, 1, "ab"), chunking.Span(1, 1, "cdefghij")]
-    (chunk,) = chunking.chunk_spans(spans, size=20, overlap=5, min_len=4)
-    assert chunk.span_seqs == (0, 1)
-    assert chunk.primary_seq == 1
-
-
-def test_primary_span_tie_goes_to_the_first() -> None:
-    chunking = need("reader.search.chunking")
-    spans = [chunking.Span(0, 1, "abcd"), chunking.Span(1, 1, "efgh")]  # 4 characters each in the window
-    (chunk,) = chunking.chunk_spans(spans, size=20, overlap=5, min_len=4)
-    assert chunk.span_seqs == (0, 1)
-    assert chunk.primary_seq == 0
-
-
-@given(
-    st.lists(
-        st.tuples(st.integers(1, 3), st.text(alphabet="ab \nц", max_size=60)), min_size=0, max_size=12
-    )
-)
-def test_chunking_is_deterministic_and_covers_its_spans(raw: list[tuple[int, str]]) -> None:
-    chunking = need("reader.search.chunking")
-    spans = [chunking.Span(i, page, body) for i, (page, body) in enumerate(sorted(raw, key=lambda r: r[0]))]
-    first = chunking.chunk_spans(spans, size=20, overlap=5, min_len=4)
-    assert first == chunking.chunk_spans(spans, size=20, overlap=5, min_len=4)
-    by_seq = {s.seq: s for s in spans}
-    for chunk in first:
-        assert len(chunk.text) >= 4
-        assert chunk.span_seqs and chunk.primary_seq in chunk.span_seqs
-        assert all(by_seq[q].page == chunk.page for q in chunk.span_seqs)
+    got = chunking.windows(body, 1200, 200, 80, prefix=prefix)
+    assert got == chunking.windows(body, 1200, 200, 80, prefix=prefix)
+    if not body.strip():
+        assert got == []
+        return
+    assert got[0].char_start == 0 and got[-1].char_stop == len(body)
+    for before, after in itertools.pairwise(got):
+        assert after.char_start < before.char_stop  # overlapping: no gap
+    head = "" if prefix is None else prefix + "\n"
+    for x in got:
+        assert len(x.passage) <= 1200 and x.passage == head + body[x.char_start : x.char_stop]
 
 
 # ---- FR-SEARCH-7, INV-SEARCH-6, VEC-SEARCH-1 ---------------------------------------------------------------
@@ -91,6 +74,9 @@ def test_chunking_is_deterministic_and_covers_its_spans(raw: list[tuple[int, str
 def test_rrf_matches_the_fixture() -> None:
     fusion = need("reader.search.fusion")
     data = fixture("rrf.yaml")
+    policy = need("reader.search.policy").load().data
+    params = need("reader.search.params")
+    assert (policy["rrf_k"], policy["w_dense"]) == (data["k"], params.W_DENSE) == (fusion.RRF_K, 5)
     for case in data["cases"]:
         fused = fusion.rrf(case["dense"], case["fts"], k=data["k"], w_dense=case.get("w_dense", 1))
         got = [{"id": f.id, "score": round(f.score, 9)} for f in fused]
@@ -142,6 +128,11 @@ def test_lexemes_are_quoted_explicitly(lexemes: list[str], expected: str) -> Non
 
 def test_params_sha256_covers_parameters_model_and_language() -> None:
     params = need("reader.search.params")
+    jobs = need("reader.search.jobs")
+    inputs = jobs.vector_inputs("russian")
+    assert inputs == {"model": params.MODEL_ID, "params_sha256": params.params_sha256("russian"),
+                      "prefix_overlay_id": None}
+    assert jobs.BUILDER == "search.vectors/1"
     ru, en = params.params_sha256("russian"), params.params_sha256("english")
     assert ru != en and len(ru) == 64 and int(ru, 16) >= 0
     assert params.params_sha256("russian") == ru
@@ -168,7 +159,8 @@ def test_job_kind_is_declared() -> None:
     jobs = need("reader.search.jobs")
     (kind,) = jobs.JOB_KINDS
     assert kind.name == "search.embed"
-    assert kind.key == ("ingest_id", "model", "params_sha256")
+    assert kind.key == ("owner_id", "overlay_id")
+    assert set(kind.args.model_fields) == {"owner_id", "pack_id", "overlay_id"}
     assert kind.max_attempts == 3 and kind.timeout_s == 3600
     errors = need("reader.search.errors")
     import asyncpg
@@ -192,8 +184,34 @@ def test_job_kind_is_declared() -> None:
 
 def test_status_map_matches_the_fixture() -> None:
     params = need("reader.search.params")
-    for row in fixture("status-map.yaml")["rows"]:
-        assert params.status_from(row["job"], row["embeds_row"]) == row["status"], row
+    rows = fixture("status-map.yaml")["rows"]
+    assert {(r["job"], r["overlay"]) for r in rows} == {
+        (j, o) for j in ("none", "queued", "running", "succeeded", "dead")
+        for o in ("none", "building", "sealed", "active", "collected")
+    }
+    for row in rows:
+        assert params.status_from(row["job"], row["overlay"]) == row["status"], row
+
+
+# ---- FR-SEARCH-7: the compatibility Hit against SRV-TUTOR's Protocol ---------------------------------------
+
+
+def test_hit_satisfies_the_tutor_protocol() -> None:
+    store = need("reader.search.store")
+    from typing import get_type_hints
+
+    from reader.tutor import jobs as tutor_jobs
+
+    loc = "spn:" + "a" * 64
+    hits = [store.Hit(material_sha256="a" * 64, page=1, span_id=f"{loc}:p1:0-{n}",
+                      span_ids=[f"{loc}:p1:0-{n}"], snippet="s", score=1.0 - n / 10, dense_rank=n,
+                      fts_rank=None)
+            for n in (3, 1, 2)]
+    protocol = {name for name in vars(tutor_jobs.Hit) if not name.startswith("_")}
+    assert protocol == {"span_id", "span_ids"}
+    hints = get_type_hints(store.Hit)
+    assert hints["span_id"] is str and hints["span_ids"] == list[str]
+    assert tutor_jobs.candidate_span_ids(hits) == [h.span_id for h in hits]  # locators in rank order
 
 
 # ---- FR-SEARCH-1, INV-SEARCH-8: the service protocol with a fake encoder --------------------------------

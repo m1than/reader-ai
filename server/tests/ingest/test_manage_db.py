@@ -469,6 +469,14 @@ async def test_delete_busy_cases(pg: Pg, tmp_path: Path) -> None:
         await refused()
         await execute(w, "DELETE FROM uploads")
         # a running import key
+        from sqlalchemy import text
+
+        from .packseed import seal
+
+        async with w.engine.begin() as conn:  # SRV-SEARCH FR-SEARCH-9: the embed key is the buildable pack's
+            ingest_id = (await conn.execute(text("SELECT id FROM ingests WHERE owner_id = :o"),
+                                            {"o": w.users["ivan"]})).scalar_one()
+            await seal(conn, w.users["ivan"], ingest_id, MATERIAL_SHA)
         async with w.engine.connect() as conn:
             import_key = await uploads.import_key(conn, MATERIAL_SHA)
             embed_key = await uploads.embed_key(conn, MATERIAL_SHA)

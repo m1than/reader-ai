@@ -898,7 +898,10 @@ requirements:
           paging until no token remains, then `link-to-run` in batches of at most 100 ids (round 8: 120 in one call
           is 400; 100 + 20 linked all 120). Re-linking a linked trace is accepted (measured).
           An import has one end per job that writes its traces: end 1 when `ingest.import` succeeds, and end
-          1 + n when its n-th `search.embed` succeeds (n = the ingest's `search_embeds` rows; paired FR-INGEST-26),
+          1 + n when its n-th `search.embed` succeeds (n = the ingest's `search_embeds` rows; paired FR-INGEST-26;
+          SRV-SEARCH ADR-0039 revision, phase 2 unit 4b, paired: n = the sealed vector overlays of the ingest's
+          pack, and the embed's job root carries `reader.ingest_id` / `reader.material_sha256` by FR-OBS-5 (e)
+          from its handler, since its args are {owner_id, pack_id, overlay_id} and `JOB_ARGS` copies none),
           so the embed's traces, which start after the import's end, are linked late, and that step's metrics
           carry `chunks` (code review of 8466329).
       (e) Ends the Run: `runs/update` with status and end time, then, LAST, `set-tag`
@@ -910,7 +913,9 @@ requirements:
           (e)) is incomplete: the next attempt or end finds it in (a) and redoes (c)-(e), so an incomplete Run is
           completed, never duplicated.
       (f) Metrics, from the snapshot: compile as VEC-OBS-5 `runs.compile.metrics` (the ledger's keys); import
-          `pages` (the material's page count), `spans`, `chunks` (the ingest's `search_chunks` rows),
+          `pages` (the material's page count), `spans`, `chunks` (the ingest's `search_chunks` rows; since
+          SRV-SEARCH's ADR-0039 revision, paired: the window rows of the pack's newest sealed vector overlay,
+          read through `reader.search.store.embed_facts`, whose `sealed_at` is the late end's time),
           `import_s` (the `ingest.import` key's `finished_at` − `created_at`) and `pages_per_min_import`
           (pages ÷ import_s × 60; left out when import_s is 0). Each lookup is scoped to the ingest's owner.
       Every value is an id, an enum, a model id from pricing.yaml, a sha256 or a number. A failure is logged by

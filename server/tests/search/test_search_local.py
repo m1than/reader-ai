@@ -26,13 +26,22 @@ from typing import Any
 
 import pytest
 
-from .conftest import DOCKER, FIXTURES, Pg, World, add_material, need, page_of, scalar, world
+from .conftest import DOCKER, FIXTURES, Pg, World, add_material, need, scalar, world
 
 PDF = os.environ.get("READER_PILOT_PDF", "")
 pytestmark = [
     pytest.mark.anyio,
     pytest.mark.skipif(not (PDF and DOCKER), reason="opt-in [local]: READER_PILOT_PDF and a docker daemon"),
+    # ADR-0039 (phase 2, unit 4b): this bench measured the legacy chunk path, which no longer exists; it is
+    # rewritten over span candidates with NFR-SEARCH-1, -2, -4's promotion (the evaluation, owner's go)
+    pytest.mark.skip(reason="legacy chunk bench, rewritten with NFR-SEARCH-1/-2/-4 (ADR-0039 revision)"),
 ]
+
+
+async def page_of(engine: Any, chunk_id: int) -> int:
+    """A legacy chunk's page (the bench above reads search_chunks)."""
+    page: int = await scalar(engine, "SELECT page FROM search_chunks WHERE id = :i", i=chunk_id)
+    return page
 IMAGE = "reader-embed:local"
 V1 = Path(__file__).resolve().parents[3] / "spikes" / "embeddings-local" / "questions.yaml"
 TMPFS = "/tmp:size=64m,uid=10003"  # noqa: S108 - a container tmpfs, as compose.yaml declares it
