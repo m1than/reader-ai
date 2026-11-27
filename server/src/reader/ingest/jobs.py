@@ -201,11 +201,10 @@ async def _enqueue_embed(conn: AsyncConnection, owner: uuid.UUID, material_sha25
     """
     from reader.ingest import packs
     from reader.jobs import running
-    from reader.search.jobs import KIND as EMBED_KIND
-    from reader.search.jobs import args_for
+    from reader.search.jobs import args_for, enqueue_current
 
     args = await args_for(conn, owner, packs.pack_id(material_sha256, version))
-    await running().enqueue(EMBED_KIND, args)
+    await enqueue_current(running(), args)  # a key dead behind a rolled-back import is requeued
 
 
 async def _deleted(conn: AsyncConnection, material_sha256: str) -> bool:

@@ -645,7 +645,7 @@ async def test_an_uncommitted_pack_is_not_ready_and_the_import_requeues_a_dead_k
     jobs, errors = need("reader.search.jobs"), need("reader.search.errors")
     owner = w.users["ivan"]
     missing = jobs.EmbedArgs(owner_id=owner, pack_id="e" * 64, overlay_id="f" * 64)
-    with pytest.raises(errors.IngestNotReady):  # the import that enqueued it rolled back (or has not committed)
+    with pytest.raises(errors.IngestNotReady):  # its import rolled back or has not committed
         await run_embed(w, missing)
     async with _queue(w, pg) as queue:
         await add_material(w, "ivan", MAT_RU, RU_SPANS)
@@ -676,14 +676,13 @@ async def test_refusals_make_no_embed_call(w: World, embed_server: EmbedServer) 
 
 async def test_newest_by_converter_order_where_pack_ids_disagree(w: World) -> None:
     from ingest.packseed import R2, R3, add_pack
-
     from reader.ingest import PARSE_CONFIGS, manifest
     from reader.ingest.artifact import pack_id
 
     jobs = need("reader.search.jobs")
     sha = next(s for s in (c * 64 for c in "0123456789cdef")
                if pack_id(s, dict(PARSE_CONFIGS[R3])) < pack_id(s, dict(PARSE_CONFIGS[R2])))
-    await add_material(w, "ivan", sha, [(1, "Miners validate blocks." + FILL_EN)], config_id=None)
+    await add_material(w, "ivan", sha, [(1, "Miners validate blocks." + FILL_EN)], config_id="book-x")
     owner = w.users["ivan"]
     async with w.engine.begin() as conn:
         newer = await add_pack(conn, owner, sha, R3, [(1, "text", "Blocks link by hash." + FILL_EN)])

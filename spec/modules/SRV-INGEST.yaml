@@ -557,9 +557,10 @@ requirements:
       `IngestNotReady` (transient) while the pack has no committed row, and the import's enqueue goes through
       `reader.search.jobs.enqueue_current(queue, args)`, which requeues the key when it is dead (the ensure rule),
       so a key that died behind a rolled-back import runs again with the next successful import. The restore
-      route passes `ensure_material` bound to the api's `Jobs` and calls it after its transaction commits, so a
-      restored material whose key is dead is requeued from the api too (FR-INGEST-39's restore; SRV-SEARCH
-      FR-SEARCH-9). test_search_db.py, test_search_manage.py (SRV-SEARCH).
+      route passes a no-op ensure to `manifest.restore_material` and, after its transaction commits, calls
+      SRV-SEARCH's `ensure_material` with the api's `Jobs` for every restored material (it enqueues only a
+      current overlay that is neither sealed nor collected and requeues a dead key), so a restored material whose
+      key is dead is requeued from the api too (FR-INGEST-39's restore; SRV-SEARCH FR-SEARCH-9). test_search_db.py, test_search_manage.py (SRV-SEARCH).
       The job kind `ingest.import` is declared in `reader.ingest.jobs.KINDS`.
       - **args:** `{material_sha256, converter_version, artifact_id, material_id}`.
       - **key:** `[material_sha256, converter_version]`.

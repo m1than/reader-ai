@@ -161,6 +161,8 @@ async def _build(conn: AsyncConnection, args: EmbedArgs, pack: views.Pack, fts_c
 async def handle_embed(args: EmbedArgs, conn: AsyncConnection, ctx: JobContext) -> None:
     del ctx
     owner, pid = args.owner_id, args.pack_id
+    if await packs.material_of(conn, owner, pid) is None:  # the import that enqueued it has not committed
+        raise IngestNotReady
     pack = await buildable(conn, owner, pid)
     if pack is None or await overlay_for(conn, owner, pid) != args.overlay_id:
         raise SearchError("overlay_superseded")
@@ -273,6 +275,15 @@ async def _ensure_args(queue: Any, args: EmbedArgs, state: str) -> None:
         await queue.enqueue(KIND, args)
 
 
+async def enqueue_current(queue: Any, args: EmbedArgs) -> Any:
+    """The import's enqueue (SRV-INGEST FR-INGEST-13): a key that died behind a rolled-back import of the same
+    pack is requeued, because the next successful import has the same key."""
+    result = await queue.enqueue(KIND, args)
+    if getattr(result, "kind", None) == "dead":
+        result = await queue.requeue_dead(KIND, job_key(args))
+    return result
+
+
 async def ensure(queue: Any, owner_id: uuid.UUID, material_sha256: str) -> str:
     """The CLI's ensure: the resulting status, or `no_ingest` without a buildable pack."""
     async with queue.engine.connect() as conn:
@@ -284,17 +295,20 @@ async def ensure(queue: Any, owner_id: uuid.UUID, material_sha256: str) -> str:
     return await _status(queue, args)
 
 
-async def ensure_material(conn: AsyncConnection, owner_id: uuid.UUID, material_sha256: str) -> None:
+async def ensure_material(
+    conn: AsyncConnection, owner_id: uuid.UUID, material_sha256: str, queue: Any = None
+) -> None:
     """SRV-INGEST's `SEARCH_ENSURE` seam (restore, profile reconcile): the material's current key enqueued, or
-    requeued when dead, through the worker's queue; in a process without a worker (the api) it is skipped and
-    the worker-start hook enqueues it."""
+    requeued when dead, through `queue` (the api's Jobs from its restore route), else the worker's queue; in a
+    process with neither it is skipped and the worker-start hook enqueues it."""
     from reader.jobs import JobError, running
 
-    try:
-        queue = running()
-    except JobError:
-        log.info("search enqueue_skipped no_worker")
-        return
+    if queue is None:
+        try:
+            queue = running()
+        except JobError:
+            log.info("search enqueue_skipped no_worker")
+            return
     if queue.catalog.get(KIND) is None:
         return
     args = await current_args(conn, owner_id, material_sha256)

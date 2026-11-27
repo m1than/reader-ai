@@ -498,6 +498,10 @@ async def restore_material(ctx: Ctx) -> Response:
         return error(400, "bad_request")
     owner = ctx.signed_in.id
     material_id = ctx.request.path_params["material_id"]
+
+    async def after_commit(_conn: AsyncConnection, _owner: uuid.UUID, _sha: str) -> None:
+        """The in-transaction ensure is replaced by the one below: a job must not see the material deleted."""
+
     async with ctx.engine.begin() as conn:
         sha = await _material_sha(ctx, conn, material_id)
         if sha is None:
@@ -508,11 +512,15 @@ async def restore_material(ctx: Ctx) -> Response:
         if row.deleted_at is not None:
             await conn.execute(text("UPDATE materials SET deleted_at = NULL WHERE id = :i"), {"i": row.id})
             restored = await manage.restore_courses(conn, owner, material_id)  # after the material is live
-            await manifest.restore_material(conn, owner, sha)  # FR-INGEST-39: after FR-INGEST-31's locks
+            await manifest.restore_material(conn, owner, sha, after_commit)  # FR-INGEST-39, after the locks
             await audit.record(conn, owner, "material.restore", material_id, {"courses": len(restored)})
-        return JSONResponse(
-            {"material": await _entry(ctx, conn, material_id, sha), "restored_courses": restored}
-        )
+        body = {"material": await _entry(ctx, conn, material_id, sha), "restored_courses": restored}
+    if row.deleted_at is not None:  # SRV-SEARCH FR-SEARCH-9 via the api's Jobs: a dead key is requeued
+        from reader.search.jobs import ensure_material
+
+        async with ctx.engine.connect() as conn:
+            await ensure_material(conn, owner, sha, getattr(ctx.request.app.state, "jobs", None))
+    return JSONResponse(body)
 
 
 # ---- packs and owner purge (FR-INGEST-45): the route enqueues, the job deletes ----
