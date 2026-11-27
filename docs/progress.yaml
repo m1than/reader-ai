@@ -2094,6 +2094,23 @@ tasks:
         (ties by ordinal, unequal counts orphan); cards cut at read time; property test over recorded model outputs.
         FR-INGEST-6, -10, -11, -12, -13, -14, -17, -31, -32; INV-INGEST-1, -2; VEC-INGEST-1, -3, -4; FR-PIPELINE-7;
         FR-TUTOR-5/8; INV-SEARCH-2; VEC-LESSON-3; FR-NOTEBOOK-2, INV-NOTEBOOK-2; FR-FRESH-3, -8, -10, VEC-FRESH-7" }
+  - { id: V.kl-active-view-readers, stage: V, kind: module, track: engineering, status: in_progress,
+      needs: [V.kl-ingest-packs],
+      branch: V/kl-active-view-readers,
+      notes: "Paired readers for FR-INGEST-40 gate (d), INV-INGEST-16 (promoted, test_readers_scan_unit.py
+        passes). Read helpers in reader.ingest.views (active_pack(s), pack_of_ingest, live_packs, pack_spans,
+        span_ids, page_stats, span_chars, pack_outline, ingest_facts, active_span_texts); span ids minted per
+        pack: <sha>:<seq> for LEGACY_VERSIONS, the locator for r3. Moved, one commit each, with a paired note and
+        a two-pack (r2 + r3) [db] test: SRV-PIPELINE FR-PIPELINE-2 (source.py), SRV-TUTOR FR-TUTOR-5 (store
+        spans_by_ids; legacy ids on an r3 pack through spanref.resolve), SRV-PLAN FR-PLAN-9/-13 (store.py),
+        SRV-OBS FR-OBS-17 (summary.py; runs.py via ingest_facts), SRV-FRESH FR-FRESH-2 (store.py, live.py),
+        SRV-SEARCH FR-SEARCH-5 (jobs.py, store.py; legacy chunk path kept). Fixtures seal their ingests through
+        server/tests/ingest/packseed.py. Open for the coordinator: (1) the legacy embed now calls try_activate,
+        since readers see only active packs and nothing else activates a fresh import before the next worker
+        start; a new material is therefore usable after its embed, not right after import; (2) an r3 pack's
+        locator ids reach SRV-PIPELINE (refused by SRV-LESSON's span_ref until its paired change and
+        FR-PIPELINE-7's quote_sha256) and the tutor's citations (no quote_sha256 yet); (3) no deep-reviewer round
+        run on this branch yet." }
   - { id: V.kl-search-find, stage: V, kind: module, track: ai, status: todo,
       needs: [V.kl-ingest-packs, V.spike.judge-gate, V.kl-agent-judges, V.kl-obs-spans],
       what: "SRV-SEARCH revision (~800–1,200 lines): the B6 cascade (routes, facets file, greedy selection under a token
