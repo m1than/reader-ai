@@ -187,3 +187,60 @@ describe('grouping details (FR-NOTEBOOK-2, code review 2026-11-23)', () => {
     ]);
   });
 });
+
+// r3_gates_revision (FR-NOTEBOOK-2 revised): locators `spn:<64 hex>:p<page>:<start>-<end>[#n]` group by material.
+const Q = '1'.repeat(64); // synthetic quote hash; never shown
+const loc = (m: string, page: number, range: string, title?: string) => ({
+  span: `spn:${m}:p${page}:${range}`,
+  quote_sha256: Q,
+  page,
+  ...(title === undefined ? {} : { material_title: title }),
+});
+
+describe('locator citations (FR-NOTEBOOK-2, r3_gates_revision)', () => {
+  it('groups the pages of one material into one entry', async () => {
+    const { groupCitations } = await load(() => import('./citations'));
+    expect(groupCitations).toBeTypeOf('function');
+    const refs = groupCitations([loc(M, 69, '0-120', 'Book'), loc(M, 70, '0-80'), loc(M, 75, '10-40'), loc(M, 70, '81-90')]);
+    expect(refs).toEqual([{ kind: 'text', text: 'Book, pp. 69–70, 75' }]);
+  });
+
+  it('merges a legacy id and a locator of the same material', async () => {
+    const { groupCitations } = await load(() => import('./citations'));
+    expect(groupCitations).toBeTypeOf('function');
+    expect(groupCitations([span(M, 4, 12, 'Book'), loc(M, 14, '0-5')])).toEqual([{ kind: 'text', text: 'Book, pp. 12, 14' }]);
+  });
+
+  it('keeps two materials apart in first-use order and counts an empty span by its page', async () => {
+    const { groupCitations } = await load(() => import('./citations'));
+    expect(groupCitations).toBeTypeOf('function');
+    const refs = groupCitations([loc(N, 3, '40-40#0', 'Second'), loc(M, 9, '0-1', 'First'), loc(N, 4, '0-2')]);
+    expect(refs).toEqual([
+      { kind: 'text', text: 'Second, pp. 3–4' },
+      { kind: 'text', text: 'First, p. 9' },
+    ]);
+  });
+
+  it('falls back to "source" and the first 8 hex of the material, never "source spn:"', async () => {
+    const { groupCitations } = await load(() => import('./citations'));
+    expect(groupCitations).toBeTypeOf('function');
+    expect(groupCitations([loc(M, 70, '0-120')])).toEqual([{ kind: 'text', text: 'source cccccccc, p. 70' }]);
+  });
+
+  it('uses a title found on a legacy citation for the locator citations of its material', async () => {
+    const { groupCitations, lessonTitles } = await load(() => import('./citations'));
+    expect(lessonTitles).toBeTypeOf('function');
+    const titles = lessonTitles([{ metadata: { reader: { claims: [{ citations: [span(M, 1, 2, 'Book')] }] } } }]);
+    expect(groupCitations([loc(M, 70, '0-120')], titles)).toEqual([{ kind: 'text', text: 'Book, p. 70' }]);
+  });
+
+  it('keeps the last-colon rule for `spn:` followed by fewer than 64 hex', async () => {
+    const { groupCitations } = await load(() => import('./citations'));
+    expect(groupCitations).toBeTypeOf('function');
+    const refs = groupCitations([{ span: 'spn:abc:p1:0-3', page: 1 }, { span: 'spn:abc:p2:4-9', page: 2 }]);
+    expect(refs).toEqual([
+      { kind: 'text', text: 'source spn:abc:, p. 1' },
+      { kind: 'text', text: 'source spn:abc:, p. 2' },
+    ]);
+  });
+});

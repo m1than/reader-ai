@@ -183,6 +183,9 @@ requirements:
       `route` cells list their `source_refs` the same way; `erratum` cells also show `source_ref` and the correction.
       A single grouping function is shared with SRV-TUTOR's Ask panel (FR-TUTOR-11). The reference list is an `ol`
       with `role="list"` (list style none). [unit] [story]
+      **Promoted revision (r3_gates_revision, unit h):** this id's text in `proposed_revisions` (a locator
+      `spn:<64 hex>:…` groups by its 64-hex material; any other span keeps the last-colon rule) replaces the
+      material rule above. citations.test.ts.
   - id: FR-NOTEBOOK-3
     text: >-
       Open findings: an `open` cell whose `status` is not `answered` is shown with a visible marker that reads its
