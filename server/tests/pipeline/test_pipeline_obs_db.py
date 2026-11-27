@@ -16,7 +16,7 @@ import pytest
 
 from obs.conftest import finished, obs_setup
 
-from .conftest import CANARY, FIXTURES, Pg, load_yaml, pipeline_env, scripts_for
+from .conftest import CANARY, FIXTURES, Pg, lab_modes, load_yaml, pipeline_env, scripts_for
 
 pytestmark = pytest.mark.anyio
 CASES = {c["name"]: c for c in load_yaml(FIXTURES / "loop-cases.yaml")["cases"]}
@@ -54,9 +54,10 @@ async def _run(pg: Pg, tmp: Path, case: dict[str, Any], monkeypatch: pytest.Monk
     with obs_setup("worker") as (handle, memory):
         async with pipeline_env(pg, tmp, labs=case.get("labs", "pass"), floors=RESERVES) as env:
             env.cli.scripts[:] = scripts_for(case["results"], case.get("labs", "pass"))
+            env.verify.modes[:] = lab_modes(case["results"])
             await env.import_plan()
             run = await env.compile()
-            for _ in range(4):
+            for _ in range(6):
                 await env.work()
             course = await env.scalar("SELECT course_id FROM lessons WHERE id = :l", l=env.lesson)
             spans = finished(handle, memory)
@@ -81,8 +82,10 @@ async def test_loop_spans_root_keys_and_assessments(pg: Pg, tmp_path: Path, monk
     ids = pytest.importorskip("reader.obs.ids")
     run, lesson, course, spans, enqueued = await _run(pg, tmp_path, CASES["one-loop-converges"], monkeypatch)
     roots = [s for s in spans if s.name in ("job pipeline.stage", "job pipeline.verify")]
-    assert len(roots) == 8  # draft, fact_check, review, revise, fact_check, review, findings, lab_verification
-    assert [s.name for s in roots].count("job pipeline.verify") == 1
+    # SRV-PIPELINE's ADR-0039 order (paired note in this spec's header): draft, rules, lab, fact_check, revise,
+    # rules, lab, fact_check, review, findings; the obs call sites fire once per check run
+    assert len(roots) == 10
+    assert [s.name for s in roots].count("job pipeline.verify") == 2
     # FR-OBS-12 (e): the queue's marker under every pipeline root, carrying the run as the session.
     markers = _children(spans, "job.session")
     assert sorted(p.context.span_id for _, p in markers) == sorted(r.context.span_id for r in roots)
@@ -108,36 +111,47 @@ async def test_loop_spans_root_keys_and_assessments(pg: Pg, tmp_path: Path, monk
         == [(6, 5), (6, 6)]
     assert all(c.status.status_code.name == "OK" for c, _ in claims)
     assert {p.attributes["reader.stage"] for _, p in claims} == {"fact_check"}
-    ((lab, lab_root),) = _children(spans, "verify.lab")
-    assert (lab.attributes["reader.kernel.cells"], lab.attributes["reader.kernel.cells_ok"]) == (1, 1)
-    assert isinstance(lab.attributes["reader.kernel.ms"], int) and lab.attributes["reader.kernel.ms"] >= 0
-    assert lab.status.status_code.name == "OK"
+    labs = _children(spans, "verify.lab")
+    assert len(labs) == 2
+    for lab, _ in labs:
+        assert (lab.attributes["reader.kernel.cells"], lab.attributes["reader.kernel.cells_ok"]) == (1, 1)
+        assert isinstance(lab.attributes["reader.kernel.ms"], int) and lab.attributes["reader.kernel.ms"] >= 0
+        assert lab.status.status_code.name == "OK"
     # FR-OBS-14: the exact obs.feedback args, each pointing at the trace of the job that computed it.
     assert all(kind == "obs.feedback" and delay == 60 for kind, _, delay in enqueued)
     got = sorted((a["name"], a["value"], json.dumps(a["metadata"], sort_keys=True)) for _, a, _ in enqueued)
     assert got == sorted([
         ("fact_check.passed", False, json.dumps({"claims": 6, "supported": 5})),
         ("fact_check.passed", True, json.dumps({"claims": 6, "supported": 6})),
-        ("verify.lab_passed", True, json.dumps({"cells": 1, "cells_ok": 1})),
-        ("verify.passed", True, "{}"),
+        *[("verify.lab_passed", True, json.dumps({"cells": 1, "cells_ok": 1}))] * 2,
+        *[("verify.passed", True, "{}")] * 2,
     ])
-    trace_of = {(a["name"], a["value"]): ids.derive_trace_id(a["job_id"], a["key"]) for _, a, _ in enqueued}
+    traces: dict[tuple[str, bool], set[Any]] = {}
+    for _, a, _ in enqueued:
+        traces.setdefault((a["name"], a["value"]), set()).add(ids.derive_trace_id(a["job_id"], a["key"]))
     fact_traces = {p.context.trace_id for _, p in claims}
-    assert {trace_of[("fact_check.passed", False)], trace_of[("fact_check.passed", True)]} == fact_traces
-    assert trace_of[("verify.lab_passed", True)] == lab_root.context.trace_id
-    assert trace_of[("verify.passed", True)] == lab_root.context.trace_id
+    assert traces[("fact_check.passed", False)] | traces[("fact_check.passed", True)] == fact_traces
+    lab_traces = {root.context.trace_id for _, root in labs}
+    assert traces[("verify.lab_passed", True)] == lab_traces
+    assert traces[("verify.passed", True)] == lab_traces
     assert all(a["key"].startswith("pipeline.") for _, a, _ in enqueued)
     _no_canary(spans, enqueued)
 
 
 async def test_failed_labs_assess_false(pg: Pg, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    _, _, _, spans, enqueued = await _run(pg, tmp_path, CASES["lab-fails-after-clean-review"], monkeypatch)
-    ((lab, _),) = _children(spans, "verify.lab")
-    assert (lab.attributes["reader.kernel.cells"], lab.attributes["reader.kernel.cells_ok"]) == (1, 0)
-    by_name = {a["name"]: a for _, a, _ in enqueued}
-    assert (by_name["verify.lab_passed"]["value"], by_name["verify.lab_passed"]["metadata"]) == (
-        False, {"cells": 1, "cells_ok": 0})
-    assert (by_name["verify.passed"]["value"], by_name["verify.passed"]["metadata"]) == (False, {})
-    assert (by_name["fact_check.passed"]["value"], by_name["fact_check.passed"]["metadata"]) == (
-        True, {"claims": 6, "supported": 6})
+    # SRV-PIPELINE's ADR-0039 order: the draft's lab fails (a loop), the revised notebook's lab passes
+    _, _, _, spans, enqueued = await _run(pg, tmp_path, CASES["lab-fail-loops-back"], monkeypatch)
+    labs = sorted(
+        (lab.attributes["reader.kernel.cells"], lab.attributes["reader.kernel.cells_ok"])
+        for lab, _ in _children(spans, "verify.lab")
+    )
+    assert labs == [(1, 0), (1, 1)]
+    got = sorted((a["name"], a["value"], json.dumps(a["metadata"], sort_keys=True)) for _, a, _ in enqueued)
+    assert got == sorted([
+        ("verify.lab_passed", False, json.dumps({"cells": 1, "cells_ok": 0})),
+        ("verify.lab_passed", True, json.dumps({"cells": 1, "cells_ok": 1})),
+        ("verify.passed", False, "{}"),
+        ("verify.passed", True, "{}"),
+        ("fact_check.passed", True, json.dumps({"claims": 6, "supported": 6})),
+    ])
     _no_canary(spans, enqueued)

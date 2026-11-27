@@ -60,7 +60,7 @@ def test_override_kernel_body_comes_from_the_x_kernel_source(tmp_path: Path) -> 
 def test_override_binds_reader_yaml_only_into_the_server_roles_and_agent_proxy(tmp_path: Path) -> None:
     override, real_dir = _override(tmp_path, ["ivan"])
     bound = {s for s, body in override["services"].items() if "volumes" in body}
-    assert bound == {"api", "worker", "mcp", "agent-proxy"}
+    assert bound == {"api", "worker", "worker-judge", "mcp", "agent-proxy"}  # FR-CLI-4 amended (ADR-0039 B7b)
     for service in bound:
         (volume,) = override["services"][service]["volumes"]
         assert volume == {

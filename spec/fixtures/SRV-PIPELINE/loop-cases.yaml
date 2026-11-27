@@ -1,10 +1,19 @@
-# VEC-PIPELINE-2: the compile loop as a decision table (FR-PIPELINE-5, -6, -9). A fake provider returns the listed
-# results in order. Each case fixes the reserve per model stage (`reserves`) so the table does not depend on the
-# estimator; `cost` is each stage's reported cost. "clean" = 0 unsupported/contradicted verdicts and 0 blocking findings.
-# `findings` and `lab_verification` run after the last model step whenever a notebook exists; the terminal state is
-# decided after lab verification (FR-PIPELINE-6). `open_cells` counts the cells the findings step appends.
-# Task budgets are per run (SRV-AGENT FR-AGENT-9); stages map to tasks as draft→draft, revise→draft,
-# fact_check→fact_check, adversarial_review→review. `task_budgets` defaults to the example reader.yaml values.
+# VEC-PIPELINE-2: the compile loop as a decision table for the four-check order (FR-PIPELINE-5, -6, -23; ADR-0039
+# decisions 18 and 22). A fake provider returns the model results listed, in order; rules and lab verification make
+# no call. After `draft` the checks run cheapest first: rules → lab_verification → fact_check → adversarial_review;
+# the first failing check sends the run to `revise` (one loop, a rule failure included) when fewer than 3 loops ran
+# and the loop rule admits it; the fourth failure stops the run (stop loop_limit). `findings` is the last step whenever
+# a notebook exists; it computes G2 and the terminal state (FR-PIPELINE-6).
+#
+# Result flags: on a draft or revise, `rules: fail` (claim c1 uncited: `claim_uncited`) and `lab: fail` (lab
+# verification of that notebook fails); on fact_check, `unsupported`/`contradicted` counts; on adversarial_review,
+# `blocking`/`nonblocking` counts; `refused: <code>` marks a model step refused before its call (FR-AGENT-9: no CLI
+# call, no compile_steps row). `loop_fits` lists the loop rule's answers in order for the pure test (null = fits);
+# the [db] test gets the same answers from SRV-AGENT's real `loop_fits_limit` and the costs below.
+# `reserves` fix the reserve per model stage (the stage floors) so the table does not depend on the estimator; a loop's
+# planned sum is then revise 1.14 + fact_check 0.38 + review 0.75 = 2.27. Task budgets are per run (FR-AGENT-9);
+# stages map to tasks as draft→draft, revise→draft, fact_check→fact_check, adversarial_review→review.
+# `open_cells` counts the open cells the findings step appends (check_not_run cells are blocking).
 defaults:
   cap: 8.00
   reserves: { draft: 0.94, fact_check: 0.38, adversarial_review: 0.75, revise: 1.14 }
@@ -15,78 +24,145 @@ cases:
       - { stage: draft, cost: 0.6 }
       - { stage: fact_check, cost: 0.24, unsupported: 0, contradicted: 0 }
       - { stage: adversarial_review, cost: 0.5, blocking: 0, nonblocking: 2 }
-    labs: pass
-    expect_stages: [draft, fact_check, adversarial_review, findings, lab_verification]
+    expect_stages: [draft, rules, lab_verification, fact_check, adversarial_review, findings]
     expect_state: converged
+    expect_stop: passed
+    expect_loops: 0
     expect_open_cells: { blocking: 0, nonblocking: 2 }
-  - name: one-loop-converges
+  - name: one-loop-converges         # the first failure is the fact-check; the review never saw the draft
     results:
       - { stage: draft, cost: 0.6 }
       - { stage: fact_check, cost: 0.24, unsupported: 1, contradicted: 0 }
-      - { stage: adversarial_review, cost: 0.5, blocking: 2, nonblocking: 3 }
       - { stage: revise, cost: 0.87 }
       - { stage: fact_check, cost: 0.24, unsupported: 0, contradicted: 0 }
       - { stage: adversarial_review, cost: 0.52, blocking: 0, nonblocking: 1 }
-    labs: pass
-    expect_stages: [draft, fact_check, adversarial_review, revise, fact_check, adversarial_review, findings, lab_verification]
+    loop_fits: [null]
+    expect_stages: [draft, rules, lab_verification, fact_check, revise, rules, lab_verification, fact_check,
+      adversarial_review, findings]
     expect_state: converged
-    expect_open_cells: { blocking: 0, nonblocking: 1 }   # only the last review's findings count
-  - name: not-converged-after-loop   # the measured outcome of both spike runs (spikes/compile-cost)
+    expect_stop: passed
+    expect_loops: 1
+    expect_open_cells: { blocking: 0, nonblocking: 1 }
+  - name: four-checks-fail-once      # ADR-0039: a draft that fails each check once stops at the fourth failure
     results:
-      - { stage: draft, cost: 0.6 }
-      - { stage: fact_check, cost: 0.24, unsupported: 0, contradicted: 0 }
-      - { stage: adversarial_review, cost: 0.5, blocking: 3, nonblocking: 13 }
+      - { stage: draft, cost: 0.6, rules: fail }
+      - { stage: revise, cost: 0.87, lab: fail }
       - { stage: revise, cost: 0.87 }
-      - { stage: fact_check, cost: 0.24, unsupported: 2, contradicted: 1 }
-      - { stage: adversarial_review, cost: 0.52, blocking: 3, nonblocking: 15 }
-    labs: pass
-    expect_stages: [draft, fact_check, adversarial_review, revise, fact_check, adversarial_review, findings, lab_verification]
+      - { stage: fact_check, cost: 0.24, unsupported: 1, contradicted: 0 }
+      - { stage: revise, cost: 0.87 }
+      - { stage: fact_check, cost: 0.24, unsupported: 0, contradicted: 0 }
+      - { stage: adversarial_review, cost: 0.5, blocking: 1, nonblocking: 2 }
+    loop_fits: [null, null, null]
+    expect_stages: [draft, rules, revise, rules, lab_verification, revise, rules, lab_verification, fact_check,
+      revise, rules, lab_verification, fact_check, adversarial_review, findings]
     expect_state: open_findings
-    expect_open_cells: { blocking: 6, nonblocking: 15 }   # 3 review + 3 fact-check (blocking) + 15 non-blocking
-    expect_refusals: []                                    # the example task budgets fit two worst-case calls each
-  - name: lab-fails-after-clean-review
+    expect_stop: loop_limit
+    expect_loops: 3
+    expect_open_cells: { blocking: 1, nonblocking: 2 }
+  - name: rule-failure-counts        # a rule failure is a return to revise like any other
     results:
-      - { stage: draft, cost: 0.6 }
+      - { stage: draft, cost: 0.6, rules: fail }
+      - { stage: revise, cost: 0.87 }
       - { stage: fact_check, cost: 0.24, unsupported: 0, contradicted: 0 }
       - { stage: adversarial_review, cost: 0.5, blocking: 0, nonblocking: 0 }
-    labs: assert_fails
-    expect_stages: [draft, fact_check, adversarial_review, findings, lab_verification]
-    expect_state: open_findings          # decided after lab verification
-    expect_open_cells: { blocking: 1, nonblocking: 0 }
-  - name: budget-stops-before-revise
-    cap: 2.4
-    results:
-      - { stage: draft, cost: 0.6 }
-      - { stage: fact_check, cost: 0.24, unsupported: 1, contradicted: 0 }
-      - { stage: adversarial_review, cost: 0.5, blocking: 1, nonblocking: 0 }
-    # spent 1.34 settled; revise reserve 1.14 → 2.48 > 2.4: refused before the call, no reservation row
-    labs: pass
-    expect_stages: [draft, fact_check, adversarial_review, findings, lab_verification]
-    expect_state: budget_exhausted
-    expect_refusals: [budget_exhausted]
-    expect_open_cells: { blocking: 2, nonblocking: 0 }
-  - name: budget-stops-before-draft
-    cap: 0.5
-    results: []
-    labs: none
-    expect_stages: []                    # no notebook exists, so findings and lab_verification do not run
-    expect_state: budget_exhausted
-    expect_refusals: [budget_exhausted]
+    loop_fits: [null]
+    expect_stages: [draft, rules, revise, rules, lab_verification, fact_check, adversarial_review, findings]
+    expect_state: converged
+    expect_stop: passed
+    expect_loops: 1
     expect_open_cells: { blocking: 0, nonblocking: 0 }
-  - name: task-budget-stops-second-review   # the review task has room for one call only
-    task_budgets: { draft: 4.00, fact_check: 2.00, review: 1.20 }
+  - name: fourth-failure-at-rules    # the later checks never ran on the final notebook: one check_not_run each
     results:
-      - { stage: draft, cost: 0.6 }
-      - { stage: fact_check, cost: 0.24, unsupported: 1, contradicted: 0 }
-      - { stage: adversarial_review, cost: 0.5, blocking: 2, nonblocking: 0 }
+      - { stage: draft, cost: 0.6, rules: fail }
+      - { stage: revise, cost: 0.87, rules: fail }
+      - { stage: revise, cost: 0.87, rules: fail }
+      - { stage: revise, cost: 0.87, rules: fail }
+    loop_fits: [null, null, null]
+    expect_stages: [draft, rules, revise, rules, revise, rules, revise, rules, findings]
+    expect_state: open_findings
+    expect_stop: loop_limit
+    expect_loops: 3
+    expect_open_cells: { blocking: 4, nonblocking: 0 }   # 1 rule failure + 3 check_not_run
+  - name: lab-fail-loops-back
+    results:
+      - { stage: draft, cost: 0.6, lab: fail }
       - { stage: revise, cost: 0.87 }
       - { stage: fact_check, cost: 0.24, unsupported: 0, contradicted: 0 }
-    # review spent 0.5 in this run; second review reserve 0.75 → 1.25 > 1.20: refused, the run goes on to findings
-    labs: pass
-    expect_stages: [draft, fact_check, adversarial_review, revise, fact_check, findings, lab_verification]
+      - { stage: adversarial_review, cost: 0.5, blocking: 0, nonblocking: 0 }
+    loop_fits: [null]
+    expect_stages: [draft, rules, lab_verification, revise, rules, lab_verification, fact_check, adversarial_review,
+      findings]
+    expect_state: converged
+    expect_stop: passed
+    expect_loops: 1
+    expect_open_cells: { blocking: 0, nonblocking: 0 }
+  - name: loop-cap-before-first-loop
+    cap: 2.0
+    results:
+      - { stage: draft, cost: 0.6 }
+      - { stage: fact_check, cost: 0.24, unsupported: 1, contradicted: 0 }
+    # spent 0.84 + the loop's 2.27 = 3.11 > 2.0: the loop does not start
+    loop_fits: [run]
+    expect_stages: [draft, rules, lab_verification, fact_check, findings]
     expect_state: budget_exhausted
-    expect_refusals: [task_budget_exhausted]
-    expect_open_cells: { blocking: 2, nonblocking: 0 }   # the last review is the first one
+    expect_stop: loop_cap
+    expect_refusals: [loop_cap_run]
+    expect_loops: 0
+    expect_open_cells: { blocking: 2, nonblocking: 0 }   # the unsupported claim + review check_not_run
+  - name: loop-cap-before-third-loop
+    cap: 4.5
+    results:
+      - { stage: draft, cost: 0.6, rules: fail }
+      - { stage: revise, cost: 0.87, lab: fail }
+      - { stage: revise, cost: 0.87 }
+      - { stage: fact_check, cost: 0.24, unsupported: 1, contradicted: 0 }
+    # before loop 3: spent 2.58 + 2.27 = 4.85 > 4.5
+    loop_fits: [null, null, run]
+    expect_stages: [draft, rules, revise, rules, lab_verification, revise, rules, lab_verification, fact_check,
+      findings]
+    expect_state: budget_exhausted
+    expect_stop: loop_cap
+    expect_refusals: [loop_cap_run]
+    expect_loops: 2
+    expect_open_cells: { blocking: 2, nonblocking: 0 }
+  - name: loop-cap-task              # the review task cannot hold the loop's review reserve (0.75 > 0.70)
+    task_budgets: { draft: 4.00, fact_check: 2.00, review: 0.70 }
+    results:
+      - { stage: draft, cost: 0.6 }
+      - { stage: fact_check, cost: 0.24, unsupported: 1, contradicted: 0 }
+    loop_fits: [task]
+    expect_stages: [draft, rules, lab_verification, fact_check, findings]
+    expect_state: budget_exhausted
+    expect_stop: loop_cap
+    expect_refusals: [loop_cap_task]
+    expect_loops: 0
+    expect_open_cells: { blocking: 2, nonblocking: 0 }
+  - name: budget-refused-mid-loop    # the loop fit by its estimate; the revise cost more, so the review is refused
+    cap: 4.0
+    results:
+      - { stage: draft, cost: 0.6 }
+      - { stage: fact_check, cost: 0.24, unsupported: 1, contradicted: 0 }
+      - { stage: revise, cost: 2.5 }
+      - { stage: fact_check, cost: 0.24, unsupported: 0, contradicted: 0 }
+      - { stage: adversarial_review, refused: budget_exhausted }   # 3.58 + 0.75 = 4.33 > 4.0
+    loop_fits: [null]
+    expect_stages: [draft, rules, lab_verification, fact_check, revise, rules, lab_verification, fact_check,
+      findings]                                    # the refused step writes no compile_steps row
+    expect_state: budget_exhausted
+    expect_stop: budget_refused
+    expect_refusals: [budget_exhausted]
+    expect_loops: 1
+    expect_open_cells: { blocking: 1, nonblocking: 0 }   # review check_not_run
+  - name: budget-stops-before-draft
+    cap: 0.5
+    results:
+      - { stage: draft, refused: budget_exhausted }
+    expect_stages: []                    # no notebook exists, so findings does not run
+    expect_state: budget_exhausted
+    expect_stop: budget_refused
+    expect_refusals: [budget_exhausted]
+    expect_loops: 0
+    expect_open_cells: { blocking: 0, nonblocking: 0 }
   - name: task-budget-is-per-run   # the same lesson's earlier run spent 1.02 on review; this run starts fresh
     task_budgets: { draft: 4.00, fact_check: 2.00, review: 1.20 }
     prior_runs_spent: { review: 1.02 }
@@ -94,10 +170,11 @@ cases:
       - { stage: draft, cost: 0.6 }
       - { stage: fact_check, cost: 0.24, unsupported: 0, contradicted: 0 }
       - { stage: adversarial_review, cost: 0.5, blocking: 0, nonblocking: 0 }
-    labs: pass
-    expect_stages: [draft, fact_check, adversarial_review, findings, lab_verification]
+    expect_stages: [draft, rules, lab_verification, fact_check, adversarial_review, findings]
     expect_state: converged
+    expect_stop: passed
     expect_refusals: []
+    expect_loops: 0
     expect_open_cells: { blocking: 0, nonblocking: 0 }
   - name: invalid-fact-report-exhausts-attempts   # spike finding 2: a summary without per-claim verdicts, 3 times
     results:
@@ -106,7 +183,7 @@ cases:
       - { stage: fact_check, cost: 0.24, invalid: summary_only }
       - { stage: fact_check, cost: 0.24, invalid: summary_only }
     labs: none
-    expect_stages: [draft, fact_check]   # fact_check's job reaches `dead` after max_attempts 3
+    expect_stages: [draft, rules, lab_verification, fact_check]   # fact_check's job is dead after 3 attempts
     expect_state: stage_failed
     expect_open_cells: { blocking: 0, nonblocking: 0 }
     expect_spent: 1.32                   # every attempt's spend is settled in the ledger
@@ -116,34 +193,45 @@ cases:
       - { stage: draft, cost: 0.6 }
       - { stage: fact_check, cost: 0.24, unsupported: 0, contradicted: 0 }
       - { stage: adversarial_review, cost: 0.5, blocking: 0, nonblocking: 0 }
-    labs: pass
-    expect_stages: [draft, fact_check, adversarial_review, findings, lab_verification]
+    expect_stages: [draft, rules, lab_verification, fact_check, adversarial_review, findings]
     expect_state: converged
     expect_spent: 1.34                   # the failed attempt settles at 0
     expect_open_cells: { blocking: 0, nonblocking: 0 }
 recompiles:
-  # A recompile is a new run of the same lesson after `not-converged-after-loop` finished. A model step whose
-  # input_sha256 matches a completed step of any earlier run of the lesson is reused: no provider call, cost 0.
+  # A recompile is a new run of the same lesson after `one-loop-converges` finished. A model step (or a rule check)
+  # whose input_sha256 matches a completed step of any earlier run of the lesson is reused: no provider call, cost 0.
+  # Lab verification is never reused. A loop whose revise and checks are all reusable starts without loop_fits_limit.
   - name: recompile-unchanged
-    prior: not-converged-after-loop
+    prior: one-loop-converges
     changed: []
     expect_provider_calls: 0
-    expect_reused: [draft, fact_check, adversarial_review, revise, fact_check, adversarial_review]
+    expect_reused: [draft, rules, fact_check, revise, rules, fact_check, adversarial_review]
     expect_spent: 0
-    expect_state: open_findings
+    expect_state: converged
   - name: recompile-after-review-prompt-change
-    prior: not-converged-after-loop
+    prior: one-loop-converges
     changed: [adversarial_review.prompt_version]
     results:   # what the fake provider returns for the steps that are not reused
-      - { stage: adversarial_review, cost: 0.5, blocking: 1, nonblocking: 4 }
-      - { stage: revise, cost: 0.87 }
+      - { stage: adversarial_review, cost: 0.5, blocking: 0, nonblocking: 2 }
+    expect_reused: [draft, rules, fact_check, revise, rules, fact_check]
+    expect_provider_calls: 1
+    expect_spent: 0.5
+    expect_planned: [[review]]           # FR-PIPELINE-23: the review's input changed with its prompt
+    expect_state: converged
+  - name: recompile-after-fact-check-prompt-change
+    prior: one-loop-converges
+    changed: [fact_check.prompt_version]
+    results:   # the same outcomes as before, from the new prompt
+      - { stage: fact_check, cost: 0.24, unsupported: 1, contradicted: 0 }
       - { stage: fact_check, cost: 0.24, unsupported: 0, contradicted: 0 }
-      - { stage: adversarial_review, cost: 0.52, blocking: 0, nonblocking: 2 }
-    expect_reused: [draft, fact_check]   # the second fact_check judges a new notebook, so it reruns
-    expect_provider_calls: 4
-    expect_spent: 2.13
+    # the loop's revise is reusable (same notebook and report), its fact_check is not, so every later check is
+    # planned too, even though the review then turns out reusable
+    expect_planned: [[fact_check, review]]
+    expect_reused: [draft, rules, revise, rules, adversarial_review]
+    expect_provider_calls: 2
+    expect_spent: 0.48
     expect_state: converged
   - name: recompile-after-source-change
-    prior: not-converged-after-loop
+    prior: one-loop-converges
     changed: [source]
-    expect_reused: []                    # the source sha256 is in every model step's input_sha256
+    expect_reused: []                    # the source sha256 is in every model step's and rule check's input

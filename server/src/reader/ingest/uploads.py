@@ -95,8 +95,9 @@ def derive(
 
 
 async def import_key(conn: AsyncConnection, sha256: str) -> str:
-    """The `ingest.import` key: (sha256, the material's frozen version or CONVERTER_VERSION)."""
-    return key_for(sha256, await store.frozen_version(conn, sha256) or ingest.CONVERTER_VERSION)
+    """The `ingest.import` key: (sha256, the material's newest imported version or CONVERTER_VERSION);
+    FR-INGEST-19's revised keys wait for SRV-SEARCH's overlay keys (paired)."""
+    return key_for(sha256, await store.newest_version(conn, sha256) or ingest.CONVERTER_VERSION)
 
 
 async def _key_code(conn: AsyncConnection, kind: str, key: str) -> tuple[bool, str | None]:

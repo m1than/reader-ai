@@ -1,0 +1,192 @@
+# VEC-OBS-7 (SRV-OBS FR-OBS-36, -37; ADR-0039 B9). Hand-derived: one recorded `find` on the owner channel with a
+# sliced judge (it judged the first 20 of 26 returned cards), and one pack build and one link run, each as what the
+# caller hands the reader.obs helpers (`open` and `done`, in the helpers' own parameter names) and the span the
+# AllowListExporter exports (validated keys plus the derived mlflow.spanType and mlflow.spanOutputs).
+#
+# `cards` holds 26 cards of every id form, in rank order; the documents of a span are its first 25 (index 0..24):
+# the 26th card is counted in reader.find.cards and listed nowhere. `uri` is the expected document uri: clear only
+# for a PDF span locator `spn:<64 hex>:p<page>:<start>-<end>[#<n>]`, `fnd:<uuid>` and `les:<uuid>`; every other id
+# (sec: outline paths, src:, con: and non-PDF spn: ids, and an spn: id in upper case) is reader://h/<sha256 of the
+# id's UTF-8 bytes>, since it may carry heading, file-path or term text of the material.
+#
+# The stage-7 case: the question's one identifier "Протокол  Х" resolves to the term concept `con:term:протокол-х`
+# (Cyrillic text in its id). The route span carries the identifier count, the sha256 of the sorted, normalised
+# identifiers joined by U+001F (normalised: NFKC, casefolded, whitespace runs collapsed to one space, trimmed) and
+# the concept only as reader://h/<sha256 of the concept id>. No exported byte holds "протокол" or "Протокол".
+#
+# `catalogs`: the code-declared sets this vector assumes (SRV-SEARCH's route ids, the facets file, reader.yaml
+# sectors); tests pass them to reader.obs.attributes.Catalogs.
+version: 1
+
+catalogs:
+  find_routes: [exact_lookup, thematic_overview, current_state, fact_check]
+  facet_values: { role: [definition, procedure, example], form: [text, table, figure] }
+  topic_paths: [networks/protocols, networks/security]
+
+hidden_text: ["протокол", "Протокол", "Глава", "Протоколы", "bashir", "intro.md", "materials/"]
+
+cards:
+  - { id: "spn:1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f:p12:100-250", uri: "reader://spn:1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f:p12:100-250", sha256: "0000000000000000000000000000000000000000000000000000000000000000", tokens: 100, judged: true }
+  - { id: "spn:1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f:p12:251-400#2", uri: "reader://spn:1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f:p12:251-400#2", sha256: "0101010101010101010101010101010101010101010101010101010101010101", tokens: 101, judged: true }
+  - { id: "fnd:3f2c1a9e-0b4d-4c8e-9f12-6a7b8c9d0e1f", uri: "reader://fnd:3f2c1a9e-0b4d-4c8e-9f12-6a7b8c9d0e1f", sha256: "0202020202020202020202020202020202020202020202020202020202020202", tokens: 102, judged: true }
+  - { id: "les:4f2c1a9e-0b4d-4c8e-9f12-6a7b8c9d0e1f", uri: "reader://les:4f2c1a9e-0b4d-4c8e-9f12-6a7b8c9d0e1f", sha256: "0303030303030303030303030303030303030303030303030303030303030303", tokens: 103, judged: true }
+  - { id: "sec:Глава 3/Протоколы", uri: "reader://h/4962d6a284853eae52ccf700910f05136328ecc253b83cd9bc963590aa4b410f", sha256: "0404040404040404040404040404040404040404040404040404040404040404", tokens: 104, judged: true }
+  - { id: "src:materials/bashir.pdf", uri: "reader://h/1583bcb2021051d2f31a9f87b2653e367a974345845e17f1788810a1a406f8d4", sha256: "0505050505050505050505050505050505050505050505050505050505050505", tokens: 105, judged: true }
+  - { id: "con:term:протокол-х", uri: "reader://h/8d026aa46646ff6bb28cc3d920beca380e639a8224e87178b3b79f50a4d7db54", sha256: "0606060606060606060606060606060606060606060606060606060606060606", tokens: 106, judged: true }
+  - { id: "spn:1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f:md:intro.md:10-20", uri: "reader://h/53f6b8999a9b7d3ff27f520c7d7d8de154983bfbf09bf12f20acb01d360debcb", sha256: "0707070707070707070707070707070707070707070707070707070707070707", tokens: 107, judged: true }
+  - { id: "spn:1F1F1F1F1F1F1F1F1F1F1F1F1F1F1F1F1F1F1F1F1F1F1F1F1F1F1F1F1F1F1F1F:p1:1-2", uri: "reader://h/f59b9189f1106c9bcb48f0608bd78c17ae0177a79a11770b390e1590bca771d0", sha256: "0808080808080808080808080808080808080808080808080808080808080808", tokens: 108, judged: true }
+  - { id: "spn:1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f:p9:0-100", uri: "reader://spn:1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f:p9:0-100", sha256: "0909090909090909090909090909090909090909090909090909090909090909", tokens: 109, judged: true }
+  - { id: "spn:1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f:p10:0-100", uri: "reader://spn:1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f:p10:0-100", sha256: "0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a0a", tokens: 110, judged: true }
+  - { id: "spn:1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f:p11:0-100", uri: "reader://spn:1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f:p11:0-100", sha256: "0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b0b", tokens: 111, judged: true }
+  - { id: "spn:1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f:p12:0-100", uri: "reader://spn:1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f:p12:0-100", sha256: "0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c0c", tokens: 112, judged: true }
+  - { id: "spn:1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f:p13:0-100", uri: "reader://spn:1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f:p13:0-100", sha256: "0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d0d", tokens: 113, judged: true }
+  - { id: "spn:1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f:p14:0-100", uri: "reader://spn:1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f:p14:0-100", sha256: "0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e0e", tokens: 114, judged: true }
+  - { id: "spn:1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f:p15:0-100", uri: "reader://spn:1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f:p15:0-100", sha256: "0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f0f", tokens: 115, judged: true }
+  - { id: "spn:1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f:p16:0-100", uri: "reader://spn:1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f:p16:0-100", sha256: "1010101010101010101010101010101010101010101010101010101010101010", tokens: 116, judged: true }
+  - { id: "spn:1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f:p17:0-100", uri: "reader://spn:1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f:p17:0-100", sha256: "1111111111111111111111111111111111111111111111111111111111111111", tokens: 117, judged: true }
+  - { id: "spn:1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f:p18:0-100", uri: "reader://spn:1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f:p18:0-100", sha256: "1212121212121212121212121212121212121212121212121212121212121212", tokens: 118, judged: true }
+  - { id: "spn:1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f:p19:0-100", uri: "reader://spn:1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f:p19:0-100", sha256: "1313131313131313131313131313131313131313131313131313131313131313", tokens: 119, judged: true }
+  - { id: "spn:1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f:p20:0-100", uri: "reader://spn:1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f:p20:0-100", sha256: "1414141414141414141414141414141414141414141414141414141414141414", tokens: 120, judged: false }
+  - { id: "spn:1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f:p21:0-100", uri: "reader://spn:1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f:p21:0-100", sha256: "1515151515151515151515151515151515151515151515151515151515151515", tokens: 121, judged: false }
+  - { id: "spn:1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f:p22:0-100", uri: "reader://spn:1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f:p22:0-100", sha256: "1616161616161616161616161616161616161616161616161616161616161616", tokens: 122, judged: false }
+  - { id: "spn:1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f:p23:0-100", uri: "reader://spn:1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f:p23:0-100", sha256: "1717171717171717171717171717171717171717171717171717171717171717", tokens: 123, judged: false }
+  - { id: "spn:1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f:p24:0-100", uri: "reader://spn:1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f:p24:0-100", sha256: "1818181818181818181818181818181818181818181818181818181818181818", tokens: 124, judged: false }
+  # The 26th card: past the cap, counted, never listed.
+  - { id: "spn:1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f:p25:0-100", uri: "reader://spn:1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f1f:p25:0-100", sha256: "1919191919191919191919191919191919191919191919191919191919191919", tokens: 125, judged: false }
+
+# The find subtree, in the order the spans are opened; every child is under `find`. `documents: cards` means the
+# span is handed all 26 cards (as reader.obs.find.doc over each card's id, sha256, tokens and, on find.select only,
+# judged) and exports the first 25: reader.doc.<i>.{uri, sha256, tokens[, judged]} and mlflow.spanOutputs (VEC-OBS-4
+# `retriever_documents`).
+find:
+  - name: find
+    open: { channel: owner, question_type: exact, entitled: true, k: 8, budget_tokens: 4000,
+      brain_version: "b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1",
+      policy_version: "c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2" }
+    # caller_model absent: the owner channel's caller model is not known to find (as for an external MCP agent).
+    done: { cards: 26, tokens: 2925, judged_tokens: 2190, unjudged_tokens: 735,
+      judge: { ran: true, source: live, skip: timeout } }   # a skip with ran true is never exported
+    expected:
+      reader.find.channel: owner
+      reader.find.question_type: exact
+      reader.find.entitled: true
+      reader.find.k: 8
+      reader.find.budget_tokens: 4000
+      reader.brain_version: "b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1b1"
+      reader.policy_version: "c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2"
+      reader.find.cards: 26
+      reader.find.tokens: 2925
+      reader.find.judged_tokens: 2190
+      reader.find.unjudged_tokens: 735
+      reader.judge_ran: true
+      reader.judge_source: live
+      mlflow.spanType: TOOL
+  - name: find.route
+    open: {}
+    done: { route: exact_lookup, role: definition, form: text, reliability_min: B, topic: networks/protocols,
+      identifiers: 1,
+      identifiers_sha256: "96cc51d9e2f2e4bb34feea87da247b4b8bd4ca254580119100a726969165735e",
+      concept_uri: "reader://h/8d026aa46646ff6bb28cc3d920beca380e639a8224e87178b3b79f50a4d7db54" }
+    stage7: { identifiers: ["Протокол  Х"], concept_id: "con:term:протокол-х" }
+    expected:
+      reader.find.route: exact_lookup
+      reader.find.filter.role: definition
+      reader.find.filter.form: text
+      reader.find.filter.reliability_min: B
+      reader.find.filter.topic: networks/protocols
+      reader.find.filter.identifiers: 1
+      reader.find.filter.identifiers_sha256: "96cc51d9e2f2e4bb34feea87da247b4b8bd4ca254580119100a726969165735e"
+      reader.find.filter.concept_uri: "reader://h/8d026aa46646ff6bb28cc3d920beca380e639a8224e87178b3b79f50a4d7db54"
+      mlflow.spanType: ROUTER
+  - name: find.retrieve
+    open: { layer: L1, method: dense_fts_rrf }
+    done: { candidates: 120, hits: 26, documents: cards }
+    expected:
+      reader.layer: L1
+      reader.find.method: dense_fts_rrf
+      reader.retrieval.candidates: 120
+      reader.retrieval.hits: 26
+      mlflow.spanType: RETRIEVER
+  - name: find.preselect
+    open: {}
+    done: { merged: 2, gate: not_separated, expanded: false, candidates_in: 28, cards: 26, tokens: 2925,
+      budget_tokens: 6000, documents: cards }
+    expected:
+      reader.find.merged: 2
+      reader.find.gate: not_separated
+      reader.find.expanded: false
+      reader.find.candidates_in: 28
+      reader.find.cards: 26
+      reader.find.tokens: 2925
+      reader.find.budget_tokens: 6000
+      mlflow.spanType: RERANKER
+  - name: find.judge_wait
+    open: { input_sha256: "d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3", input_tokens: 2400 }
+    done: { kept: 18, dropped: 2, judge: { ran: true, source: live } }
+    expected:
+      reader.judge.input_sha256: "d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3d3"
+      reader.judge.input_tokens: 2400
+      reader.judge.kept: 18
+      reader.judge.dropped: 2
+      reader.judge_ran: true
+      reader.judge_source: live
+      mlflow.spanType: CHAIN
+  - name: find.select
+    open: {}
+    done: { cards: 26, tokens: 2925, judged_tokens: 2190, unjudged_tokens: 735, budget_tokens: 4000,
+      documents: cards }
+    expected:
+      reader.find.cards: 26
+      reader.find.tokens: 2925
+      reader.find.judged_tokens: 2190
+      reader.find.unjudged_tokens: 735
+      reader.find.budget_tokens: 4000
+      mlflow.spanType: RERANKER
+
+# A judge that did not run: the skip reason only; a source handed with ran false is never exported.
+judge_skipped:
+  judge: { ran: false, source: recorded, skip: gate }
+  expected: { reader.judge_ran: false, reader.judge_skip: gate }
+
+# FR-OBS-37. reader.build.usd is shown for reading only: no mlflow.llm.cost on either span.
+pack_build:
+  name: pack.build
+  open: { pack_id: "e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4",
+    overlay_version: "f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5",
+    material_sha256: "a6a6a6a6a6a6a6a6a6a6a6a6a6a6a6a6a6a6a6a6a6a6a6a6a6a6a6a6a6a6a6a6", overlay_kind: base }
+  done: { state: sealed, spans: 4210, outline_nodes: 312, rows: 4522, calls: 14, usd: 0.4213, cap_hit: false }
+  expected:
+    reader.pack.id: "e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4"
+    reader.overlay.version: "f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5f5"
+    reader.material_sha256: "a6a6a6a6a6a6a6a6a6a6a6a6a6a6a6a6a6a6a6a6a6a6a6a6a6a6a6a6a6a6a6a6"
+    reader.overlay.kind: base
+    reader.pack.state: sealed
+    reader.pack.spans: 4210
+    reader.pack.outline_nodes: 312
+    reader.pack.rows: 4522
+    reader.build.calls: 14
+    reader.build.usd: 0.4213
+    reader.build.cap_hit: false
+    mlflow.spanType: CHAIN
+
+link_run:
+  name: link.run
+  open: { pack_a: "e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4",
+    pack_b: "e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5",
+    overlay_version: "f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6" }
+  done: { mentions: 930, concepts_proposed: 41, pairs_blocked: 2200, pairs_kept: 180, judge_calls: 12,
+    judge_replayed: 3, links: 57, usd: 0.0871, cap_hit: true }
+  expected:
+    reader.pack.a: "e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4e4"
+    reader.pack.b: "e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5e5"
+    reader.overlay.version: "f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6f6"
+    reader.link.mentions: 930
+    reader.link.concepts_proposed: 41
+    reader.link.pairs_blocked: 2200
+    reader.link.pairs_kept: 180
+    reader.link.judge_calls: 12
+    reader.link.judge_replayed: 3
+    reader.link.links: 57
+    reader.build.usd: 0.0871
+    reader.build.cap_hit: true
+    mlflow.spanType: CHAIN

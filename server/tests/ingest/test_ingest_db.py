@@ -11,10 +11,11 @@ import json
 import logging
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Final
 
 import pytest
 from ruamel.yaml import YAML
+from sqlalchemy import text
 
 from .conftest import (
     CANARY,
@@ -29,7 +30,7 @@ from .conftest import (
     world,
 )
 
-pytestmark = pytest.mark.anyio
+pytestmark = [pytest.mark.anyio, pytest.mark.usefixtures("r3_converter")]  # r3 artifacts, deliberately
 
 
 def tar(**manifest: Any) -> io.BytesIO:
@@ -77,7 +78,7 @@ async def test_receive_then_import(pg: Pg, tmp_path: Path) -> None:
         assert await w.scalar("SELECT count(*) FROM material_spans WHERE owner_id = :o", o=owner) == 8
         assert await w.scalar("SELECT count(*) FROM material_outline WHERE owner_id = :o", o=owner) == 2
         version = await w.scalar("SELECT converter_version FROM ingests")
-        assert version == "docling-2.151.1+r2"
+        assert version == "docling-2.151.1+r3"
         again = await receive(w, tar())
         assert again["result"] == "already_done"
         await w.work()
@@ -153,37 +154,102 @@ async def test_unknown_material_and_version_mismatch(pg: Pg, tmp_path: Path) -> 
         assert stored(w) == [] and await key_rows(w) == 0
 
 
-async def test_frozen_version_is_refused_at_receive_and_import(
+R2: Final = "docling-2.151.1+r2"
+R3: Final = "docling-2.151.1+r3"
+
+
+async def test_second_converter_version_imports_a_second_pack(
     pg: Pg, tmp_path: Path, monkeypatch: Any
 ) -> None:
+    """FR-INGEST-11, -12, -13, -17 revised: no frozen version; an r2-imported material is `none` under r3."""
     ingest = need("reader.ingest")
+    status = need("reader.ingest.status")
+    async with world(pg, tmp_path) as w:
+        monkeypatch.setattr(ingest, "CONVERTER_VERSION", R2)
+        await receive(w, tar(converter_version=R2))
+        await w.work()
+        monkeypatch.setattr(ingest, "CONVERTER_VERSION", R3)
+        report = await status.status(w.engine, w.jobs, MATERIAL_SHA)
+        assert report == {"status": "none", "converter_version": R3}
+        assert (await receive(w, tar()))["result"] == "queued"
+        await w.work()
+        assert await status.status(w.engine, w.jobs, MATERIAL_SHA) == {
+            "status": "succeeded", "converter_version": R3
+        }
+        rows = await w.rows("SELECT converter_version FROM ingests ORDER BY imported_at")
+        assert [r[0] for r in rows] == [R2, R3]
+        assert await w.scalar("SELECT count(*) FROM base_packs WHERE state = 'sealed'") == 2
+        assert await w.scalar("SELECT count(*) FROM material_spans") == 16
+        # INV-INGEST-2 per pack: a repeated receive and import of r3 add nothing.
+        assert (await receive(w, tar()))["result"] == "already_done"
+        await w.work()
+        assert await w.scalar("SELECT count(*) FROM ingests") == 2
+
+
+async def test_the_routes_read_the_newest_ingest(pg: Pg, tmp_path: Path, monkeypatch: Any) -> None:
+    """Code review of unit B, blocking 3: r2 and r3 differ in span text and count; every reader shows r3."""
+    ingest, uploads = need("reader.ingest"), need("reader.ingest.uploads")
+    jobs = need("reader.ingest.jobs")
+    base = [json.loads(x) for x in build_artifact()["spans.jsonl"].splitlines()]
+    newer = [dict(s) for s in base[:-1]]  # one span fewer (the last, on page 2)
+    page1 = next(i for i, s in enumerate(newer) if s["page"] == 1 and s["kind"] == "text")
+    newer[page1]["text"] = "Текст r3"
+    async with world(pg, tmp_path) as w:
+        monkeypatch.setattr(ingest, "CONVERTER_VERSION", R2)
+        await receive(w, tar(converter_version=R2))
+        await w.work()
+        monkeypatch.setattr(ingest, "CONVERTER_VERSION", R3)
+        await receive(w, io.BytesIO(tar_of(build_artifact(spans=newer))))
+        await w.work()
+        assert await w.scalar("SELECT count(*) FROM ingests") == 2
+        async with client(w) as c:
+            listed = next(m for m in (await c.get("/api/materials")).json()["materials"]
+                          if m["sha256"] == MATERIAL_SHA)
+            assert listed["span_count"] == len(newer) == len(base) - 1
+            assert (await c.get("/api/materials/synthetic/outline")).status_code == 200
+            pages = [(await c.get("/api/materials/synthetic/spans", params={"page": p})).json()["spans"]
+                     for p in (1, 2)]
+            assert [s["text"] for page in pages for s in page] == [s["text"] for s in newer]
+        async with w.engine.connect() as conn:
+            assert await uploads.import_key(conn, MATERIAL_SHA) == jobs.key_for(MATERIAL_SHA, R3)
+
+
+async def test_r2_artifact_is_refused_by_an_r3_receive(pg: Pg, tmp_path: Path) -> None:
+    async with world(pg, tmp_path) as w:
+        assert await refused(w, tar(converter_version=R2)) == "version_mismatch"
+        assert stored(w) == [] and await key_rows(w) == 0
+
+
+async def test_locator_and_pack_mismatch_are_refused_at_receive(pg: Pg, tmp_path: Path) -> None:
+    async with world(pg, tmp_path) as w:
+        spans = [json.loads(x) for x in build_artifact()["spans.jsonl"].splitlines()]
+        spans[0]["locator"] = spans[1]["locator"]
+        bad = io.BytesIO(tar_of(build_artifact(spans=spans, keep_locators=True)))
+        assert await refused(w, bad) == "locator_mismatch"
+        assert await refused(w, tar(pack_id="0" * 64)) == "pack_mismatch"
+        assert stored(w) == [] and await key_rows(w) == 0
+
+
+@pytest.mark.parametrize("gone", ["collected", "purged"])
+async def test_status_of_a_gone_pack(pg: Pg, tmp_path: Path, gone: str) -> None:
+    """FR-INGEST-12, VEC-INGEST-5 revised: a succeeded key whose pack is collected or purged reports that."""
+    status = need("reader.ingest.status")
+    column = {"collected": "collected_at", "purged": "purged_at"}[gone]
     async with world(pg, tmp_path) as w:
         await receive(w, tar())
         await w.work()
-        monkeypatch.setattr(ingest, "CONVERTER_VERSION", "docling-2.151.1+r3")
-        assert await refused(w, tar(converter_version="docling-2.151.1+r3")) == "version_frozen"
-        status = need("reader.ingest.status")
+        async with w.engine.begin() as conn:
+            await conn.execute(text("UPDATE base_packs SET " + column + " = now()"))  # noqa: S608 - fixed names
         report = await status.status(w.engine, w.jobs, MATERIAL_SHA)
-        assert report == {"status": "succeeded", "converter_version": "docling-2.151.1+r2"}
-        # A job under another version reaching the import is refused permanently.
-        artifact = next(iter(stored(w)))
-        await w.jobs.enqueue(
-            "ingest.import",
-            {
-                "material_sha256": MATERIAL_SHA,
-                "converter_version": "docling-2.151.1+r3",
-                "artifact_id": artifact,
-                "material_id": "synthetic",
-            },
-        )
-        await w.work()
-        codes = await w.rows("SELECT outcome, error_code FROM job_keys ORDER BY created_at")
-        assert tuple(codes[-1]) == ("dead", "version_frozen")
-        assert await w.scalar("SELECT count(*) FROM ingests") == 1
+        assert report == {"status": gone, "converter_version": R3}
+        async with client(w) as c:
+            listed = (await c.get("/api/materials")).json()["materials"]
+        assert next(m for m in listed if m["sha256"] == MATERIAL_SHA)["status"] == gone
 
 
 async def test_spans_route_returns_stable_span_ids(pg: Pg, tmp_path: Path) -> None:
-    artifact = need("reader.ingest.artifact")
+    """INV-INGEST-7, FR-INGEST-15 revised: span ids are the locators, with quote hashes; never a legacy id."""
+    locator = need("reader.ingest.locator")
     async with world(pg, tmp_path) as w:
         await receive(w, tar())
         await w.work()
@@ -194,7 +260,11 @@ async def test_spans_route_returns_stable_span_ids(pg: Pg, tmp_path: Path) -> No
         async with client(w) as c:
             second = (await c.get("/api/materials/synthetic/spans", params={"page": 1})).json()
         ids = [s["span_id"] for s in first["spans"]]
-        assert ids == [artifact.span_id(MATERIAL_SHA, s["seq"]) for s in first["spans"]]
+        assert ids == locator.page_locators(MATERIAL_SHA, 1, [s["text"] for s in first["spans"]])
+        assert not any(locator.is_legacy_id(i) for i in ids)
+        assert [s["quote_sha256"] for s in first["spans"]] == [
+            locator.quote_sha256(s["text"]) for s in first["spans"]
+        ]
         assert len(set(ids)) == len(ids) == 4
         assert first == second
 
@@ -288,9 +358,9 @@ async def test_tables_have_owner_ids_and_the_downgrade_drops_only_them(pg: Pg, t
             assert fk == 1 and nullable == "NO", table
         unique = await w.scalar(
             "SELECT count(*) FROM pg_indexes"
-            " WHERE tablename = 'ingests' AND indexdef LIKE '%UNIQUE%(material_id)%'"
+            " WHERE tablename = 'ingests' AND indexdef LIKE '%UNIQUE%(material_id, converter_version)%'"
         )
-        assert unique == 1
+        assert unique == 1  # FR-INGEST-14 revision 3 (ingest_0004_packs): one pack per material and version
         import importlib.util
 
         path = need("reader.ingest").MIGRATIONS / "ingest_0001.py"
@@ -310,7 +380,8 @@ def test_status_map_vector() -> None:
     store = need("reader.ingest.store")
     rows = YAML(typ="safe").load((FIXTURES / "status-map.yaml").read_text())["rows"]
     for row in rows:
-        assert store.api_status(row["job_status"], row["ingested"]) == row["status"], row
+        got = store.api_status(row["job_status"], row["ingested"], row.get("pack", "live"))
+        assert got == row["status"], row
 
 
 async def test_routes(pg: Pg, tmp_path: Path) -> None:

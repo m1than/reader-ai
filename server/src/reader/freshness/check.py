@@ -71,7 +71,7 @@ class Prepared:
     @property
     def scan_inputs_sha256(self) -> str:
         prompt = prompts.load("scan")
-        ids = [sampling.span_id(self.material.sha256, seq) for seq in self.sample.seqs]
+        ids = [p.id_in(self.material.sha256) for p in self.sample.spans]
         model = self.models[params.TASK_SCAN]
         return sampling.scan_inputs_sha256(str(self.ingest_id), ids, prompt.version, prompt.sha256, model)
 

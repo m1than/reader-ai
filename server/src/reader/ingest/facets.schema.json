@@ -1,0 +1,109 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://reader.local/ingest/facets.schema.json",
+  "title": "SRV-INGEST FR-INGEST-37 facets file",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "test_vector_rule", "facets"],
+  "properties": {
+    "version": { "const": 1 },
+    "test_vector_rule": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["min_lines", "pattern"],
+      "properties": {
+        "min_lines": { "type": "integer", "minimum": 1 },
+        "pattern": { "type": "string", "minLength": 1 }
+      }
+    },
+    "facets": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["role", "reliability", "credibility", "as_of", "license", "form", "topic"],
+      "properties": {
+        "role": { "$ref": "#/$defs/closed" },
+        "reliability": { "$ref": "#/$defs/closed" },
+        "credibility": { "$ref": "#/$defs/closed" },
+        "as_of": { "$ref": "#/$defs/date" },
+        "license": { "$ref": "#/$defs/closed" },
+        "form": { "$ref": "#/$defs/form" },
+        "topic": { "$ref": "#/$defs/tree" }
+      }
+    }
+  },
+  "$defs": {
+    "level": { "enum": ["source", "span", "concept", "finding"] },
+    "by": { "enum": ["rule", "model", "owner"] },
+    "consumer": { "type": "string", "pattern": "^((FR|INV|NFR)-[A-Z]+-[0-9]+|(SRV|WEB|OPS)-[A-Z]+|[a-z][a-z_]*)$" },
+    "values": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": { "type": "string", "minLength": 1 }
+    },
+    "closed": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["level", "values", "by", "enabled", "consumer"],
+      "properties": {
+        "level": { "$ref": "#/$defs/level" },
+        "values": { "$ref": "#/$defs/values" },
+        "by": { "$ref": "#/$defs/by" },
+        "enabled": { "type": "boolean" },
+        "consumer": { "$ref": "#/$defs/consumer" }
+      }
+    },
+    "date": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["level", "type", "by", "enabled", "consumer"],
+      "properties": {
+        "level": { "$ref": "#/$defs/level" },
+        "type": { "const": "date" },
+        "by": { "$ref": "#/$defs/by" },
+        "enabled": { "type": "boolean" },
+        "consumer": { "$ref": "#/$defs/consumer" }
+      }
+    },
+    "tree": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["level", "tree", "by", "enabled", "consumer"],
+      "properties": {
+        "level": { "$ref": "#/$defs/level" },
+        "tree": { "const": "sectors" },
+        "multi": { "type": "boolean" },
+        "grows": { "type": "boolean" },
+        "by": { "$ref": "#/$defs/by" },
+        "enabled": { "type": "boolean" },
+        "consumer": { "$ref": "#/$defs/consumer" }
+      }
+    },
+    "form": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["level", "values", "by", "enabled", "consumer", "rule"],
+      "properties": {
+        "level": { "$ref": "#/$defs/level" },
+        "values": { "$ref": "#/$defs/values" },
+        "by": { "$ref": "#/$defs/by" },
+        "enabled": { "type": "boolean" },
+        "consumer": { "$ref": "#/$defs/consumer" },
+        "rule": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["heading", "text", "list_item", "code", "formula", "table", "figure"],
+          "properties": {
+            "heading": { "type": "string" },
+            "text": { "type": "string" },
+            "list_item": { "type": "string" },
+            "code": { "type": "string" },
+            "formula": { "type": "string" },
+            "table": { "type": "string" },
+            "figure": { "type": "string" }
+          }
+        }
+      }
+    }
+  }
+}

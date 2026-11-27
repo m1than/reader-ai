@@ -2,8 +2,8 @@
 (SRV-TUTOR FR-TUTOR-1..5, -9, -10; INV-TUTOR-6, -7).
 
 Every transition is `UPDATE … WHERE state = 'queued'`, so the api's finalisation and the worker's last write
-cannot both win. Span texts are read from SRV-INGEST's `material_spans` directly (read-only) until its
-`spans_by_ids` helper exists (cross-spec item).
+cannot both win. Span texts are read from the owner's active packs through SRV-INGEST's
+`reader.ingest.views.active_span_texts` (INV-INGEST-16).
 """
 
 from __future__ import annotations
@@ -157,22 +157,11 @@ async def queued_of(conn: AsyncConnection, owner_id: uuid.UUID) -> list[tuple[uu
 async def spans_by_ids(
     conn: AsyncConnection, owner_id: uuid.UUID, span_ids: Sequence[str]
 ) -> dict[str, tuple[int, str]]:
-    """span id `<material_sha256>:<seq>` → (page, text), for the owner's materials only."""
-    pairs = [s.rsplit(":", 1) for s in span_ids if ":" in s]
-    keys = [(sha, int(seq)) for sha, seq in pairs if seq.isdigit()]
-    if not keys:
-        return {}
-    rows = await conn.execute(
-        text(
-            "SELECT m.sha256, s.seq, s.page, s.text FROM material_spans s"
-            " JOIN ingests i ON i.id = s.ingest_id JOIN materials m ON m.id = i.material_id"
-            " JOIN unnest(CAST(:shas AS text[]), CAST(:seqs AS integer[])) AS w(sha, seq)"
-            " ON w.sha = m.sha256 AND w.seq = s.seq"
-            " WHERE s.owner_id = :o AND m.owner_id = :o"
-        ),
-        {"o": owner_id, "shas": [k[0] for k in keys], "seqs": [k[1] for k in keys]},
-    )
-    return {f"{r[0]}:{r[1]}": (int(r[2]), str(r[3])) for r in rows}
+    """span id (`<material_sha256>:<seq>` or a locator) → (page, text), from the owner's active packs only
+    (FR-TUTOR-5's paired change, SRV-INGEST INV-INGEST-16)."""
+    from reader.ingest import views
+
+    return await views.active_span_texts(conn, owner_id, span_ids)
 
 
 def _source(value: object) -> str:

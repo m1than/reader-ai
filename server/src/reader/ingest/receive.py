@@ -28,7 +28,6 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 
 import reader.ingest as ingest
 from reader.config import ReaderConfig
-from reader.ingest import store
 from reader.ingest.artifact import ArtifactError, artifact_id, read_members, validate_dir, validate_members
 from reader.ingest.errors import Cancel, IngestError
 from reader.ingest.jobs import KIND
@@ -132,17 +131,15 @@ async def receive(
             raise IngestError("version_mismatch")
         scope = asyncio.timeout(remaining())
         try:
-            async with scope, engine.connect() as conn:
-                frozen = await store.frozen_version(conn, sha)
+            async with scope, engine.connect():  # revision 3: no frozen version; the database is probed first
+                pass
         except TimeoutError:
             if scope.expired():  # the deadline's own scope, not a driver's connect timeout
                 raise DeadlineExceeded from None
             raise IngestError("database_unreachable") from None
         except Exception:
             raise IngestError("database_unreachable") from None
-        if frozen is not None and frozen != version:
-            raise IngestError("version_frozen")
-        artifact = artifact_id(members["manifest.json"])  # the bytes as received
+        artifact =artifact_id(members["manifest.json"])  # the bytes as received
         remaining()
         _store(tmp, root, artifact)
         state["stored"] = True

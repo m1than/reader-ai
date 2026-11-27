@@ -98,7 +98,10 @@ async def test_compile_routes(pg: Pg, tmp_path: Path) -> None:
                 await env.work()
             body = (await c.get(f"/api/compiles/{run}")).json()
             assert body["state"] == "converged"
-            assert [s["stage"] for s in body["steps"]][:3] == ["draft", "fact_check", "adversarial_review"]
+            assert [s["stage"] for s in body["steps"]] == [
+                "draft", "rules", "lab_verification", "fact_check", "adversarial_review", "findings"
+            ]  # ADR-0039 order (FR-PIPELINE-5 revised)
+            assert body["stop"] == "passed" and body["loops"] == 0 and body["target_usd"] == "4.35"
             assert body["steps"][0]["model"] == "claude-opus-5-5"
             assert body["spent_usd"] == "1.340000"
             assert body["latest_sha256"]

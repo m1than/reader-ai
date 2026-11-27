@@ -24,9 +24,8 @@ import reader.ingest as ingest
 from reader.api.http import Ctx, Handler, Route, error
 from reader.config import ConfigError, load_config
 from reader.config.model import Material
-from reader.ingest import manage, params, store, upload, uploads
-from reader.ingest.artifact import span_id
-from reader.ingest.jobs import KIND, key_for
+from reader.ingest import manage, manifest, packs, params, store, upload, uploads
+from reader.ingest.jobs import KIND, PURGE_KIND, key_for, purge_key
 from reader.jobs import audit
 from reader.jobs.queue import job_status_of
 
@@ -64,7 +63,7 @@ async def _imported(conn: AsyncConnection, owner: Any, sha: str) -> Any:
             text(
                 "SELECT i.id, i.converter_version, m.page_count, i.span_count, i.outline_count,"
                 " i.pages_without_text, m.deleted_at FROM ingests i JOIN materials m ON m.id = i.material_id"
-                " WHERE m.owner_id = :o AND m.sha256 = :s"
+                " WHERE m.owner_id = :o AND m.sha256 = :s ORDER BY i.imported_at DESC LIMIT 1"
             ),
             {"o": owner, "s": sha},
         )
@@ -79,9 +78,10 @@ async def _material_fields(conn: AsyncConnection, owner: Any, sha: str) -> dict[
     row = await _imported(conn, owner, sha)
     version = row[1] if row else ingest.CONVERTER_VERSION
     state = await _job_status(conn, key_for(sha, version))
+    pack = await store.pack_state(conn, sha, version) if row else "live"
     return {
         "sha256": sha,
-        "status": store.api_status(state, row is not None),
+        "status": store.api_status(state, row is not None, pack),
         "converter_version": row[1] if row else None,
         "page_count": row[2] if row else None,
         "span_count": row[3] if row else None,
@@ -205,14 +205,15 @@ async def get_spans(ctx: Ctx) -> Response:
         found = await _material_ingest(ctx, conn)
         if found is None:
             return error(404, "not_found")
-        sha, row = found
+        row = found[1]
         raw = ctx.request.query_params.get("page", "")
         valid = raw.isascii() and raw.isdecimal() and len(raw) <= PAGE_DIGITS
         if not valid or not 1 <= int(raw) <= int(row[2]):
             return error(400, "page")
         spans = await conn.execute(
             text(
-                "SELECT seq, page, kind, level, decoded, text, x0, y0, x1, y1 FROM material_spans"
+                "SELECT seq, page, kind, level, decoded, text, x0, y0, x1, y1, locator, quote_sha256"
+                " FROM material_spans"
                 " WHERE ingest_id = :i AND page = :p ORDER BY seq"
             ),
             {"i": row[0], "p": int(raw)},
@@ -221,7 +222,8 @@ async def get_spans(ctx: Ctx) -> Response:
             {
                 "spans": [
                     {
-                        "span_id": span_id(sha, s[0]),
+                        "span_id": s[10],  # FR-INGEST-15 revised: the locator (FR-INGEST-33)
+                        "quote_sha256": s[11],
                         "seq": s[0],
                         "page": s[1],
                         "kind": s[2],
@@ -485,6 +487,7 @@ async def delete_material(ctx: Ctx) -> Response:
             await manage.delete_courses(conn, owner, courses, material_id)
         sql = "UPDATE materials SET deleted_at = now() WHERE id = :i RETURNING deleted_at"
         deleted_at = (await conn.execute(text(sql), {"i": row.id})).scalar_one()
+        await manifest.remove_material(conn, owner, sha)  # FR-INGEST-39: one entry when the head names it
         await audit.record(conn, owner, "material.delete", material_id, {"courses": len(courses)})
         return JSONResponse(await _deleted_body(conn, owner, material_id, sha, deleted_at))
 
@@ -505,10 +508,50 @@ async def restore_material(ctx: Ctx) -> Response:
         if row.deleted_at is not None:
             await conn.execute(text("UPDATE materials SET deleted_at = NULL WHERE id = :i"), {"i": row.id})
             restored = await manage.restore_courses(conn, owner, material_id)  # after the material is live
+            await manifest.restore_material(conn, owner, sha)  # FR-INGEST-39: after FR-INGEST-31's locks
             await audit.record(conn, owner, "material.restore", material_id, {"courses": len(restored)})
         return JSONResponse(
             {"material": await _entry(ctx, conn, material_id, sha), "restored_courses": restored}
         )
+
+
+# ---- packs and owner purge (FR-INGEST-45): the route enqueues, the job deletes ----
+
+PACK_ID: Final = re.compile(r"[0-9a-f]{64}")
+
+
+async def list_packs(ctx: Ctx) -> Response:
+    async with ctx.engine.connect() as conn:
+        _, sha, _ = await _managed(ctx, conn, lock=False)
+        return JSONResponse({"packs": await packs.material_packs(conn, ctx.signed_in.id, sha)})
+
+
+async def purge_pack(ctx: Ctx) -> Response:
+    body = await ctx.json()
+    if not isinstance(body, dict) or set(body) != {"confirm"}:
+        return error(400, "bad_request")
+    owner = ctx.signed_in.id
+    pid = ctx.request.path_params["pack_id"]
+    async with ctx.engine.connect() as conn:
+        material_id, sha, row = await _managed(ctx, conn, lock=False)
+        if not PACK_ID.fullmatch(pid) or await packs.material_of(conn, owner, pid) != sha:
+            raise manage.refused(404, "not_found")
+        display = await manage.display_title(conn, owner, material_id, row)
+        if not manage.confirm_matches(body["confirm"], display):
+            raise manage.refused(400, "confirm_mismatch")
+        if await manage.busy(conn, owner, row):
+            raise manage.refused(409, "material_busy")
+        active = any(e["pack_id"] == pid for e in (await manifest.active_view(conn, owner)).entry["packs"])
+        courses = await manage.courses_using(conn, owner, sha) if active else []
+        if courses:
+            raise manage.Refused(409, {"error": "material_in_use", "courses": courses})
+    jobs = getattr(ctx.request.app.state, "jobs", None)
+    if jobs is None:
+        return error(503, "unavailable")
+    result = await jobs.enqueue(PURGE_KIND, {"owner_id": str(owner), "pack_id": pid})
+    if result.kind == "dead":  # a purge that ended dead runs again on the owner's next request
+        result = await jobs.requeue_dead(PURGE_KIND, purge_key(owner, pid))
+    return JSONResponse({"pack_id": pid, "enqueued": result.kind == "queued"}, status_code=202)
 
 
 ROUTES: tuple[Route, ...] = (
@@ -525,4 +568,8 @@ ROUTES: tuple[Route, ...] = (
     Route("GET", "/api/materials/{material_id}/impact", "session", _managed_route(get_impact)),
     Route("DELETE", "/api/materials/{material_id}", "session", _managed_route(delete_material)),
     Route("POST", "/api/materials/{material_id}/restore", "session", _managed_route(restore_material)),
+    Route("GET", "/api/materials/{material_id}/packs", "session", _managed_route(list_packs)),
+    Route(
+        "POST", "/api/materials/{material_id}/packs/{pack_id}/purge", "session", _managed_route(purge_pack)
+    ),
 )

@@ -32,7 +32,9 @@ LINK_BATCH: Final = 100
 TRACE_PAGE: Final = 500
 RUNS_PAGE: Final = 1000  # runs/search's largest page (FR-OBS-31)
 EXPERIMENT: Final = "0"
-ID_TAG: Final = {"compile": "reader.run_id", "ingest": "reader.ingest_id"}
+# ADR-0039 (FR-OBS-20 as amended): `obs.eval_run` writes kind `eval` through the same steps; FR-OBS-31's prune
+# searches every kind listed here.
+ID_TAG: Final = {"compile": "reader.run_id", "ingest": "reader.ingest_id", "eval": "reader.eval_id"}
 
 
 class ObsRunsDuplicate(Exception):
@@ -239,15 +241,14 @@ _SPEND_SQL: Final = (
 )
 _MODELS_SQL: Final = "SELECT stage, max(model) AS model FROM compile_steps WHERE run_id = :id GROUP BY stage"
 _INGEST_SQL: Final = (
-    "SELECT i.id, i.converter_version, i.span_count, i.imported_at, m.sha256, m.page_count,"
-    " (SELECT count(*) FROM search_chunks c WHERE c.ingest_id = i.id AND c.owner_id = i.owner_id) AS chunks,"
-    " (SELECT max(e.embedded_at) FROM search_embeds e WHERE e.ingest_id = i.id AND e.owner_id = i.owner_id)"
+    # the ingest's own row comes from SRV-INGEST's `views.ingest_facts` (INV-INGEST-16)
+    "SELECT (SELECT count(*) FROM search_chunks c WHERE c.ingest_id = :id AND c.owner_id = :o) AS chunks,"
+    " (SELECT max(e.embedded_at) FROM search_embeds e WHERE e.ingest_id = :id AND e.owner_id = :o)"
     " AS embedded_at,"
     # FR-OBS-20 f: the import job's own key (enqueued to succeeded)
     " (SELECT extract(epoch FROM max(k.finished_at - k.created_at)) FROM job_keys k"
-    " WHERE k.kind = 'ingest.import' AND k.outcome = 'succeeded' AND k.args->>'material_sha256' = m.sha256"
-    " AND k.args->>'converter_version' = i.converter_version) AS import_s"
-    " FROM ingests i JOIN materials m ON m.id = i.material_id AND m.owner_id = i.owner_id WHERE i.id = :id"
+    " WHERE k.kind = 'ingest.import' AND k.outcome = 'succeeded' AND k.args->>'material_sha256' = :s"
+    " AND k.args->>'converter_version' = :v) AS import_s"
 )
 
 
@@ -316,13 +317,18 @@ async def snapshot(conn: Any, args: RunsArgs, now: datetime) -> Snapshot | None:
             metrics=metrics,
             snapshot_at=_iso(now),
         )
-    row = (await conn.execute(text(_INGEST_SQL), {"id": args.id})).first()
-    if row is None:
+    from reader.ingest import views
+
+    facts = await views.ingest_facts(conn, args.id)
+    if facts is None:
         return None
-    pages = int(row.page_count or 0)
+    row = (await conn.execute(text(_INGEST_SQL), {
+        "id": args.id, "o": facts.owner_id, "s": facts.material_sha256, "v": facts.converter_version,
+    })).one()
+    pages = facts.page_count
     ingest_metrics: dict[str, float | int] = {
         "pages": pages,
-        "spans": int(row.span_count or 0),
+        "spans": facts.span_count,
         "chunks": int(row.chunks or 0),
     }
     if row.import_s is not None:
@@ -333,17 +339,17 @@ async def snapshot(conn: Any, args: RunsArgs, now: datetime) -> Snapshot | None:
     return Snapshot(
         kind="ingest",
         key=args.id,
-        name=f"import {row.sha256[:8]}",
-        start_ms=_ms(row.imported_at),
-        end_ms=_ms(max(row.imported_at, row.embedded_at or row.imported_at)),  # the late end's time (d)
+        name=f"import {facts.material_sha256[:8]}",
+        start_ms=_ms(facts.imported_at),
+        end_ms=_ms(max(facts.imported_at, row.embedded_at or facts.imported_at)),  # the late end's time (d)
         status="FINISHED",
         outcome="succeeded",
         end=args.end,
-        tags={"reader.material_sha256": row.sha256},
-        params={"converter_version": row.converter_version, "material_sha256": row.sha256},
+        tags={"reader.material_sha256": facts.material_sha256},
+        params={"converter_version": facts.converter_version, "material_sha256": facts.material_sha256},
         metrics=ingest_metrics,
         snapshot_at=_iso(now),
-        trace_tag=("reader.material_sha256", row.sha256),
+        trace_tag=("reader.material_sha256", facts.material_sha256),
     )
 
 

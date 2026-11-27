@@ -115,6 +115,9 @@ async def import_plan_material(
                 ),
                 {"i": iid, "o": owner, "q": seq, "l": level, "t": title, "p": page},
             )
+        from ingest.packseed import seal  # FR-PLAN-9: the material's active pack is read
+
+        await seal(conn, owner, iid, sha)
     return iid
 
 

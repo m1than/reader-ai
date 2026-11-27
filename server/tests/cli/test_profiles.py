@@ -128,7 +128,9 @@ def test_provider_tokens_go_to_agent_proxy_only(tmp_path: Path, monkeypatch: pyt
     tokens = [d for d in plan if d["name"] != "db-password"]
     assert len(tokens) == 4
     assert {d["service"] for d in tokens} == {"agent-proxy"}
-    assert {d["service"] for d in plan if d["name"] == "db-password"} == {"postgres", "api", "worker"}
+    assert {d["service"] for d in plan if d["name"] == "db-password"} == {
+        "postgres", "api", "worker", "worker-judge"  # FR-CLI-5 amended (ADR-0039 B7b)
+    }
 
 
 def test_status_renders_with_the_recorded_profiles(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

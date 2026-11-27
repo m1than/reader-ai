@@ -30,6 +30,8 @@ from typing import Any
 import httpx
 import pytest
 
+from . import make_artifact_fixture as fixture_gen
+
 REPO = Path(__file__).resolve().parents[3]
 SPEC = REPO / "spec" / "modules" / "SRV-INGEST.yaml"
 FIXTURES = REPO / "spec" / "fixtures" / "SRV-INGEST"
@@ -69,15 +71,30 @@ def canonical(value: Any) -> bytes:
 def build_artifact(
     spans: list[dict[str, Any]] | None = None,
     outline: list[dict[str, Any]] | None = None,
+    keep_locators: bool = False,
     **manifest: Any,
 ) -> dict[str, bytes]:
-    """The three artifact files, derived from VEC-INGEST-1 with optional replacements (hashes recomputed)."""
+    """The three artifact files, derived from VEC-INGEST-1 with optional replacements (hashes recomputed).
+
+    Locators, quote hashes, parse_config and pack_id (format 2) are recomputed by the independent generator
+    for the material and version in effect, unless `keep_locators` (spans as given) or the caller names
+    them."""
     base = artifact_files()
     span_rows = spans if spans is not None else [json.loads(x) for x in base["spans.jsonl"].splitlines()]
+    meta = json.loads(base["manifest.json"])
+    sha = str(manifest.get("material_sha256", meta["material_sha256"]))
+    version = str(manifest.get("converter_version", meta["converter_version"]))
+    if not keep_locators:
+        bare = [{k: v for k, v in s.items() if k not in ("locator", "quote_sha256")} for s in span_rows]
+        try:
+            span_rows = fixture_gen.with_locators(bare, sha)
+        except (KeyError, TypeError, ValueError):  # a span broken on purpose (no page, say): leave it bare
+            span_rows = bare
+    if version in fixture_gen.PARSE_CONFIGS:
+        meta.update(fixture_gen.pack_fields(sha, version))
     outline_rows = outline if outline is not None else json.loads(base["outline.json"])
     spans_bytes = b"".join(canonical(s) + b"\n" for s in span_rows)
     outline_bytes = canonical(outline_rows)
-    meta = json.loads(base["manifest.json"])
     meta.update(
         span_count=len(span_rows),
         outline_count=len(outline_rows),
@@ -177,6 +194,15 @@ def pg(pg_container: tuple[Pg, Any]) -> Pg:
 @pytest.fixture
 def anyio_backend() -> str:
     return "asyncio"
+
+
+@pytest.fixture
+def r3_converter(monkeypatch: pytest.MonkeyPatch) -> None:
+    """FR-INGEST-40's held bump: `CONVERTER_VERSION` is r2, so tests that receive and import the r3 fixture
+    artifacts (make_artifact_fixture) deliberately make r3 the stack's version for their duration."""
+    import reader.ingest as ingest
+
+    monkeypatch.setattr(ingest, "CONVERTER_VERSION", fixture_gen.CONVERTER_VERSION)
 
 
 CONFIG = """\
@@ -305,12 +331,16 @@ async def session_for(w: World, handle: str) -> str:
 
 
 @asynccontextmanager
-async def client(w: World, handle: str | None = "ivan") -> AsyncIterator[httpx.AsyncClient]:
+async def client(
+    w: World, handle: str | None = "ivan", *, jobs: Any = None
+) -> AsyncIterator[httpx.AsyncClient]:
     from reader.api.app import create_app
 
     app = create_app(w.settings, w.engine, run_cleanup_task=False)
     app.state.blobs_root = w.blobs
     app.state.ingest_materials = w.config.materials
+    if jobs is not None:  # the api's job runtime (routes that enqueue)
+        app.state.jobs = jobs
     cookies = {SESSION_COOKIE: await session_for(w, handle)} if handle else {}
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(

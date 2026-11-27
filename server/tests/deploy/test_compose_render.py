@@ -14,7 +14,7 @@ from .conftest import (
     DEPLOY,
     PROFILE_SETS,
     PROFILES,
-    SERVER_ROLES,
+    SERVER_SERVICES,
     all_renders,
     render,
     requires_docker_cli,
@@ -29,7 +29,8 @@ LOCAL_IMAGES = {
     "reader-caddy:local", "reader-embed:local",
     "reader-mlflow:local",  # FR-DEPLOY-13 (paired SRV-OBS change)
 }
-BASE = {"caddy", "api", "worker", "postgres", "embed"}  # embed: paired SRV-SEARCH change (FR-DEPLOY-1)
+# embed: the paired SRV-SEARCH change (FR-DEPLOY-1); worker-judge: FR-DEPLOY-16
+BASE = {"caddy", "api", "worker", "worker-judge", "postgres", "embed"}
 
 
 @pytest.mark.parametrize(
@@ -207,8 +208,8 @@ def test_volumes_and_mounts() -> None:
     assert named["postgres"] == {"pgdata"}
     assert {n for n, vols in named.items() if "pgdata" in vols} == {"postgres"}
     assert {n for n, vols in named.items() if "blobs" in vols} == {"api", "worker"}
-    # server roles and agent-proxy: the override's reader.yaml bind
-    assert {n for n, b in binds.items() if b} == {"caddy", *SERVER_ROLES, "agent-proxy"}
+    # server services and agent-proxy: the override's reader.yaml bind (worker-judge: FR-DEPLOY-16 f)
+    assert {n for n, b in binds.items() if b} == {"caddy", *SERVER_SERVICES, "agent-proxy"}
     caddy_binds = {(m["target"], m.get("read_only", False)) for m in binds["caddy"]}
     assert caddy_binds == {("/etc/caddy/Caddyfile", True)}  # the SPA is in the reader-caddy image
     labels = {
@@ -238,7 +239,7 @@ SETUP_BIND_TARGET = "/etc/reader/mlflow-setup.yaml"  # FR-DEPLOY-15 (d), (g): th
 def test_base_has_no_bind_on_server_roles() -> None:
     for profiles in PROFILE_SETS:
         services = render(profiles)["services"]
-        for role in SERVER_ROLES:
+        for role in SERVER_SERVICES:
             if role not in services:
                 continue
             binds = _binds(services[role])
@@ -255,11 +256,11 @@ def test_override_binds_the_config_file_into_server_roles_and_agent_proxy_only()
         name for name, svc in services.items()
         if any(m["target"] == CONFIG_BIND["target"] for m in svc.get("volumes") or [])
     }
-    assert with_config == {*SERVER_ROLES, "agent-proxy"}
-    for role in (*SERVER_ROLES, "agent-proxy"):
+    assert with_config == {*SERVER_SERVICES, "agent-proxy"}
+    for role in (*SERVER_SERVICES, "agent-proxy"):
         binds = [b for b in _binds(services[role]) if b["target"] != SETUP_BIND_TARGET or role != "worker"]
         assert binds == [CONFIG_BIND], role  # FR-DEPLOY-15 (g): the worker also keeps its setup-file bind
-    for role in SERVER_ROLES:
+    for role in SERVER_SERVICES:
         assert services[role]["environment"] == {"READER_CONFIG": CONFIG_BIND["target"]}, role
     assert not services["agent-proxy"].get("environment")
 

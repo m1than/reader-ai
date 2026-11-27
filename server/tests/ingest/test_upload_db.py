@@ -43,7 +43,7 @@ from .conftest import (
     world,
 )
 
-pytestmark = pytest.mark.anyio
+pytestmark = [pytest.mark.anyio, pytest.mark.usefixtures("r3_converter")]  # r3 artifacts, deliberately
 
 HERE = Path(__file__).resolve().parent
 CANARY_NAME = "QUOKKAZEBRA-name.pdf"
@@ -836,7 +836,7 @@ async def test_receive_under_a_claim_imports_the_upload(pg: Pg, tmp_path: Path) 
         assert fields == (material_id, "imported", "ru", "personal-use")
         assert mine["upload"]["id"] == view["id"] and mine["title"] == "Book"
         assert outline.status_code == 200 and spans.status_code == 200
-        assert spans.json()["spans"][0]["span_id"].startswith(sha(body) + ":")
+        assert spans.json()["spans"][0]["span_id"].startswith("spn:" + sha(body) + ":")
 
 
 async def test_receive_refusals_under_claims(pg: Pg, tmp_path: Path) -> None:

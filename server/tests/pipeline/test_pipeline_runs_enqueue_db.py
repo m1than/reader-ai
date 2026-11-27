@@ -23,7 +23,7 @@ import pytest
 
 from obs.conftest import obs_setup
 
-from .conftest import BY_NAME_HINT, FIXTURES, Pg, client, load_yaml, pipeline_env, scripts_for
+from .conftest import BY_NAME_HINT, FIXTURES, Pg, client, lab_modes, load_yaml, pipeline_env, scripts_for
 
 pytestmark = pytest.mark.anyio
 CASES = {c["name"]: c for c in load_yaml(FIXTURES / "loop-cases.yaml")["cases"]}
@@ -52,6 +52,7 @@ async def _compile(pg: Pg, tmp: Path, name: str, monkeypatch: pytest.MonkeyPatch
     with obs_setup("worker", enabled=enabled):
         async with pipeline_env(pg, tmp, labs=case.get("labs", "pass"), floors=RESERVES) as env:
             env.cli.scripts[:] = scripts_for(case["results"], case.get("labs", "pass"))
+            env.verify.modes[:] = lab_modes(case["results"])
             await env.import_plan()
             run = await env.compile(str(case.get("cap", "8.00")))
             for _ in range(6):
@@ -63,9 +64,9 @@ async def _compile(pg: Pg, tmp: Path, name: str, monkeypatch: pytest.MonkeyPatch
 
 
 @pytest.mark.parametrize("name", [
-    "clean-first-pass", "invalid-fact-report-exhausts-attempts", "one-loop-converges", "not-converged-after-loop",
-    "budget-stops-before-revise", "budget-stops-before-draft",
-])
+    "clean-first-pass", "invalid-fact-report-exhausts-attempts", "one-loop-converges", "four-checks-fail-once",
+    "loop-cap-before-first-loop", "budget-refused-mid-loop", "budget-stops-before-draft",
+])  # ADR-0039 order: the findings step ends a run (or a refusal before any notebook)
 async def test_a_run_end_enqueues_obs_runs_once(pg: Pg, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
                                                 name: str) -> None:
     """Only the step that ended the run counts (code review of 8466329: never one per stage)."""
@@ -177,14 +178,23 @@ async def test_the_ending_step_rule_case_by_case(pg: Pg, tmp_path: Path, monkeyp
     got: dict[str, Any] = {}
 
     async def inside(env: Any, run: Any) -> None:
-        last = int(await env.scalar("SELECT max(step) FROM compile_steps WHERE run_id = :r", r=run))
+        rows = {
+            int(r[0]): str(r[1])
+            for r in await env.rows("SELECT step, input_sha256 FROM compile_steps WHERE run_id = :r", r=run)
+        }
+        last = max(rows)
 
-        async def end(step: int, outcome: str) -> int:
-            await pipeline_jobs.after_end(env.engine, {"run_id": str(run), "step": step, "stage": "x"}, outcome)
+        async def end(step: int, outcome: str, stage: str = "findings", key: str | None = None) -> int:
+            payload = {"run_id": str(run), "step": step, "stage": stage, "input_sha256": key or rows[step]}
+            await pipeline_jobs.after_end(env.engine, payload, outcome)
             return int(await env.scalar("SELECT ends FROM compile_runs WHERE id = :r", r=run))
 
-        got["earlier"] = await end(last - 1, "succeeded")
+        got["earlier"] = await end(last - 1, "succeeded", "adversarial_review")
         got["dead"] = await end(last, "dead")
+        # ADR-0039 revision: a stale model step at the last step number has no row of its own: nothing counts
+        got["stale"] = await end(last, "succeeded", "fact_check")
+        # the same step and stage under another key (a lost transaction's earlier findings job): nothing counts
+        got["other_key"] = await end(last, "succeeded", key="0" * 64)
         got["final"] = await end(last, "succeeded")
         from sqlalchemy import text
 
@@ -193,7 +203,7 @@ async def test_the_ending_step_rule_case_by_case(pg: Pg, tmp_path: Path, monkeyp
         got["cancelled"] = await end(last, "succeeded")
 
     _, enqueued, _ = await _compile(pg, tmp_path, "clean-first-pass", monkeypatch, inside=inside)
-    assert got == {"earlier": 1, "dead": 1, "final": 2, "cancelled": 2}
+    assert got == {"earlier": 1, "dead": 1, "stale": 1, "other_key": 1, "final": 2, "cancelled": 2}
     assert [e[1]["end"] for e in enqueued] == [1, 2]
 
 

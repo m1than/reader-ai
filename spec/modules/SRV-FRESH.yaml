@@ -184,6 +184,15 @@ requirements:
       on, each cut to `span_chars_max` at a word boundary, until `sample_chars_max`. Every section gets a span before
       any section gets a second (VEC-FRESH-4 has more sections than the budget holds). The sample stores span ids and
       pages only. Same ingest and bounds → the same sample, byte for byte.
+      **Paired change, ADR-0039 / SRV-INGEST INV-INGEST-16, V.kl-active-view-readers:** "the material's current
+      ingest" is the ingest of its pack in the owner's head manifest entry (`reader.ingest.views.active_pack`;
+      none → `not_imported`), so FR-FRESH-10's staleness compares with the active pack's ingest; spans and outline
+      are read through `views.pack_spans` and `views.pack_outline`, never the `ingests` join, so a material with two
+      packs (r2 and r3) samples one pack, never both. The stored span ids (sample, `claims[].span`, and the ids in
+      FR-FRESH-3's `scan_inputs_sha256`) are the ones the view mints: `<sha>:<seq>` for a legacy (r2) pack (so every
+      existing hash and report is unchanged), the locator for an r3 pack (FR-INGEST-33). The rest of the SRV-INGEST
+      note for this module (the pack id in `scan_inputs_sha256`) is not part of this change. The [db] fixtures seal
+      their ingest as an active r2 pack (server/tests/ingest/packseed.py). [db] test_freshness_active_pack_db.py.
   - id: FR-FRESH-3
     text: >-
       Scan (stage a). One SRV-AGENT call, task `freshness_scan`, stage `scan`, `thinking_off`, no tools, its own

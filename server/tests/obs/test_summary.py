@@ -233,6 +233,10 @@ async def _seed(engine: Any) -> None:
                 ),
                 {"i": s["ingest_id"], "o": s["owner_id"], "n": s["seq"], "p": s["page"], "t": "x" * s["chars"]},
             )
+        from ingest.packseed import seal  # FR-OBS-17: the lengths come from each owner's active pack
+
+        for i in seed["ingests"]:
+            await seal(conn, uuid.UUID(str(i["owner_id"])), uuid.UUID(str(i["id"])), i["material_sha256"])
         for k in seed["job_keys"]:
             await run(
                 text(
@@ -359,6 +363,44 @@ async def test_tombstoned_lessons_and_courses_show_as_deleted_lessons(pg: Any) -
     assert of_course and all({k: course_gone[lid][k] for k in blank} == blank for lid in of_course)
     for rows in (one_gone, course_gone):
         assert round(sum(r["total_usd"] for r in rows.values()), 6) == total
+
+
+@pytest.mark.anyio
+async def test_two_packs_count_the_active_packs_characters_only(pg: Any) -> None:
+    """FR-OBS-17's paired change (ADR-0039 / SRV-INGEST INV-INGEST-16): an r3 pack of the owner's material never
+    adds to the r2 pack's characters; activated, it replaces them."""
+    from sqlalchemy import text
+
+    from ingest.packseed import R3, activate_pack, add_pack
+    from jobs.conftest import target
+    from reader.db import make_engine, migrate
+
+    summary = require("reader.obs.summary")
+    owner, sha = uuid.UUID(VEC["owner"]), "aa11" * 16
+    engine = make_engine(target(pg))
+
+    async def chars() -> dict[str, Any]:
+        async with engine.connect() as conn:
+            got = await summary.summary(conn, owner, days=7, now=NOW, tracing=TRACING)
+        return {r["lesson_id"]: r["chars"] for r in got["lessons"]["rows"]}
+
+    try:
+        await migrate(engine)
+        await _seed(engine)
+        before = await chars()
+        async with engine.begin() as conn:  # the seed has no users rows: foreign keys off, as _seed
+            await conn.execute(text("SET LOCAL session_replication_role = replica"))
+            r3 = await add_pack(conn, owner, sha, R3, [(1, "text", "y" * 300), (2, "text", "y" * 100)])
+        inactive = await chars()
+        async with engine.begin() as conn:
+            await conn.execute(text("SET LOCAL session_replication_role = replica"))
+            await activate_pack(conn, owner, r3)
+        active = await chars()
+    finally:
+        await engine.dispose()
+    assert inactive == before
+    assert 2000 in before.values() and 0 in before.values()
+    assert active == {k: 400 if v == 2000 else None if v == 0 else v for k, v in before.items()}
 
 
 @pytest.mark.anyio

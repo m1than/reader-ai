@@ -20,9 +20,10 @@ from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any, BinaryIO, Final
 
-from reader.ingest import CONVERTER_VERSION
+import reader.ingest as ingest
+from reader.ingest import CONVERTER_VERSION, locator
 
-FORMAT: Final = "reader-ingest/1"
+FORMAT: Final = "reader-ingest/2"  # revision 3: locators, quote hashes, parse_config and pack_id
 MEMBERS: Final = ("manifest.json", "spans.jsonl", "outline.json")
 # Structural caps (spec header): ceilings that keep the worker's 2 GiB safe while it parses line by line.
 CAPS: Final[Mapping[str, int]] = {
@@ -39,7 +40,9 @@ MAX_TITLE: Final = 1_024
 MAX_LEVEL: Final = 16
 MAX_COORD: Final = 1e5  # points; structural, far above any page size (A0 is 3,370 pt tall)
 KINDS: Final = frozenset({"text", "heading", "list_item", "formula", "code", "table", "figure"})
-SPAN_KEYS: Final = frozenset({"seq", "page", "kind", "level", "decoded", "text", "bbox"})
+SPAN_KEYS: Final = frozenset(
+    {"seq", "page", "kind", "level", "decoded", "text", "bbox", "locator", "quote_sha256"}
+)
 OUTLINE_KEYS: Final = frozenset({"seq", "level", "title", "page"})
 MANIFEST_KEYS: Final = frozenset(
     {
@@ -54,6 +57,8 @@ MANIFEST_KEYS: Final = frozenset(
         "outline_source",
         "spans_sha256",
         "outline_sha256",
+        "parse_config",
+        "pack_id",
     }
 )
 SHA256: Final = re.compile(r"[0-9a-f]{64}")
@@ -98,9 +103,25 @@ def artifact_id(manifest: bytes) -> str:
     return hashlib.sha256(manifest).hexdigest()
 
 
-def span_id(material_sha256: str, seq: int) -> str:
-    """FR-INGEST-17: the public id of a span."""
-    return f"{material_sha256}:{seq}"
+def pack_id(material_sha256: str, parse_config: Mapping[str, Any]) -> str:
+    """FR-INGEST-35: sha256 of the canonical {material_sha256, parse_config}; no owner."""
+    body = canonical({"material_sha256": material_sha256, "parse_config": dict(parse_config)})
+    return hashlib.sha256(body).hexdigest()
+
+
+def with_locators(material_sha256: str, spans: Sequence[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    """Each span with FR-INGEST-33's locator over its page's spans and FR-INGEST-34's quote hash."""
+    pages: dict[int, list[int]] = {}
+    for i, span in enumerate(spans):
+        pages.setdefault(int(span["page"]), []).append(i)
+    found: dict[int, str] = {}
+    for page, members in pages.items():
+        ids = locator.page_locators(material_sha256, page, [str(spans[i]["text"]) for i in members])
+        found.update(zip(members, ids, strict=True))
+    return [
+        {**span, "locator": found[i], "quote_sha256": locator.quote_sha256(str(span["text"]))}
+        for i, span in enumerate(spans)
+    ]
 
 
 # ---- writing (FR-INGEST-10) --------------------------------------------------------------------------------
@@ -118,8 +139,11 @@ def write_artifact(
     outline: Sequence[Mapping[str, Any]],
     converter_version: str = CONVERTER_VERSION,
 ) -> str:
-    """Write the three members into `out` (created) and return the artifact id."""
-    spans_bytes = b"".join(canonical(dict(s)) + b"\n" for s in spans)
+    """Write the three members into `out` (created) and return the artifact id; the locators, quote hashes,
+    parse_config and pack_id are computed here (revision 3), never taken from the input."""
+    bare = [{k: v for k, v in s.items() if k not in ("locator", "quote_sha256")} for s in spans]
+    spans_bytes = b"".join(canonical(s) + b"\n" for s in with_locators(material_sha256, bare))
+    config = ingest.PARSE_CONFIGS[converter_version]
     outline_bytes = canonical([dict(o) for o in outline])
     manifest = canonical(
         {
@@ -134,6 +158,8 @@ def write_artifact(
             "outline_source": outline_source,
             "spans_sha256": hashlib.sha256(spans_bytes).hexdigest(),
             "outline_sha256": hashlib.sha256(outline_bytes).hexdigest(),
+            "parse_config": dict(config),
+            "pack_id": pack_id(material_sha256, config),
         }
     )
     out.mkdir(parents=True, exist_ok=True)
@@ -188,6 +214,13 @@ def _check_manifest(raw: bytes) -> dict[str, Any]:
         raise ArtifactError("schema")
     if without != sorted(set(without)):
         raise ArtifactError("schema")
+    if not isinstance(meta["parse_config"], dict) or not isinstance(meta["pack_id"], str):
+        raise ArtifactError("schema")
+    pinned = ingest.PARSE_CONFIGS.get(version)
+    if pinned is None:
+        raise ArtifactError("version_mismatch")
+    if meta["parse_config"] != pinned or meta["pack_id"] != pack_id(meta["material_sha256"], pinned):
+        raise ArtifactError("pack_mismatch")
     return meta
 
 
@@ -224,6 +257,10 @@ def check_span(span: Any, seq: int, page_count: int) -> None:
     x0, y0, x1, y1 = bbox
     if not (0 <= x0 <= x1 <= MAX_COORD and 0 <= y0 <= y1 <= MAX_COORD):
         raise ArtifactError("schema")
+    if not isinstance(span["locator"], str) or not isinstance(span["quote_sha256"], str):
+        raise ArtifactError("schema")
+    if span["quote_sha256"] != locator.quote_sha256(text):
+        raise ArtifactError("locator_mismatch")
 
 
 def check_outline(entries: Any, page_count: int) -> None:
@@ -242,17 +279,26 @@ def check_outline(entries: Any, page_count: int) -> None:
             _int(entry["page"], 1, page_count)
 
 
-def _spans(handle: BinaryIO, page_count: int) -> tuple[int, str]:
+def _spans(handle: BinaryIO, page_count: int, material_sha256: str) -> tuple[int, str]:
     digest = hashlib.sha256()
     count = 0
+    pages: dict[int, tuple[list[int], list[str]]] = {}  # page → (code-point lengths, locators); no texts
     for line in handle:
         digest.update(line)
         if not line.endswith(b"\n"):
             raise ArtifactError("schema")
         if count >= MAX_SPANS:
             raise ArtifactError("schema")
-        check_span(_json(line), count, page_count)
+        span = _json(line)
+        check_span(span, count, page_count)
+        lengths, ids = pages.setdefault(span["page"], ([], []))
+        lengths.append(len(span["text"]))
+        ids.append(span["locator"])
         count += 1
+    for page, (lengths, ids) in pages.items():  # INV-INGEST-1 rev: FR-INGEST-33 over the page's spans
+        want = [locator.pdf_locator(material_sha256, page, *r) for r in locator.ranges_of_lengths(lengths)]
+        if ids != want:
+            raise ArtifactError("locator_mismatch")
     return count, digest.hexdigest()
 
 
@@ -265,7 +311,7 @@ def validate(manifest: bytes, spans: BinaryIO, outline: bytes) -> dict[str, Any]
         raise ArtifactError("incomplete")
     entries = _json(outline)
     check_outline(entries, meta["page_count"])
-    count, digest = _spans(spans, meta["page_count"])
+    count, digest = _spans(spans, meta["page_count"], meta["material_sha256"])
     if digest != meta["spans_sha256"]:
         raise ArtifactError("hash_mismatch")
     if count != meta["span_count"] or len(entries) != meta["outline_count"]:

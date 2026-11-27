@@ -257,6 +257,9 @@ async def add_material(
                 ),
                 {"i": ingest, "o": owner, "q": seq, "p": page, "k": span_kinds[seq], "t": body},
             )
+        from ingest.packseed import seal  # FR-SEARCH-5: the ingest's pack, active (searched) by default
+
+        await seal(conn, owner, ingest, sha)
     result: uuid.UUID = ingest
     return result
 
@@ -293,9 +296,12 @@ async def page_of(engine: Any, chunk_id: int) -> int:
 
 
 async def reset(w: World) -> None:
-    """Empty the search and test-only ingest tables (between property-test examples)."""
+    """Empty the search and test-only ingest tables (between property-test examples). Packs and the manifest
+    are tombstones and append-only under SRV-INGEST's triggers, so this session switches triggers off."""
     from sqlalchemy import text
 
     async with w.engine.begin() as conn:
-        for table in ("search_chunks", "search_embeds", "material_spans", "ingests", "materials"):
+        await conn.execute(text("SET LOCAL session_replication_role = replica"))
+        for table in ("search_chunks", "search_embeds", "manifest_entries", "pending_activations",
+                      "material_spans", "base_packs", "ingests", "materials"):
             await conn.execute(text(f"DELETE FROM {table}"))

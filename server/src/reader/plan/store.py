@@ -1,4 +1,5 @@
-"""SRV-PLAN's own reader over SRV-INGEST's tables, and the `study_plans` rows (FR-PLAN-6, -9, -11).
+"""SRV-PLAN's reader of the material's active pack (SRV-INGEST `reader.ingest.views`, INV-INGEST-16), and the
+`study_plans` rows (FR-PLAN-6, -9, -11).
 
 Reads only the owner's rows. Titles are read for the response and never logged.
 """
@@ -13,6 +14,7 @@ from typing import Any
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from reader.ingest import views
 from reader.lessons import store as lessons
 from reader.plan.planner import Fixed
 
@@ -20,45 +22,39 @@ from reader.plan.planner import Fixed
 async def page_chars(
     conn: AsyncConnection, owner_id: uuid.UUID, material_sha256: str
 ) -> tuple[uuid.UUID, tuple[int, ...], tuple[int, ...]] | None:
-    """(ingest id, span characters per page, spans per page) for pages 1..page_count; None if not imported."""
-    row = (
+    """(ingest id, span characters per page, spans per page) for pages 1..page_count, from the material's
+    active pack (SRV-INGEST INV-INGEST-16); None if not imported (no active pack)."""
+    count = (
         await conn.execute(
             text(
-                "SELECT i.id, m.page_count FROM materials m JOIN ingests i ON i.material_id = m.id"
+                "SELECT page_count FROM materials"
                 # FR-PLAN-20: a deleted material is not planned (404).
-                " WHERE m.owner_id = :o AND m.sha256 = :s AND m.deleted_at IS NULL"
+                " WHERE owner_id = :o AND sha256 = :s AND deleted_at IS NULL"
             ),
             {"o": owner_id, "s": material_sha256},
         )
-    ).first()
-    if row is None:
+    ).scalar()
+    pack = None if count is None else await views.active_pack(conn, owner_id, material_sha256)
+    if count is None or pack is None:
         return None
-    ingest_id, count = row[0], int(row[1])
-    chars = [0] * count
-    spans = [0] * count
-    for page, n, k in await conn.execute(
-        text(
-            "SELECT page, sum(char_length(text)), count(*) FROM material_spans"
-            " WHERE ingest_id = :i AND owner_id = :o GROUP BY page"
-        ),
-        {"i": ingest_id, "o": owner_id},
-    ):
+    chars = [0] * int(count)
+    spans = [0] * int(count)
+    for page, n, k in await views.page_stats(conn, pack):
         if 1 <= page <= count:
-            chars[page - 1], spans[page - 1] = int(n), int(k)
-    return ingest_id, tuple(chars), tuple(spans)
+            chars[page - 1], spans[page - 1] = n, k
+    return pack.ingest_id, tuple(chars), tuple(spans)
 
 
 async def lesson_chars(conn: AsyncConnection, owner_id: uuid.UUID, lesson_id: uuid.UUID) -> int | None:
-    """FR-PLAN-13: span characters of the lesson's pages, from the owner's own ingest of its material.
+    """FR-PLAN-13: span characters of the lesson's pages, from the owner's active pack of its material.
 
-    None for a lesson without a `course_plans` row of this owner or a material without an ingest.
+    None for a lesson without a `course_plans` row of this owner or a material without an active pack.
     """
     row = (
         await conn.execute(
             text(
-                "SELECT i.id, p.pdf_first, p.pdf_last FROM course_plans p"
+                "SELECT p.material_sha256, p.pdf_first, p.pdf_last FROM course_plans p"
                 " JOIN materials m ON m.owner_id = p.owner_id AND m.sha256 = p.material_sha256"
-                " JOIN ingests i ON i.material_id = m.id AND i.owner_id = p.owner_id"
                 " JOIN lessons l ON l.id = p.lesson_id JOIN courses c ON c.id = l.course_id"
                 " WHERE p.owner_id = :o AND p.lesson_id = :l"
                 " AND l.deleted_at IS NULL AND c.deleted_at IS NULL"  # SRV-LESSON INV-LESSON-22
@@ -66,31 +62,19 @@ async def lesson_chars(conn: AsyncConnection, owner_id: uuid.UUID, lesson_id: uu
             {"o": owner_id, "l": lesson_id},
         )
     ).first()
-    if row is None:
+    pack = None if row is None else await views.active_pack(conn, owner_id, str(row[0]))
+    if row is None or pack is None:
         return None
-    total = (
-        await conn.execute(
-            text(
-                "SELECT coalesce(sum(char_length(text)), 0) FROM material_spans"
-                " WHERE ingest_id = :i AND owner_id = :o AND page BETWEEN :f AND :t"
-            ),
-            {"i": row[0], "o": owner_id, "f": row[1], "t": row[2]},
-        )
-    ).scalar()
-    return int(total or 0)
+    return await views.span_chars(conn, pack, int(row[1]), int(row[2]))
 
 
 async def outline_entries(
     conn: AsyncConnection, owner_id: uuid.UUID, ingest_id: uuid.UUID
 ) -> tuple[tuple[int, int | None, str], ...]:
-    rows = await conn.execute(
-        text(
-            "SELECT level, page, title FROM material_outline"
-            " WHERE ingest_id = :i AND owner_id = :o ORDER BY seq"
-        ),
-        {"i": ingest_id, "o": owner_id},
-    )
-    return tuple((int(r[0]), None if r[1] is None else int(r[1]), str(r[2])) for r in rows)
+    pack = await views.pack_of_ingest(conn, ingest_id)
+    if pack is None or pack.owner_id != owner_id:
+        return ()
+    return tuple((e.level, e.page, e.title) for e in await views.pack_outline(conn, pack))
 
 
 @dataclass(frozen=True)

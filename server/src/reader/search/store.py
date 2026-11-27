@@ -20,6 +20,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
 from reader.config import load_config
+from reader.ingest import views
 from reader.search import embed_client, params
 from reader.search.errors import EmbedUnavailable, SearchError
 from reader.search.fusion import rrf, snippet, tsquery_text
@@ -49,6 +50,19 @@ async def material_deleted(engine: AsyncEngine, owner_id: UUID, material_sha256:
             {"o": owner_id, "s": material_sha256},
         )
         return row.first() is not None
+
+
+async def forget_legacy(conn: AsyncConnection, owner_id: UUID, ingest_id: UUID) -> int:
+    """FR-SEARCH-21: the owner's chunk and embed rows of one ingest, deleted on the caller's connection
+    (SRV-INGEST's GC and purge call it in their transaction); returns the number of rows deleted."""
+    count = 0
+    for table in ("search_chunks", "search_embeds"):  # constants only
+        done = await conn.execute(
+            text(f"DELETE FROM {table} WHERE owner_id = :o AND ingest_id = :i"),  # noqa: S608
+            {"o": owner_id, "i": ingest_id},
+        )
+        count += int(done.rowcount)
+    return count
 
 
 @dataclass(frozen=True)
@@ -102,23 +116,31 @@ async def fts_config_of(conn: AsyncConnection, material_sha256: str, ingest_id: 
     if ingest_id is None:
         sql = "SELECT config_id FROM materials WHERE sha256 = :s ORDER BY id LIMIT 1"
         row = (await conn.execute(text(sql), {"s": material_sha256})).first()
-    else:
-        sql = "SELECT m.config_id FROM ingests i JOIN materials m ON m.id = i.material_id WHERE i.id = :i"
-        row = (await conn.execute(text(sql), {"i": ingest_id})).first()
+    else:  # the material row of the ingest's pack owner (SRV-INGEST INV-INGEST-16: through its views)
+        pack = await views.pack_of_ingest(conn, ingest_id)
+        row = None if pack is None else (await conn.execute(
+            text("SELECT config_id FROM materials WHERE owner_id = :o AND sha256 = :s"),
+            {"o": pack.owner_id, "s": pack.material_sha256},
+        )).first()
     if row is None:
         return params.fts_config_for(None)
     return await _fts_config(conn, row[0], material_sha256, _languages)
 
 
 async def current_keys(conn: AsyncConnection, owner_id: UUID) -> dict[str, Any]:
-    """FR-SEARCH-7: per embedded ingest of the owner, the params_sha256 its material would get now."""
+    """FR-SEARCH-7: per embedded ingest of the owner's active packs (SRV-INGEST INV-INGEST-16: one pack per
+    material, never two), the params_sha256 its material would get now."""
+    heads = (await views.active_packs(conn, owner_id)).values()
     rows = await conn.execute(
         text(
             "SELECT DISTINCT e.ingest_id, m.config_id, m.sha256 FROM search_embeds e"
-            " JOIN ingests i ON i.id = e.ingest_id JOIN materials m ON m.id = i.material_id"
+            " JOIN unnest(CAST(:a AS uuid[]), CAST(:s AS text[])) AS h(ingest_id, sha256)"
+            " ON h.ingest_id = e.ingest_id"
+            " JOIN materials m ON m.owner_id = e.owner_id AND m.sha256 = h.sha256"
             " WHERE e.owner_id = :o AND e.model = :m"
         ),
-        {"o": owner_id, "m": params.MODEL_ID},
+        {"o": owner_id, "m": params.MODEL_ID, "a": [p.ingest_id for p in heads],
+         "s": [p.material_sha256 for p in heads]},
     )
     loaded: list[dict[str, str]] = []
 
@@ -129,6 +151,20 @@ async def current_keys(conn: AsyncConnection, owner_id: UUID) -> dict[str, Any]:
 
     pairs = [(r[0], params.params_sha256(await _fts_config(conn, r[1], r[2], languages))) for r in rows.all()]
     return {"ci": [p[0] for p in pairs], "cp": [p[1] for p in pairs]}
+
+
+async def _span_ids(conn: AsyncConnection, rows: list[Any]) -> dict[Any, dict[int, str]]:
+    """ingest id → (seq → span id) as SRV-INGEST's views mint it: `<sha>:<seq>` for a legacy pack, the locator
+    for an r3 pack (FR-SEARCH-5's paired change)."""
+    seqs: dict[Any, set[int]] = {}
+    for r in rows:
+        seqs.setdefault(r[6], set()).update([int(r[4]), *(int(s) for s in r[3])])
+    out: dict[Any, dict[int, str]] = {}
+    for ingest_id, wanted in seqs.items():
+        pack = await views.pack_of_ingest(conn, ingest_id)
+        if pack is not None:
+            out[ingest_id] = await views.span_ids(conn, pack, sorted(wanted))
+    return out
 
 
 def vector_literal(vector: list[float]) -> str:
@@ -210,23 +246,28 @@ async def search(
             return SearchResult([], degraded)
         rows = await conn.execute(
             text(
-                "SELECT id, material_sha256, page, span_seqs, primary_seq, text FROM search_chunks"
+                "SELECT id, material_sha256, page, span_seqs, primary_seq, text, ingest_id FROM search_chunks"
                 " WHERE id = ANY(:ids)"
             ),
             {"ids": [f.id for f in fused]},
         )
         by_id = {int(r[0]): r for r in rows}
+        ids = await _span_ids(conn, list(by_id.values()))
     hits = []
     for f in fused:
         row = by_id[f.id]
         sha = str(row[1])
+        of = ids.get(row[6], {})
+        primary = of.get(int(row[4]))
+        if primary is None:  # no span id from the view (a gone pack or span): dropped, never minted
+            continue
         hits.append(
             Hit(
                 chunk_id=f.id,
                 material_sha256=sha,
                 page=int(row[2]),
-                span_id=f"{sha}:{row[4]}",
-                span_ids=[f"{sha}:{seq}" for seq in row[3]],
+                span_id=primary,
+                span_ids=[of[int(seq)] for seq in row[3] if int(seq) in of],
                 snippet=snippet(str(row[5])),
                 score=f.score,
                 dense_rank=f.dense_rank,

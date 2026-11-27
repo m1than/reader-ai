@@ -45,6 +45,14 @@
 #     every check listed under `defers` for G2.
 #
 # Red phase: tests import the module inside each test body, so that each test fails on its own assertion.
+#
+# Paired change (2026-11-26, V/kl-pipeline-checks, SRV-PIPELINE's ADR-0039 revision, owner-approved): the cell schema
+# (VEC-LESSON-1's cell.schema.json, runtime copy equal to the fixture) gains, all optional so stored revisions stay
+# valid: `credibility` (integer 1–6, Admiralty information credibility, written by code only) on `explain` claims
+# and on `changed` and `erratum` cells; `reference` on `lab` cells (`{kind: test_vector, span?: <span id>,
+# expected: [text]}`, `{kind: library, module}` or `{kind: second_implementation}`, SRV-PIPELINE FR-PIPELINE-25);
+# and `rules` in the provenance stage enum and in `finding.stage`. No requirement text and no oracle of an existing
+# SRV-LESSON test changes; the schema-equality test reads the new fixture bytes.
 
 id: SRV-LESSON
 title: Lesson notebooks (ADR-0004) — validate, store as content-addressed revisions with stage records, list and open (slice subset)

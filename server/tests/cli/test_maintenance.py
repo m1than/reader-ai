@@ -213,7 +213,7 @@ def test_backup_restarts_the_writers_after_a_partial_stop(tmp_path: Path) -> Non
     with held_lock(world.ctx.run_dir):
         assert _main(world, "backup", str(tmp_path / "b"), "--config", str(config)) != 0
     (start,) = world.runner.argvs("start")
-    assert set(start[5:]) == {"api", "worker"}
+    assert set(start[5:]) == {"api", "worker", "worker-judge"}  # FR-CLI-17 amended (ADR-0039 B7b)
     assert world.runner.argvs("pg_dump") == []
 
 
@@ -238,8 +238,8 @@ def test_backup_stops_and_restarts_the_writers(tmp_path: Path) -> None:
     (stop,) = world.runner.argvs("stop")
     (start,) = world.runner.argvs("start")
     assert stop[:5] == ["docker", "compose", "-p", "reader-vec", "stop"]
-    assert set(stop[5:]) == {"api", "worker"}
-    assert set(start[5:]) == {"api", "worker"}
+    assert set(stop[5:]) == {"api", "worker", "worker-judge"}  # FR-CLI-17 amended (ADR-0039 B7b)
+    assert set(start[5:]) == {"api", "worker", "worker-judge"}
     calls = [c.argv for c in world.runner.calls]
     assert calls.index(stop) < calls.index(world.runner.argvs("pg_dump")[0]) < calls.index(start)
 
@@ -343,7 +343,7 @@ def test_restore_argv_and_stdin(tmp_path: Path) -> None:
     assert pg.timeout == 600
     assert {c.timeout for c in untar.values()} == {120}
     (stop,) = world.runner.argvs("stop")
-    assert set(stop[5:]) == {"api", "worker", "caddy"}
+    assert set(stop[5:]) == {"api", "worker", "worker-judge", "caddy"}  # FR-CLI-18 amended (ADR-0039 B7b)
     (check,) = [c for c in world.runner.calls if EMPTY_CHECK in c.argv]
     assert check.argv == [
         "docker",
@@ -379,7 +379,7 @@ def test_restore_restarts_the_services_after_a_failed_pg_restore(tmp_path: Path)
     with held_lock(world.ctx.run_dir):
         assert _main(world, "restore", str(archive), "--config", str(config)) != 0
     (start,) = world.runner.argvs("start")
-    assert set(start[5:]) == {"api", "worker", "caddy"}
+    assert set(start[5:]) == {"api", "worker", "worker-judge", "caddy"}  # FR-CLI-18 amended
     assert "restore_failed" in world.err
 
 

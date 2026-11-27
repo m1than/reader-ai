@@ -259,6 +259,26 @@ requirements:
       SRV-OBS FR-OBS-13 (2026-11-24; tracing only): chunking runs inside an `ingest.chunk` child span (the chunk
       count) and each passage batch inside an `embed.batch` child (the batch size and the vectors returned); counts
       only.
+      **Paired change, ADR-0039 / SRV-INGEST INV-INGEST-16, V.kl-active-view-readers** (the legacy chunk path,
+      kept until V.kl-search-find): this module reads ingest rows only through `reader.ingest.views`, never the
+      `ingests` join. Step 1 resolves `args.ingest_id` to its base pack (`pack_of_ingest`, the material sha256 must
+      match; none while the material has another pack → `ingest_superseded`; none at all → `IngestNotReady`); step 3
+      reads that pack's spans (`pack_spans`); FR-SEARCH-6's language reads the material row of the pack's owner. After
+      its rows (or when the key's `search_embeds` row already exists) the handler calls SRV-INGEST's
+      `manifest.try_activate(conn, owner_id, pack_id)` in the run transaction (FR-INGEST-39's contract, without a
+      vectors overlay until V.kl-search-find), so a newly imported pack becomes the material's active pack once it is
+      searchable instead of only at the next worker start. FR-SEARCH-9's current key is the ingest of the material's
+      active pack, else of its newest live pack (sealed, neither collected nor purged; the one awaiting activation);
+      the worker-start hook walks every live pack. FR-SEARCH-7's candidates are restricted to the ingests of the
+      owner's active packs (`current_keys`), so a material with two embedded packs (r2 and r3) is searched in one,
+      never both, and a result's span ids are the ones the view mints (`span_ids`: `<sha>:<seq>` for a legacy pack,
+      the locator for an r3 pack); a hit whose primary span gets no id from the view (its pack or span gone) is
+      dropped, never given a minted `<sha>:<seq>`. No `base_packs` join here either: the ingest's owner and
+      material come from `pack_of_ingest`, the current keys from `active_packs`. Before any r2 → r3 re-conversion,
+      SRV-INGEST FR-INGEST-40's merge gate (i) needs this path to keep a replacing pack inactive until its
+      `search_embeds` row exists, or V.kl-search-find's vector overlays (the r3 bump is held until then). The [db]
+      fixtures seal their ingest as an active r2 pack (server/tests/ingest/packseed.py). [db]
+      test_search_active_pack_db.py.
   - id: FR-SEARCH-6
     text: >-
       **Full-text configuration.** A material's `fts_config` comes from its reader.yaml `materials[].language`, looked up
@@ -348,6 +368,16 @@ requirements:
       hit is in material A: after A is deleted the hit is gone and B's results are unchanged; the material filter
       on A → 404; after restore the first result set returns exactly; no row of search_chunks or search_embeds
       changed across the cycle.
+  - id: FR-SEARCH-21   # paired change for SRV-INGEST FR-INGEST-44, -45 (V.kl-ingest-packs, ADR-0039 P6)
+    text: >-
+      **Forgetting a legacy ingest.** `reader.search.store.forget_legacy(conn, owner_id, ingest_id)` deletes the
+      owner's `search_chunks` and `search_embeds` rows of that ingest on the caller's connection and returns the
+      number of rows deleted; it never commits. SRV-INGEST's GC and owner purge call it in the transaction that
+      collects or purges the ingest's pack (under the pack's lock), so a purged pack leaves no chunk text behind. It
+      lives in `store.py`, not in the package `__init__`, because the embed image carries that file and it must
+      import nothing (ADR-0028). Another owner's rows and other ingests' rows stay. [db] test_search_forget_db.py:
+      the call deletes exactly the owner's chunk and embed rows of that ingest and returns their count; a second
+      ingest of the same owner and a row of another owner stay; a second call deletes nothing.
 
 invariants:
   - id: INV-SEARCH-1

@@ -95,6 +95,7 @@ _VALUE_RULES: Final[dict[str, Callable[[Any], bool]]] = {
     "old": _setting_value,
     "new": _setting_value,
     "file": _setting_value,
+    "pack_id": _fullmatch(_SHA),
 }
 
 _ID_RULES: Final[dict[str, Callable[[Any], bool]]] = {
@@ -136,6 +137,7 @@ AUDIT_ACTIONS: Final[Mapping[str, Action]] = {
     "material.rename": _a("material", "material", "version"),
     "material.delete": _a("material", "material", "courses"),
     "material.restore": _a("material", "material", "courses"),
+    "material.purge_pack": _a("material", "material", "pack_id"),
     "compile.cancel": _a("run", "uuid", "lesson_id"),
     "tutor.clear": _a("lesson", "uuid", "count"),
     "user.sessions_revoke": _a("user", "uuid", "count"),

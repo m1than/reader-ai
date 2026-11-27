@@ -1,0 +1,62 @@
+# SRV-INGEST FR-INGEST-37 (ADR-0039 B3, F1-F6): the closed facet vocabularies, validated by facets.schema.json.
+# A facet is enabled only with a consumer that resolves (a requirement id or a view of reader.ingest.manifest.VIEWS);
+# a disabled facet names what it waits for. Its sha256 is an input of the tags overlay and of policy_version.
+version: 1
+# FR-INGEST-37's test-vector rule (initial value): a code span is `test_vector` when at least `min_lines` of its
+# lines match. Unmeasured on the pilot (recorded deviation): measure before `form` is enabled.
+test_vector_rule:
+  min_lines: 2
+  pattern: '^\s*([A-Za-z][\w .-]{0,40}\s*[:=]\s*)?((0x)?[0-9A-Fa-f]{32,}|[xt](prv|pub)[1-9A-HJ-NP-Za-km-z]{100,})\s*$'
+facets:
+  role:
+    level: source
+    values: [map, normative, time_axis, verification, reference_impl]
+    by: owner
+    enabled: false
+    consumer: SRV-SEARCH  # route filters
+  reliability:
+    level: source
+    values: [A, B, C, D, E, F]
+    by: owner
+    enabled: false
+    consumer: SRV-PIPELINE  # the fact-check threshold
+  credibility:
+    level: finding
+    values: ["1", "2", "3", "4", "5", "6"]
+    by: model
+    enabled: false
+    consumer: SRV-KB  # findings carry SRV-PIPELINE FR-PIPELINE-27's credibility
+  as_of:
+    level: source
+    type: date
+    by: owner
+    enabled: false
+    consumer: SRV-SEARCH  # the current-state route
+  license:
+    level: source
+    values: [personal-use, shareable]
+    by: rule
+    enabled: true
+    consumer: profile_for_pack  # FR-INGEST-36: the entitlement and personal-use checks
+  form:
+    level: span
+    values: [prose, code, formula, table, figure, test_vector]
+    by: rule
+    enabled: false
+    consumer: SRV-SEARCH  # a card-shape requirement; the ablation dropped the form filter
+    rule:
+      heading: prose
+      text: prose
+      list_item: prose
+      code: code
+      formula: formula
+      table: table
+      figure: figure
+  topic:
+    level: concept
+    tree: sectors
+    multi: true
+    grows: true
+    by: model
+    enabled: false
+    consumer: SRV-KB  # brain_map, the coverage objective

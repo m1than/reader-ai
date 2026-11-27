@@ -11,6 +11,7 @@ probes:
   - { id: http-external,  action: "urllib.request.urlopen('https://pypi.org', timeout=3)", expect: connect_fails, level: [image, live] }
   - { id: dns-postgres,   action: "socket.getaddrinfo('postgres', 5432)",          expect: resolve_fails, level: [live] }
   - { id: dns-worker,     action: "socket.getaddrinfo('worker', 80)",              expect: resolve_fails, level: [live] }
+  - { id: dns-worker-judge, action: "socket.getaddrinfo('worker-judge', 80)",      expect: resolve_fails, level: [live] }  # ADR-0039 B7b
   - { id: dns-caddy,      action: "socket.getaddrinfo('caddy', 443)",              expect: resolve_fails, level: [live] }
   - { id: dns-mcp,        action: "socket.getaddrinfo('mcp', 8001)",               expect: resolve_fails, level: [live] }
   - { id: dns-agentproxy, action: "socket.getaddrinfo('agent-proxy', 80)",         expect: resolve_fails, level: [live] }

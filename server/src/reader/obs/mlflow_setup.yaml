@@ -18,7 +18,7 @@ experiments:
       reader.kind: bench
       reader.managed_by: obs.setup
 datasets:
-  names: [tutor-bench-v2, search-bench-v1]
+  names: [tutor-bench-v2, search-bench-v1, brain-eval-v1]
 logged_models:
   name: reader-agent
   tag: reader.version_key
@@ -35,3 +35,4 @@ run_tags:
   - reader.complete
   - reader.bench
   - reader.bench_upload
+  - reader.eval_id

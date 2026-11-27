@@ -19,7 +19,7 @@ from obs.conftest import finished, obs_setup
 
 from .conftest import CANARY, Pg, build_artifact, need, tar_of, world
 
-pytestmark = pytest.mark.anyio
+pytestmark = [pytest.mark.anyio, pytest.mark.usefixtures("r3_converter")]  # r3 artifacts, deliberately
 
 
 def _files() -> dict[str, bytes]:

@@ -1,4 +1,5 @@
-"""SQL for SRV-FRESH's tables and its reads of SRV-INGEST's (FR-FRESH-1, -2, -10, -11).
+"""SQL for SRV-FRESH's tables and its reads of SRV-INGEST's active packs through `reader.ingest.views`
+(FR-FRESH-1, -2, -10, -11; SRV-INGEST INV-INGEST-16).
 
 Every query is scoped by owner. Report updates match only `running` rows, so a report is never changed after
 `done`, `failed` or `budget_refused` (FR-FRESH-10). Nothing outside `reader.freshness` names these tables
@@ -22,6 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 from reader.freshness.bibliography import FIELDS, with_meta
 from reader.freshness.errors import FreshError
 from reader.freshness.sample import OutlineRow, SpanRow
+from reader.ingest import views
 
 JSON_COLUMNS: Final = (
     "bibliography",
@@ -96,15 +98,18 @@ def _uuid(value: str) -> uuid.UUID | None:
 
 
 _MATERIAL: Final = (
-    "SELECT m.id, m.sha256, m.config_id, m.page_count, i.id, m.deleted_at IS NOT NULL FROM materials m"
-    " LEFT JOIN ingests i ON i.material_id = m.id AND i.owner_id = m.owner_id WHERE m.owner_id = :o AND "
+    "SELECT m.id, m.sha256, m.config_id, m.page_count, m.deleted_at IS NOT NULL FROM materials m"
+    " WHERE m.owner_id = :o AND "
 )
 
 
-def _material(row: Any) -> MaterialRow | None:
+async def _material(conn: AsyncConnection, owner_id: uuid.UUID, row: Any) -> MaterialRow | None:
+    """The ingest is the one of the material's pack in the owner's head entry (FR-FRESH-2's paired change)."""
     if row is None:
         return None
-    return MaterialRow(row[0], str(row[1]), str(row[2]), int(row[3]), row[4], bool(row[5]))
+    pack = await views.active_pack(conn, owner_id, str(row[1]))
+    ingest_id = None if pack is None else pack.ingest_id
+    return MaterialRow(row[0], str(row[1]), str(row[2]), int(row[3]), ingest_id, bool(row[4]))
 
 
 async def live_material(conn: AsyncConnection, owner_id: uuid.UUID, ident: str) -> MaterialRow | None:
@@ -121,34 +126,32 @@ async def find_material(conn: AsyncConnection, owner_id: uuid.UUID, ident: str) 
         if found is not None:
             return found
     sql = _MATERIAL + "m.config_id = :c ORDER BY m.created_at, m.id LIMIT 1"
-    return _material((await conn.execute(text(sql), {"o": owner_id, "c": ident})).first())
+    row = (await conn.execute(text(sql), {"o": owner_id, "c": ident})).first()
+    return await _material(conn, owner_id, row)
 
 
 async def material(conn: AsyncConnection, owner_id: uuid.UUID, material_id: uuid.UUID) -> MaterialRow | None:
     row = (await conn.execute(text(_MATERIAL + "m.id = :m"), {"o": owner_id, "m": material_id})).first()
-    return _material(row)
+    return await _material(conn, owner_id, row)
+
+
+async def _pack(conn: AsyncConnection, owner_id: uuid.UUID, ingest_id: uuid.UUID) -> views.Pack | None:
+    pack = await views.pack_of_ingest(conn, ingest_id)
+    return pack if pack is not None and pack.owner_id == owner_id else None
 
 
 async def spans(conn: AsyncConnection, owner_id: uuid.UUID, ingest_id: uuid.UUID) -> list[SpanRow]:
-    rows = await conn.execute(
-        text(
-            "SELECT seq, page, kind, text FROM material_spans"
-            " WHERE ingest_id = :i AND owner_id = :o ORDER BY seq"
-        ),
-        {"i": ingest_id, "o": owner_id},
-    )
-    return [SpanRow(int(r[0]), int(r[1]), str(r[2]), str(r[3])) for r in rows]
+    pack = await _pack(conn, owner_id, ingest_id)
+    if pack is None:
+        return []
+    return [SpanRow(s.seq, s.page, s.kind, s.text, s.span_id) for s in await views.pack_spans(conn, pack)]
 
 
 async def outline(conn: AsyncConnection, owner_id: uuid.UUID, ingest_id: uuid.UUID) -> list[OutlineRow]:
-    rows = await conn.execute(
-        text(
-            "SELECT seq, level, title, page FROM material_outline"
-            " WHERE ingest_id = :i AND owner_id = :o ORDER BY seq"
-        ),
-        {"i": ingest_id, "o": owner_id},
-    )
-    return [OutlineRow(int(r[0]), int(r[1]), str(r[2]), None if r[3] is None else int(r[3])) for r in rows]
+    pack = await _pack(conn, owner_id, ingest_id)
+    if pack is None:
+        return []
+    return [OutlineRow(e.seq, e.level, e.title, e.page) for e in await views.pack_outline(conn, pack)]
 
 
 async def handle_of(conn: AsyncConnection, owner_id: uuid.UUID) -> str:

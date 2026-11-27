@@ -64,6 +64,8 @@ PROXY_REFUSALS: Final = frozenset(
         "tools_not_allowed",
         "search_cap",
         "request_cap",
+        "client_unknown",  # FR-AGENT-3: an address outside CLIENTS (mapped by PROXY_CODES at issue)
+        "client_quota",  # FR-AGENT-3: the lane at its quota
     }
 )
 # agent-proxy's answers to a run_token issue → the adapter's code (FR-AGENT-6).

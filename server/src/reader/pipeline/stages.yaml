@@ -1,6 +1,10 @@
 # VEC-PIPELINE-1: the compile pipeline declared as data (ADR-0009: server/src/reader/pipeline/stages.yaml; the runtime
-# file must equal this one). Stage names are SRV-LESSON provenance stages, plus `findings` (a paired SRV-LESSON
-# enum addition: the deterministic step that turns open problems into `open` cells).
+# file must equal this one). Stage names are SRV-LESSON provenance stages, plus `rules` and `findings` (paired SRV-LESSON
+# enum additions: the rule check and the deterministic step that turns open problems into `open` cells).
+#
+# ADR-0039 revision (owner decisions 18 and 22): after `draft`, the checks run cheapest first; the first failure loops
+# back to `revise`; at most `max_loops` loops, every return counted (FR-PIPELINE-5); a loop starts only under the loop
+# rule (FR-PIPELINE-23). `findings` is the last step.
 #
 # task: the reader.yaml `tasks` entry naming the model and the task budget, spent per compile run (ADR-0005, SRV-CONFIG).
 # max_output_tokens: passed to the CLI as CLAUDE_CODE_MAX_OUTPUT_TOKENS. Measured maxima on L02 (spikes/compile-cost):
@@ -8,19 +12,31 @@
 #   stages (1.24x the largest measured); 16,000 for reports.
 # floor_reserve_usd: the largest measured cost of the stage on L02 (run 1/run 2): draft 0.605/0.296, fact_check
 #   0.242/0.235, review 0.520/0.501, revise 0.871/0.738, rounded up. The reserve actually used is
-#   max(floor, worst-case estimate) per SRV-AGENT FR-AGENT-9.
+#   max(floor, worst-case estimate) per SRV-AGENT FR-AGENT-9. The reordered stages keep these floors until the stage
+#   live check re-measures them.
 # The fact_check output is UNMEASURED in its itemized form (FR-PIPELINE-4 requires one verdict per claim; the spike's
 # reports were partly summaries). Its 16,000-token cap is 2.4x the largest measured output, as margin.
+# prompt_version stays v1: the prompt files are edited in place, and FR-PIPELINE-3's input_sha256 hashes their content,
+# so SRV-OBS's prompt registry (VEC-OBS-4's file paths) is unchanged.
+# fact_check.source: `section` (the lesson's own spans) until SRV-SEARCH's fact-check route lands and
+# retrieval-ablation's comparison passes ADR-0039 B10's rule (FR-PIPELINE-26).
+# reference_libraries: the modules a lab's `library` reference may name (FR-PIPELINE-25); the standard library only.
 prompt_version: v1
-max_revise_loops: 1
+max_loops: 3
+fact_check: { source: section }
 stages:
   - { name: draft,              task: draft,      max_output_tokens: 32000, floor_reserve_usd: 0.61, output: notebook }
+  - { name: rules,              task: none,       max_output_tokens: 0,     floor_reserve_usd: 0.0,  output: rule_report }
+  - { name: lab_verification,   task: none,       max_output_tokens: 0,     floor_reserve_usd: 0.0,  output: lab_report }
   - { name: fact_check,         task: fact_check, max_output_tokens: 16000, floor_reserve_usd: 0.25, output: fact_report }
   - { name: adversarial_review, task: review,     max_output_tokens: 16000, floor_reserve_usd: 0.53, output: review_report }
   - { name: revise,             task: draft,      max_output_tokens: 32000, floor_reserve_usd: 0.88, output: notebook }
   - { name: findings,           task: none,       max_output_tokens: 0,     floor_reserve_usd: 0.0,  output: notebook }
-  - { name: lab_verification,   task: none,       max_output_tokens: 0,     floor_reserve_usd: 0.0,  output: lab_report }
+rules: [explain_without_claims, claim_uncited, cell_uncited, citation_stripped, lab_reference_missing,
+  lab_reference_unresolved, labs_unverifiable]
+reference_libraries: [hashlib, hmac, decimal, fractions, math]
 order:
-  first_pass: [draft, fact_check, adversarial_review]
-  loop: [revise, fact_check, adversarial_review]
-  final: [findings, lab_verification]
+  first: [draft]
+  checks: [rules, lab_verification, fact_check, adversarial_review]
+  loop: [revise]
+  final: [findings]

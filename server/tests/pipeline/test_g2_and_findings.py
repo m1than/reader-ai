@@ -34,8 +34,8 @@ def test_g2_vectors(case: dict[str, Any]) -> None:
     verify = need("reader.pipeline.verify")
     base = json.loads(F01)
     ops = LESSON_CASES[case["from"].split("/")[1]]["ops"] if "from" in case else case.get("ops", [])
-    final = apply_ops(base, ops)
-    model_written = copy.deepcopy(final)
+    model_written = apply_ops(base, ops)
+    final = findings.append_findings(model_written, [])  # the findings step: credibility 6 where none was judged
     if case.get("tamper") == "final_revision_extra_cell":
         extra = copy.deepcopy(final["cells"][-1])
         extra["id"] = "tampered"
@@ -46,9 +46,10 @@ def test_g2_vectors(case: dict[str, Any]) -> None:
         if "verified" in cell["metadata"]["reader"]
     }
     lab_report = verify.LabReport(findings.labs_sha256(base), results, [])
-    records = set(case.get("records", ["fact_check", "adversarial_review", "lab_verification"]))
+    records = set(case.get("records", g2.CHECKS))
+    missing = [c for c in g2.CHECKS if c not in records]
     deltas_ok = g2.deltas_ok(final, model_written, [], lab_report)
-    report = g2.report(final, records, lab_report, _all_supported(final), deltas_ok)
+    report = g2.report(final, missing, lab_report, _all_supported(final), deltas_ok)
     assert report["publishable"] is case["publishable"]
     assert report["failing"] == case["failing"]
 
@@ -98,8 +99,43 @@ def test_problems_from_reports_and_slice_items() -> None:
     assert nonblocking == ["adversarial_review", "changed_unchecked", "url_citation_unchecked"]
 
 
+def test_findings_for_a_stop_at_the_rule_check() -> None:
+    """FR-PIPELINE-10 (revised): rule failures and one check_not_run cell per later check, all blocking, with
+    the check's stage; every claim gets credibility 6; a rerun neither duplicates nor renumbers."""
+    findings = need("reader.pipeline.findings")
+    nb = json.loads(F01)
+    failures = [{"rule": "claim_uncited", "cell": "f01-explain", "claim": "c1", "text": "uncited"}]
+    problems = findings.problems_from(
+        [], [], nb, rule_failures=failures, not_run=["lab_verification", "fact_check", "adversarial_review"]
+    )
+    blocking = [(p.kind, p.stage) for p in problems if p.blocking]
+    assert blocking == [
+        ("rules", "rules"),
+        ("check_not_run", "lab_verification"),
+        ("check_not_run", "fact_check"),
+        ("check_not_run", "adversarial_review"),
+    ]
+    once = findings.append_findings(nb, problems)
+    assert findings.append_findings(once, problems) == once
+    for cell in once["cells"]:
+        for claim in cell["metadata"]["reader"].get("claims", []):
+            assert claim["credibility"] == 6
+
+
+def test_source_too_large_is_a_blocking_open_cell() -> None:
+    """FR-PIPELINE-10 (revised): a `source_too_large` outcome becomes a blocking fact_check open cell."""
+    findings = need("reader.pipeline.findings")
+    reports = need("reader.pipeline.reports")
+    verdicts = [reports.Verdict("f01-explain", "c1", "source_too_large", (), "", None, 6)]
+    problems = findings.problems_from(verdicts, [], json.loads(F01))
+    hit = [p for p in problems if p.kind == "fact_check"]
+    assert len(hit) == 1 and hit[0].blocking and hit[0].stage == "fact_check"
+    assert hit[0].text.startswith("source_too_large")
+
+
 def test_final_revision_is_the_deterministic_deltas() -> None:
-    """INV-PIPELINE-5: F = stamp_labs(append_findings(M, problems), lab_report); any other F fails."""
+    """INV-PIPELINE-5 (revised): F = append_findings(stamp_credibility(stamp_labs(M, lab), fact), problems);
+    a lab failure reaches the notebook as an open cell only through the findings step; any other F fails."""
     findings = need("reader.pipeline.findings")
     verify = need("reader.pipeline.verify")
     g2 = need("reader.pipeline.g2")
@@ -119,15 +155,21 @@ def test_final_revision_is_the_deterministic_deltas() -> None:
         },
         [findings.Problem("lab_failed", "f01-lab", None, "assert failed", "lab_verification", True)],
     )
-    final = findings.stamp_labs(findings.append_findings(m, problems), report)
-    assert g2.deltas_ok(final, m, problems, report)
+    assert findings.stamp_labs(m, report)["cells"] != m["cells"]
+    assert len(findings.stamp_labs(m, report)["cells"]) == len(m["cells"])  # stamping appends nothing
+    problems = [*problems, *report.problems]
+    reports = need("reader.pipeline.reports")
+    verdicts = [reports.Verdict("f01-explain", "c1", "supported", ("x:1",), "", None, 2)]
+    final = findings.append_findings(findings.stamp_credibility(findings.stamp_labs(m, report), verdicts), problems)
+    assert g2.deltas_ok(final, m, problems, report, verdicts)
+    assert not g2.deltas_ok(final, m, problems, report)  # the credibility stamp is part of the derivation
     stamped = next(cell for _, cell in findings.labs_of(final))
     assert stamped["metadata"]["reader"]["verified"]["passed"] is False
     opened = [c for c in final["cells"] if c["metadata"]["reader"]["kind"] == "open"]
     assert {c["metadata"]["reader"]["finding"]["stage"] for c in opened} >= {"lab_verification"}
     tampered = copy.deepcopy(final)
     tampered["cells"][0]["source"] = "changed by hand"
-    assert not g2.deltas_ok(tampered, m, problems, report)
+    assert not g2.deltas_ok(tampered, m, problems, report, verdicts)
 
 
 def test_deltas_hold_across_the_stored_form() -> None:
@@ -151,7 +193,7 @@ def test_deltas_hold_across_the_stored_form() -> None:
         {"f01-lab": {"runs": 2, "passed": True, "outputs_identical": True, "input_sha256": findings.source_sha256(lab)}},
         [],
     )
-    final = stored(findings.stamp_labs(findings.append_findings(m, problems), report))
+    final = stored(findings.append_findings(findings.stamp_labs(m, report), problems))
     assert g2.deltas_ok(final, m, problems, report)
     tampered = copy.deepcopy(final)
     tampered["cells"][-1]["metadata"]["reader"]["finding"]["text"] = "edited"
@@ -179,7 +221,7 @@ def _report(nb: dict[str, Any], verdicts: dict[Any, str] | None = None) -> dict[
     verify = need("reader.pipeline.verify")
     lab = verify.LabReport(findings.labs_sha256(nb), {}, [])
     given = verdicts if verdicts is not None else _all_supported(nb)
-    result: dict[str, Any] = g2.report(nb, {"fact_check", "adversarial_review"}, lab, given, True)
+    result: dict[str, Any] = g2.report(nb, [], lab, given, True)
     return result
 
 

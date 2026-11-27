@@ -50,6 +50,7 @@ from reader.config import ReaderConfig, container_registry, load_config, resolve
 from reader.db import DbTarget, make_engine
 from reader.freshness import jobs, params, routes, store
 from reader.freshness.links import collect
+from reader.ingest import views
 from reader.jobs.model import JobContext
 from reader.serve.main import DB_PASSWORD_REF, Env
 
@@ -140,13 +141,14 @@ async def _owner(engine: AsyncEngine, handle: str) -> tuple[SessionUser, uuid.UU
                 {"h": handle},
             )
         ).one()
+        active = list(await views.active_packs(conn, user.id))  # SRV-INGEST INV-INGEST-16: imported = active
         material_id = (
             await conn.execute(
                 text(
-                    "SELECT m.id FROM materials m JOIN ingests i ON i.material_id = m.id"
-                    " WHERE m.owner_id = :o ORDER BY m.created_at LIMIT 1"
+                    "SELECT m.id FROM materials m WHERE m.owner_id = :o AND m.sha256 = ANY(:s)"
+                    " ORDER BY m.created_at LIMIT 1"
                 ),
-                {"o": user.id},
+                {"o": user.id, "s": active},
             )
         ).scalar_one()
         bib = await store.bibliography(conn, user.id, material_id)

@@ -21,6 +21,42 @@ patterns:
 # "Changing param values is not allowed"), so everything that can change between two ends of one run is a metric or
 # a tag.
 runs:
+  # ADR-0039 FR-OBS-39 (c): an evaluation Run, written by obs.eval_run through FR-OBS-20's steps.
+  eval:
+    name: "eval {eval_id[:8]}"
+    tags: { reader.kind: { enum: [eval] }, reader.eval_id: uuid,
+            reader.outcome: { enum: [done, capped, failed] }, reader.ends: { int: [1, 100] },
+            reader.complete: { enum: ["true"] }, reader.snapshot_at: datetime }
+    params: { set_sha256: sha256, budget_profile: { enum: [mcp, tutor] }, caller: { enum: [none] },
+              brain_version: sha256, policy_version: sha256, version_key: version_key,
+              judge.relevance: "^judge\\.eval\\.relevance@[0-9a-f]{12}$",
+              judge.sufficiency: "^judge\\.eval\\.sufficiency@[0-9a-f]{12}$",
+              judge.groundedness: "^judge\\.eval\\.groundedness@[0-9a-f]{12}$",
+              judge.self_contained: "^judge\\.eval\\.self_contained@[0-9a-f]{12}$",
+              judge.citation_supports_claim: "^judge\\.eval\\.citation_supports_claim@[0-9a-f]{12}$" }
+    metrics:
+      records: { int: [0, 100000] }
+      failed: { int: [0, 100000] }
+      capped: { int: [0, 100000] }
+      skipped_not_entitled: { int: [0, 10000000] }
+      invalid_outputs: { int: [0, 10000000] }
+      tokens.mean: { float: [0, 1000000] }
+      tokens.p95: { float: [0, 1000000] }
+      find_ms.p50: { float: [0, 100000000] }
+      find_ms.p95: { float: [0, 100000000] }
+      judged_completion: { float: [0, 1] }
+      calls_per_answer: { float: [0, 1000] }
+      mean.relevance: { float: [0, 1] }
+      mean.sufficiency: { float: [0, 1] }
+      mean.groundedness: { float: [0, 1] }
+      mean.self_contained: { float: [0, 1] }
+      mean.citation_supports_claim: { float: [0, 1] }
+      records.exact: { int: [0, 100000] }
+      records.thematic: { int: [0, 100000] }
+      records.fact_check: { int: [0, 100000] }
+      mean.sufficiency.exact: { float: [0, 1] }
+      mean.sufficiency.thematic: { float: [0, 1] }
+      mean.sufficiency.fact_check: { float: [0, 1] }
   compile:
     name: "compile {run_id[:8]}"
     tags: { reader.kind: { enum: [compile] }, reader.run_id: uuid, reader.lesson.id: uuid, reader.course.id: uuid,
@@ -133,9 +169,48 @@ labels:
   targets:
     lesson: { assessment: owner.lesson_ok, trace: "the lesson's newest compile run's revise-stage job" }
     answer: { assessment: owner.answer_ok, trace: "the question's tutor.answer job" }
+    judge: { assessment: "owner.<slot>_ok", trace: "the judge.find job's trace, or the score's own trace" }
   reasons: [wrong_fact, unclear, off_topic, broken_lab, bad_citation, other]
   source: { source_type: HUMAN, source_id: owner }
   metadata: { lesson_id: uuid, question_id: uuid, reason: { enum_from: reasons }, revision: { int: [1, 10000] } }
+  # ADR-0039 (FR-OBS-24 as amended): judge labels per slot; judge.link_type joins with SRV-KB, judge.align never.
+  judge_slots: [judge.find, judge.eval.relevance, judge.eval.sufficiency, judge.eval.groundedness,
+                judge.eval.self_contained, judge.eval.citation_supports_claim]
+  judge_metadata: { judge_input_id: uuid, score_id: uuid, revision: { int: [1, 10000] } }
+  note_max_chars: 200
+
+# ADR-0039 FR-OBS-38: the judge_inputs output, as 1-based ordinals into the row's card_ids.
+judge_inputs:
+  output: { keep: { list: { int: [1, 50] } }, drop: { list: { int: [1, 50] } }, sufficiency: { float: [0, 1], null: true } }
+  max_cards: 50
+
+# ADR-0039 FR-OBS-22, -39: the evaluation sets `obs.eval` may run, by file sha256. brain-eval-v1 is pinned when the
+# owner accepts V.kl-eval-set's set; until then `sha256` is null and every eval start is refused set_not_pinned.
+eval_sets:
+  brain-eval-v1:
+    file: spec/fixtures/SRV-OBS/brain-eval-v1.yaml
+    sha256: null
+    question_types: [exact, thematic, fact_check]
+eval_record:
+  inputs: { question_id: question_id, question: { pinned: true }, question_type: { enum: [exact, thematic, fact_check] },
+            chapter: { int: [1, 23] } }
+  expectations: { gold_pages: { list: { int: [1, 2000] }, min: 1, max: 20 } }
+  never_sent: [expected_facts]
+
+# ADR-0039 FR-OBS-41: alignment (the codes, markers and initial values align.py uses; a test keeps them equal).
+align:
+  refusals: [verbatim_8, whole_input, demonstration, no_change, guard_inputs_missing, too_few_labels, slot_unsupported,
+             eval_cap, provider_error, output_invalid, step_lost, section_delimiter, frame_changed, base_changed,
+             all_guard_refused, no_training_errors, threshold_missing, policy_changed]
+  drop_kinds: [dropped_missing, dropped_guard]
+  data_delimiter_replacement: { READER-INSTRUCTIONS: READER_INSTRUCTIONS_DATA }
+  section_delimiters: ["<<<READER-INSTRUCTIONS", "READER-INSTRUCTIONS>>>"]
+  demonstration_markers: [example, пример, input, output, q, a]
+  rerun_deadline_s: 8.3
+  max_missing_share: 0.2
+  scoring_step_budget_s: 150
+  limits: { train: 70, heldout: 30, min_split: 10, rounds: 3, proposing_steps: 2, every: 50, verbatim_words: 8,
+            max_length_factor: 1.5 }
 
 # FR-OBS-25: alert codes on /observability.
 alerts:
@@ -178,3 +253,20 @@ writes:
   - { kind: obs.retention, method: POST, path: /api/2.0/mlflow/runs/delete, body: [run_id] }
   - { kind: obs.retention, method: DELETE, path: "/api/2.0/mlflow/logged-models/{id}" }
   - { kind: obs.setup, method: PATCH, path: "/api/2.0/mlflow/logged-models/{id}/tags", body: [tags], tag: reader.last_started }
+  # ADR-0039 (FR-OBS-14, -39): LLM_JUDGE scores and the eval Run; endpoints already measured above.
+  - { kind: obs.judge_score, method: GET, path: /ajax-api/3.0/mlflow/traces/get, query: [trace_id] }
+  - { kind: obs.judge_score, method: POST, path: "/api/3.0/mlflow/traces/{trace_id}/assessments", body: [assessment],
+      assessment_keys: [assessment_name, trace_id, source, feedback, metadata], source_type: LLM_JUDGE }
+  - { kind: obs.eval_run, method: GET, path: /api/2.0/mlflow/experiments/get-by-name, query: [experiment_name] }
+  - { kind: obs.eval_run, method: POST, path: /api/3.0/mlflow/datasets/search, body: [experiment_ids, filter_string] }
+  - { kind: obs.eval_run, method: POST, path: /api/3.0/mlflow/datasets/create, body: [name, experiment_ids, tags] }
+  - { kind: obs.eval_run, method: POST, path: "/api/3.0/mlflow/datasets/{id}/records", body: [records] }
+  - { kind: obs.eval_run, method: POST, path: /api/2.0/mlflow/runs/search, body: [experiment_ids, filter, max_results] }
+  - { kind: obs.eval_run, method: POST, path: /api/2.0/mlflow/runs/create, body: [experiment_id, run_name, start_time, tags] }
+  - { kind: obs.eval_run, method: POST, path: /api/2.0/mlflow/runs/log-batch, body: [run_id, params, metrics, tags] }
+  - { kind: obs.eval_run, method: POST, path: /api/2.0/mlflow/runs/update, body: [run_id, status, end_time] }
+  - { kind: obs.eval_run, method: POST, path: /api/2.0/mlflow/runs/set-tag, body: [run_id, key, value] }
+  - { kind: obs.eval_run, method: POST, path: /ajax-api/3.0/mlflow/traces/search, body: [locations, filter, max_results, page_token],
+      max_results: 500 }
+  - { kind: obs.eval_run, method: POST, path: /api/2.0/mlflow/traces/link-to-run, body: [trace_ids, run_id], max_ids: 100 }
+  - { kind: obs.eval_run, method: POST, path: /api/2.0/mlflow/runs/log-inputs, body: [run_id, datasets] }

@@ -232,6 +232,9 @@ async def add_material(
                 ),
                 {"i": ingest, "o": owner, "q": seq, "l": level, "t": title, "p": page},
             )
+        from ingest.packseed import seal  # FR-FRESH-2: the material's active pack is read
+
+        await seal(conn, owner, ingest, sha)
     return material, ingest
 
 

@@ -219,6 +219,40 @@ operations:
       observability: { items: [FR-INGEST-12] }
       recovery: { items: [FR-EVENTS-8, INV-INGEST-2] }
 
+  - id: ingest.migrate_citations
+    title: Rewrite mutable legacy citations to locators (reader-ingest --migrate-citations)
+    surface: [cli]
+    specs: [SRV-INGEST]
+    commands: ["reader-ingest --migrate-citations"]
+    gate: tracked
+    criteria:
+      functional: { items: [FR-INGEST-41] }
+      security: { items: [FR-INGEST-41] }
+      privacy: { items: [FR-INGEST-41] }
+      a11y: { na: no web surface }
+      latency: { missing: "no sourced budget" }
+      cost: { na: no provider call }
+      observability: { items: [FR-INGEST-41] }
+      recovery: { items: [INV-INGEST-15] }
+
+  - id: material.purge_pack
+    title: List a material's packs and purge one (owner)
+    surface: [api]
+    specs: [SRV-INGEST, SRV-EVENTS, SRV-SEARCH]
+    routes: ["GET /api/materials/{material_id}/packs", "POST /api/materials/{material_id}/packs/{pack_id}/purge"]
+    gate: tracked
+    criteria:
+      functional: { items: [FR-INGEST-45] }
+      security: { items: [FR-INGEST-45, INV-INGEST-14] }
+      privacy: { items: [FR-INGEST-45, FR-SEARCH-21] }
+      a11y: { na: no web surface yet (a WEB-MANAGE control is not specified) }
+      latency: { missing: "no sourced budget" }
+      cost: { na: no provider call }
+      # The job span around each ingest.purge run (FR-EVENTS-19, job_args {} in SRV-OBS VEC-OBS-1) and the
+      # material.purge_pack audit row in the job's transaction (FR-INGEST-45 (4), FR-EVENTS-30).
+      observability: { items: [FR-INGEST-45, FR-EVENTS-19, FR-EVENTS-30] }
+      recovery: { items: [FR-INGEST-44] }
+
   # Added 2026-11-23 (V/onboarding) from the items of SRV-INGEST revision 2 and WEB-IMPORT (ADR-0029, accepted by
   # the owner); cells filled on V/upload-impl when the items were promoted with their tests. Routes and commands are
   # named here in the Green commit that adds them to the registry.
@@ -581,6 +615,23 @@ operations:
       latency: { missing: "no sourced budget" }
       cost: { na: no provider call }
       observability: { missing: "no spec requires a log line for an upload or a label" }
+      recovery: { items: [INV-OBS-3] }
+
+  # Added 2026-11-26 (SRV-OBS, ADR-0039): the owner labels judge outputs and starts a local judge evaluation.
+  - id: obs.judge
+    title: Label judge outputs and start a judge evaluation
+    surface: [web]
+    specs: [SRV-OBS]
+    routes: ["GET /api/obs/judge-queue", "GET /api/obs/judge-items/{item_id}", "POST /api/obs/eval"]
+    gate: tracked
+    criteria:
+      functional: { items: [FR-OBS-39, FR-OBS-40, FR-OBS-24] }
+      security: { items: [FR-OBS-40, FR-OBS-39] }
+      privacy: { items: [INV-OBS-6, INV-OBS-2] }
+      a11y: { missing: "the WEB-MANAGE judge tab (FR-MANAGE-6, paired) is not built yet" }
+      latency: { missing: "no sourced budget" }
+      cost: { missing: "the eval cap budgets.eval_usd_per_run is set from judge-gate's measured run cost" }
+      observability: { missing: "no spec requires a log line for a judge label or an eval start" }
       recovery: { items: [INV-OBS-3] }
 
   - id: stack.backup

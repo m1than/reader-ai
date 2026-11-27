@@ -65,34 +65,40 @@ class SpanReader(Protocol):
 
 
 class DbSpanReader:
-    """SRV-INGEST's tables (FR-INGEST-14); none yet (its migration not merged) reads as no spans."""
+    """The material's active pack (SRV-INGEST INV-INGEST-16, `reader.ingest.views`); no pack tables yet (its
+    migration not merged) or no active pack reads as no spans."""
 
     async def load(
         self, conn: AsyncConnection, owner_id: uuid.UUID, material_sha256: str, first: int, last: int
     ) -> tuple[list[Span], str]:
-        present = (await conn.execute(text("SELECT to_regclass('material_spans')"))).scalar()
+        present = (await conn.execute(text("SELECT to_regclass('base_packs')"))).scalar()
         if present is None:
             return [], material_sha256[:12]
-        rows = (
+        from reader.ingest import views
+
+        pack = await views.active_pack(conn, owner_id, material_sha256)
+        if pack is None:
+            return [], material_sha256[:12]
+        spans = await views.pack_spans(conn, pack, first, last)
+        config_id = (
             await conn.execute(
-                text(
-                    "SELECT s.seq, s.page, s.kind, s.text, m.config_id FROM materials m"
-                    " JOIN ingests i ON i.material_id = m.id JOIN material_spans s ON s.ingest_id = i.id"
-                    " WHERE m.owner_id = :o AND m.sha256 = :m AND s.page BETWEEN :f AND :l ORDER BY s.seq"
-                ),
-                {"o": owner_id, "m": material_sha256, "f": first, "l": last},
+                text("SELECT config_id FROM materials WHERE owner_id = :o AND sha256 = :m"),
+                {"o": owner_id, "m": material_sha256},
             )
-        ).all()
-        title = str(rows[0][4]) if rows and rows[0][4] else material_sha256[:12]
-        return [Span(f"{material_sha256}:{r[0]}", int(r[1]), str(r[2]), str(r[3])) for r in rows], title
+        ).scalar()
+        title = str(config_id) if spans and config_id else material_sha256[:12]
+        return [Span(s.span_id, s.page, s.kind, s.text) for s in spans], title
 
 
 async def material_imported(conn: AsyncConnection, owner_id: uuid.UUID, material_sha256: str) -> bool:
-    if (await conn.execute(text("SELECT to_regclass('materials')"))).scalar() is None:
+    if (await conn.execute(text("SELECT to_regclass('base_packs')"))).scalar() is None:
         return False
-    found = await conn.execute(
-        # FR-PIPELINE-22: a deleted material (SRV-INGEST FR-INGEST-31) counts as not imported.
+    from reader.ingest import views
+
+    # FR-PIPELINE-22: a deleted material (SRV-INGEST FR-INGEST-31) counts as not imported; "imported" is
+    # "has an active pack" (FR-PIPELINE-2's paired change, INV-INGEST-16), and the tombstone is checked too.
+    live = await conn.execute(
         text("SELECT 1 FROM materials WHERE owner_id = :o AND sha256 = :m AND deleted_at IS NULL"),
         {"o": owner_id, "m": material_sha256},
     )
-    return found.scalar() is not None
+    return live.first() is not None and await views.active_pack(conn, owner_id, material_sha256) is not None
