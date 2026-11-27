@@ -1,5 +1,6 @@
-// Citations as references (WEB-NOTEBOOK FR-NOTEBOOK-2). Span form `{span, page?, material_title?}` (SRV-LESSON) or
-// `{url, retrieved}`. Span citations are grouped per material with page ranges; only http and https URLs become links.
+// Citations as references (WEB-NOTEBOOK FR-NOTEBOOK-2). Span form `{span, quote_sha256?, page?, material_title?}`
+// (SRV-LESSON; a legacy id or a locator, the hash never shown) or `{url, retrieved}`. Span citations are grouped per
+// material with page ranges; only http and https URLs become links.
 import { englishT, type T } from '../ui/i18n';
 import en from './messages.en';
 
@@ -30,7 +31,12 @@ export const formatCitation = (c: Citation): Reference => {
   return { kind: 'text', text: url, retrieved };
 };
 
+const LOCATOR = /^spn:([0-9a-f]{64}):/;
+
+/** A locator's 64-hex material field (SRV-INGEST FR-INGEST-33); any other span: the part before the last `:`. */
 const materialOf = (span: string): string => {
+  const locator = LOCATOR.exec(span);
+  if (locator) return locator[1]!;
   const i = span.lastIndexOf(':');
   return i < 0 ? span : span.slice(0, i);
 };
