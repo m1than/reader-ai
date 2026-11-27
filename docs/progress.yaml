@@ -1953,9 +1953,14 @@ tasks:
       note: "Promotion order (deep-reviewer round 1): FR-AGENT-3 revised (agent-proxy client identity), INV-AGENT-7 and
         VEC-AGENT-6 go Green only in the same integration merge as V.kl-deploy-judge-lane's OPS-DEPLOY agentnet subnet
         and fixed addresses, never before (else every worker issue is 403 client_unknown); the rest may merge earlier" }
-  - { id: V.kl-deploy-judge-lane, stage: V, kind: module, track: engineering, status: in_progress,
+  - { id: V.kl-deploy-judge-lane, stage: V, kind: module, track: engineering, status: done,
       needs: [V.owner.adr-0039, V.kl-agent-judges],
       branch: V/kl-deploy-judge-lane,
+      code_review: "deep-reviewer (Fable) round 1 changes (2 blockers: lane hand-off untested; stage-1 live checks
+        missing), round 2 approve (2026-11-27; 31/33 mutants killed in round 1, lane mutant killed in round 2;
+        search/jobs suites pass under load). Merged into V/slice-integration. Open non-blocking: stage-1 loopback
+        probe tightening and SKIP line, NaN run_cap_usd and NUL in pack_ids validation. Stage-1 live check not run
+        (needs the owner's stack: judge slots in reader.yaml, reader down then reader up)",
       review: "spec: deep-reviewer (Fable) round 1 changes (4 blockers), round 2 changes (1 blocker), round 3
         approve (2026-11-26); code review by the coordinator before the merge into V/slice-integration (pending)",
       done_here: "merged origin/V/kl-agent-judges and origin/V/slice-integration; promoted OPS-DEPLOY FR-DEPLOY-16,
