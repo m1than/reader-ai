@@ -1,0 +1,21 @@
+# VEC-SEARCH-8 (FR-SEARCH-23): synthetic questions (agent's wording, no book text) → question type, identifiers and
+# route per channel. Identifier rules first, then current-state wording, else thematic; `question_type` is taken
+# only from the pipeline channel and only `fact_check` (else channel_invalid).
+cases:
+  - {q: "What does BIP-32 say about hardened keys?", type: exact, identifiers: [BIP-32]}
+  - {q: "Explain OP_CHECKSIG step by step", type: exact, identifiers: [OP_CHECKSIG]}
+  - {q: "How is the constant 0x1f2e3d4c5b used?", type: exact, identifiers: ["0x1f2e3d4c5b"]}
+  - {q: "Where is rfc 6979 applied, and what is current practice?", type: exact, identifiers: [rfc 6979]}
+  - {q: "What is the current block reward?", type: current_state, identifiers: []}
+  - {q: "Какой сейчас размер награды за блок?", type: current_state, identifiers: []}
+  - {q: "Is this still up to date?", type: current_state, identifiers: []}
+  - {q: "How do wallets derive child keys?", type: thematic, identifiers: []}
+  - {q: "Почему подписи Шнорра короче?", type: thematic, identifiers: []}
+  - {q: "Is the claim about nonces right?", channel: pipeline, question_type: fact_check, type: fact_check,
+     identifiers: []}
+  - {q: "Is the claim about BIP-340 right?", channel: pipeline, question_type: fact_check, type: fact_check,
+     identifiers: [BIP-340]}
+refused:
+  - {q: "Is the claim right?", channel: mcp, question_type: fact_check, code: channel_invalid}
+  - {q: "Is the claim right?", channel: owner, question_type: fact_check, code: channel_invalid}
+  - {q: "Is the claim right?", channel: pipeline, question_type: thematic, code: channel_invalid}

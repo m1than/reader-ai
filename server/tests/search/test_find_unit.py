@@ -1,0 +1,388 @@
+"""SRV-SEARCH [unit]: the find cascade over fake ports (entry, routing, gate, expansion, step 7, card shape).
+
+@trace FR-SEARCH-22 FR-SEARCH-23 FR-SEARCH-24 FR-SEARCH-29 INV-SEARCH-15 VEC-SEARCH-8 VEC-SEARCH-10
+"""
+
+from __future__ import annotations
+
+import asyncio
+import copy
+import hashlib
+import json
+import math
+import uuid
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass, field
+from typing import Any
+
+import pytest
+
+from .conftest import fixture, need
+
+USER = uuid.UUID(int=1)
+BRAIN = "b" * 64
+POLICY_V = "p" * 64
+LICENSE = "personal-use"
+
+
+def _find() -> Any:
+    return need("reader.search.find")
+
+
+def _cards() -> Any:
+    return need("reader.search.cards")
+
+
+def _policy(**changes: Any) -> Any:
+    policy = need("reader.search.policy")
+    data = copy.deepcopy(dict(policy.load().data))
+    for path, value in changes.items():
+        node = data
+        keys = path.split("__")
+        for key in keys[:-1]:
+            node = node[key]
+        node[keys[-1]] = value
+    return policy.Policy(data, "f" * 64)
+
+
+def _card(card_id: str, score: float, text: str = "", covers: Sequence[str] = (), layer: str = "L1",
+          nxt: Sequence[str] = (), title: str = "") -> Any:
+    cards = _cards()
+    return cards.Card(
+        id=card_id, layer=layer, title=title, text=text,
+        cite=(cards.Cite(spn=card_id, quote_sha256="q" * 64),),
+        source=cards.Source(id="s" * 64, role=None, as_of=None, reliability=None, license=LICENSE),
+        next=tuple(nxt), score=score, covers=frozenset(covers),
+    )
+
+
+@dataclass
+class Corpus:
+    cards: list[Any]
+    neighbours_of: Mapping[str, list[Any]] = field(default_factory=dict)
+    degraded: bool = False
+    reads: int = 0
+    routes: list[Any] = field(default_factory=list)
+
+    async def candidates(self, caller: Any, channel: str, route: Any, query: str, filters: Any,
+                         identifiers: Sequence[str]) -> Any:
+        self.reads += 1
+        self.routes.append(route)
+        return _find().Candidates(cards=list(self.cards), degraded=self.degraded, brain_version=BRAIN,
+                                  lexemes=frozenset({"a"}), layers=frozenset({"L1"}))
+
+    async def neighbours(self, caller: Any, channel: str, cards: Sequence[Any]) -> Mapping[str, list[Any]]:
+        return {c.id: list(self.neighbours_of.get(c.id, [])) for c in cards}
+
+
+@dataclass
+class Judge:
+    kept: Sequence[str] | None = None
+    skip: str | None = None
+    calls: list[Any] = field(default_factory=list)
+
+    async def __call__(self, call: Any) -> Any:
+        self.calls.append(call)
+        if self.skip is not None:
+            return _find().JudgeOutcome(kept=None, source=None, skip=self.skip)
+        ids = [i for i, _ in call.cards]
+        kept = [i for i in (self.kept if self.kept is not None else ids) if i in ids]
+        return _find().JudgeOutcome(kept=tuple(kept), source="live", skip=None)
+
+
+def _run(corpus: Corpus, *, policy: Any = None, judge: Any = None, channel: str = "owner",
+         query: str = "a query", **kw: Any) -> dict[str, Any]:
+    find = _find()
+    deps = find.Deps(corpus=corpus, judge=judge, policy=policy or _policy(), policy_version=lambda: POLICY_V)
+    caller = find.Caller(user_id=USER, roles=("owner",), provider=True)
+    result: dict[str, Any] = asyncio.run(find.find(caller, channel, query, deps=deps, **kw))
+    return result
+
+
+def _estimate(value: Any) -> int:
+    return math.ceil(len(json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False)) / 2)
+
+
+# ---- FR-SEARCH-22: entry, budget and response -------------------------------------------------------------
+
+@pytest.mark.parametrize(
+    ("kw", "code"),
+    [
+        ({"query": "   "}, "query_invalid"),
+        ({"query": "x" * 1001}, "query_invalid"),
+        ({"k": 0}, "k_invalid"),
+        ({"k": 51}, "k_invalid"),
+        ({"budget": 399}, "budget_invalid"),
+        ({"filters": {"colour": "red"}}, "filter_invalid"),
+        ({"filters": {"role": "bogus"}}, "filter_invalid"),
+        ({"channel": "web"}, "channel_invalid"),
+    ],
+)
+def test_each_validation_code(kw: dict[str, Any], code: str) -> None:
+    with pytest.raises(_find().FindError) as caught:
+        _run(Corpus([_card("a", 0.9, "x")]), **kw)
+    assert caught.value.code == code
+
+
+def test_budget_min_is_accepted_and_a_budget_above_max_is_clamped() -> None:
+    assert _run(Corpus([]), budget=400)["budget"] == 400
+    assert _run(Corpus([]), channel="mcp", budget=999_999)["budget"] == 2000
+    assert _run(Corpus([]), channel="tutor")["budget"] == 5250
+    assert _run(Corpus([]))["budget"] == 2000
+
+
+def test_query_is_nfc_and_trimmed() -> None:
+    corpus = Corpus([])
+    _run(corpus, query="  Café  ")
+    find = _find()
+    assert find.normalise_query("  Café  ") == "Café"
+
+
+def test_response_shape_and_degraded_rules() -> None:
+    gate = _run(Corpus([_card("a", 0.9, "alpha")]))
+    assert set(gate) == {
+        "brain_version", "policy_version", "budget", "cards", "judge_ran", "judge_skip", "degraded"}
+    assert (gate["brain_version"], gate["policy_version"]) == (BRAIN, POLICY_V)
+    assert gate["judge_skip"] == "gate" and gate["degraded"] is False and gate["judge_ran"] is False
+    assert _run(Corpus([_card("a", 0.9, "alpha")], degraded=True))["degraded"] is True
+    judged = _policy(gate={"mode": "always_judge", "margin": None})
+    for skip in ("timeout", "error", "budget", "saturated", "quota_refused", "no_provider"):
+        out = _run(Corpus([_card("a", 0.9, "alpha")]), policy=judged, judge=Judge(skip=skip))
+        assert (out["degraded"], out["judge_skip"], out["judge_ran"]) == (True, skip, False)
+    out = _run(Corpus([_card("a", 0.9, "alpha")]), policy=judged, judge=Judge())
+    assert (out["degraded"], out["judge_ran"], out["judge_source"]) == (False, True, "live")
+    assert "judge_skip" not in out
+    empty = _run(Corpus([]), policy=judged, judge=Judge())
+    assert (empty["judge_skip"], empty["degraded"]) == ("slice_empty", False)
+    no_lane = _run(Corpus([_card("a", 0.9, "alpha")]), policy=judged, judge=None)
+    assert (no_lane["judge_skip"], no_lane["degraded"]) == ("error", True)
+
+
+def test_the_whole_response_fits_the_budget_at_the_boundary() -> None:
+    cards = [_card(f"c{i:02d}", 1 - i / 100, "w" * 200 + f" {i}", covers=[f"e{i}"]) for i in range(40)]
+    for budget in (400, 401, 555, 1000, 2000):
+        out = _run(Corpus(cards), budget=budget)
+        assert _estimate(out) <= budget
+        assert out["cards"], budget  # the cards' budget is used, not left empty
+
+
+def test_a_cards_cost_is_its_whole_json() -> None:
+    cards = _cards()
+    card = _card("a", 0.5, "some text ключ")
+    body = cards.to_json(card, judged=False)
+    assert set(body) == {"id", "layer", "title", "text", "cite", "source", "next", "judged"}
+    assert cards.cost(card) == _estimate(body) + 0.5
+    assert cards.to_json(card, judged=True)["judged"] is True
+
+
+def test_cuts_at_whitespace_and_hard() -> None:
+    cards = _cards()
+    assert cards.cut("aaa bbb ccc", 4) == "aaa bbb"  # 4 tokens = 8 characters, last whitespace at 7
+    assert cards.cut("a" * 20, 4) == "a" * 8
+    assert cards.cut("short", 4) == "short"
+
+
+def test_l1_text_budget_and_more() -> None:
+    cards = _cards()
+    policy = _policy()
+    long = ("word " * 400).strip()  # 1,999 characters
+    text, more = cards.l1_text(long, policy, "owner", entitled=True, shareable=False)
+    assert len(text) <= 1200 and more is False and long.startswith(text)
+    text, more = cards.l1_text(long, policy, "owner", entitled=True, shareable=True)
+    assert more is True
+    text, more = cards.l1_text(long, policy, "pipeline", entitled=True, shareable=False)
+    assert text == long and more is False  # pipeline, entitled: not cut
+    text, more = cards.l1_text("short", policy, "owner", entitled=True, shareable=True)
+    assert (text, more) == ("short", False)
+
+
+def test_l2_and_l0_cut_order() -> None:
+    cards = _cards()
+    policy = _policy()
+    assert cards.l2_budget(policy, has_children=False, top_level=False) == 100
+    assert cards.l2_budget(policy, has_children=True, top_level=False) == 300
+    assert cards.l2_budget(policy, has_children=True, top_level=True) == 500
+    quote = "q" * 50 + " " + "r" * 249  # 300 characters
+    text, served = cards.l2_text("Chapter 1 / Keys", None, quote, 100)  # 200 characters
+    assert text == "Chapter 1 / Keys" and served == "q" * 50  # the quote takes the rest, cut at whitespace
+    text, served = cards.l2_text("T " * 150, None, quote, 100)  # the title path alone exceeds the budget
+    assert len(text) <= 200 and served is None
+    text, served = cards.l2_text("x" * 199, None, quote, 100)  # 1 character left: nothing at whitespace
+    assert served is None or len(served) <= 1
+    text, served = cards.l2_text("Title", "A summary of it.", quote, 100)
+    assert text == "Title\nA summary of it." and served is not None and len(text) + len(served) <= 200
+    assert cards.cut("x" * 500, policy.data["card_budgets"]["L0"]) == "x" * 400
+
+
+def test_request_hash_changes_with_each_field() -> None:
+    find = _find()
+    base = {"user_id": str(USER), "roles": ["owner"], "channel": "owner", "query": "q", "filters": {},
+            "k": None, "budget": 2000, "brain_version": BRAIN, "policy_version": POLICY_V}
+    digest = find.request_hash(**base)
+    canonical = json.dumps(base, sort_keys=True, separators=(",", ":")).encode()
+    assert digest == hashlib.sha256(canonical).hexdigest()
+    for key, other in (("user_id", str(uuid.UUID(int=2))), ("roles", ["learner"]), ("channel", "mcp"),
+                       ("query", "r"), ("filters", {"role": "map"}), ("k", 3), ("budget", 1999),
+                       ("brain_version", "c" * 64), ("policy_version", "d" * 64)):
+        assert find.request_hash(**{**base, key: other}) != digest, key
+
+
+def test_no_cache_two_calls_read_twice() -> None:
+    corpus = Corpus([_card("a", 0.9, "alpha")])
+    first = _run(corpus)
+    second = _run(corpus)
+    assert corpus.reads == 2 and first == second
+
+
+# ---- FR-SEARCH-23, VEC-SEARCH-8 ----
+
+@pytest.mark.parametrize("case", fixture("routes.yaml")["cases"], ids=lambda c: c["q"][:30])
+def test_classification_and_route_vec_search_8(case: dict[str, Any]) -> None:
+    find = _find()
+    kind, identifiers = find.classify(_policy(), case["q"], case.get("question_type"),
+                                      case.get("channel", "owner"))
+    assert kind == case["type"] and list(identifiers) == case["identifiers"]
+    for channel in ([case["channel"]] if "channel" in case else ["mcp", "owner", "tutor", "pipeline"]):
+        corpus = Corpus([])
+        _run(corpus, channel=channel, query=case["q"], question_type=case.get("question_type"))
+        assert corpus.routes[0].id == f"{channel}.{case['type']}"
+
+
+@pytest.mark.parametrize("case", fixture("routes.yaml")["refused"], ids=lambda c: f"{c['channel']}")
+def test_question_type_only_from_the_pipeline(case: dict[str, Any]) -> None:
+    with pytest.raises(_find().FindError) as caught:
+        _run(Corpus([]), channel=case["channel"], query=case["q"], question_type=case["question_type"])
+    assert caught.value.code == case["code"]
+
+
+def test_unbuilt_layers_are_skipped() -> None:
+    policy = _policy()
+    policy.data["routes"]["owner.thematic"]["layers"] = ["L3", "L1", "L2"]
+    corpus = Corpus([])
+    _run(corpus, policy=policy)
+    assert corpus.routes[0].layers == ("L1", "L2") and corpus.routes[0].skipped == ("L3",)
+
+
+# ---- FR-SEARCH-24: gate, expansion, preselection ----------------------------------------------------------
+
+def test_gate_modes_and_the_margin_boundary() -> None:
+    find = _find()
+    assert find.separated(_policy(), [0.9, 0.1]) is True
+    always = _policy(gate={"mode": "always_judge", "margin": None})
+    assert find.separated(always, [0.9, 0.1]) is False
+    margin = _policy(gate={"mode": "margin", "margin": 0.25})
+    assert find.separated(margin, [0.5]) is True
+    assert find.separated(margin, []) is True
+    assert find.separated(margin, [0.75, 0.5]) is True  # s1 - s2 = margin
+    assert find.separated(margin, [0.74, 0.5]) is False
+
+
+def test_expansion_scores_cap_and_layers() -> None:
+    find = _find()
+    policy = _policy()
+    a, b = _card("a", 0.8, nxt=["n1", "a2"]), _card("b", 0.6, nxt=["n1"])
+    n1, a2 = _card("n1", 0.0), _card("a2", 0.0)
+    also = _card("b2", 0.0)
+    section = _card("sec", 0.0, layer="L2")
+    neighbours = {"a": [n1, a2, section], "b": [n1, also]}
+    expanded = find.expand([a, b], neighbours, policy, ("L1",))
+    scores = {c.id: c.score for c in expanded}
+    assert scores["n1"] == pytest.approx(0.4)  # max over parents: 0.8 * 0.5
+    assert scores["a2"] == pytest.approx(0.4) and scores["b2"] == pytest.approx(0.3)
+    assert "sec" not in scores  # an L2 target on an L1-only route
+    own = find.expand([a, _card("n1", 0.7)], {"a": [n1], "n1": []}, policy, ("L1",))
+    assert {c.id: c.score for c in own}["n1"] == pytest.approx(0.7)  # its own score is higher
+    many = [_card(f"m{i:02d}", 0.5) for i in range(60)]
+    capped = find.expand(many, {}, policy, ("L1",))
+    assert [c.id for c in capped] == [f"m{i:02d}" for i in range(50)]  # top 50 by (score desc, id)
+    per_card = find.expand([a], {"a": [n1, a2, also]}, policy, ("L1",))
+    assert {c.id for c in per_card} == {"a", "n1", "a2"}  # expand_per_card 2
+
+
+def test_preselection_cost_within_the_factor() -> None:
+    policy = _policy(gate={"mode": "always_judge", "margin": None})
+    cards = [_card(f"c{i:02d}", 1 - i / 100, "w" * 300 + f" {i}", covers=[f"e{i}"]) for i in range(40)]
+    judge = Judge()
+    out = _run(Corpus(cards), policy=policy, judge=judge, budget=1000)
+    assert judge.calls and _estimate(out) <= 1000
+    call = judge.calls[0]
+    assert call.preselection_cost <= 1.5 * call.cards_budget + 1e-9
+
+
+def test_links_merge_by_pivot() -> None:
+    find = _find()
+    a, b, c = _card("a", 0.9, "A"), _card("b", 0.8, "B"), _card("c", 0.7, "C")
+    merged = find.merge([a, b, c], lambda x, y: {x, y} == {"a", "c"}, seed="s1")
+    by_id = {m.id: m for m in merged}
+    pivot = "a" if "a" in by_id else "c"
+    assert len(merged) == 2 and by_id[pivot].score == pytest.approx(0.9)
+    assert {x.spn for x in by_id[pivot].cite} == {"a", "c"}
+
+
+# ---- FR-SEARCH-29, VEC-SEARCH-10 ----
+
+def _vec10() -> dict[str, Any]:
+    data: dict[str, Any] = fixture("judge-mixed.yaml")
+    return data
+
+
+@pytest.mark.parametrize("case", _vec10()["steps"], ids=lambda c: c["name"])
+def test_step_seven_vec_search_10(case: dict[str, Any]) -> None:
+    data = _vec10()
+    find = _find()
+    greedy = need("reader.search.greedy")
+    cards = data["cards"]
+    covers = {c: frozenset(v["covers"]) for c, v in cards.items()}
+    f = greedy.Coverage(dict.fromkeys(data["elements"], 1.0), covers)
+    cost = {c: v["cost"] for c, v in cards.items()}
+    score = {c: v["score"] for c, v in cards.items()}
+    picked = find.step7(
+        f, cost, score, case["budget"], case.get("k"), pool=case.get("pool", case.get("preselection")),
+        preselection=case.get("preselection", []), judged_slice=case.get("slice", []), kept=case["kept"],
+    )
+    assert [c for c, _ in picked] == case["expect"]
+    assert [j for _, j in picked] == case["judged"]
+
+
+@pytest.mark.parametrize("case", _vec10()["slices"], ids=lambda c: c["name"])
+def test_judge_slice_vec_search_10(case: dict[str, Any]) -> None:
+    find = _find()
+    cards = [(c, "x" * 100) for c in case["cards"]]
+    limit = min(1.5 * case["budget"], case["cap"])
+    assert find.judge_slice("q", cards, limit) == case["expect"]
+
+
+def test_degraded_judge_selects_from_the_capped_expanded_set() -> None:
+    policy = _policy(gate={"mode": "always_judge", "margin": None})
+    a = _card("a", 0.9, "alpha", covers=["e1"], nxt=["n"])
+    n = _card("n", 0.0, "next one", covers=["e2"])
+    out = _run(Corpus([a], neighbours_of={"a": [n]}), policy=policy, judge=Judge(skip="timeout"))
+    assert [c["id"] for c in out["cards"]] == ["a", "n"] and not any(c["judged"] for c in out["cards"])
+
+
+def test_judged_response_orders_kept_first() -> None:
+    policy = _policy(gate={"mode": "always_judge", "margin": None})
+    cards = [_card(x, s, x * 5, covers=[x]) for x, s in (("a", 0.9), ("b", 0.8), ("c", 0.7))]
+    out = _run(Corpus(cards), policy=policy, judge=Judge(kept=["c", "a"]))
+    # b dropped, no remainder
+    assert [(c["id"], c["judged"]) for c in out["cards"]] == [("c", True), ("a", True)]
+
+
+# ---- INV-SEARCH-15 ----
+
+def test_unreviewed_findings_are_never_returned() -> None:
+    find = _find()
+    policy = _policy()
+    policy.data["routes"]["owner.thematic"]["layers"] = ["L1", "L4"]
+    good = _card("fnd:good", 0.8, "a reviewed finding", layer="L4", covers=["e1"])
+    bad = _card("fnd:bad", 0.9, "an unreviewed finding", layer="L4", covers=["e2"])
+
+    class Findings:
+        async def for_query(self, caller: Any, channel: str, query: str) -> list[Any]:
+            return [find.Finding(card=good, reviewed=True), find.Finding(card=bad, reviewed=False)]
+
+    deps = find.Deps(corpus=Corpus([]), judge=None, policy=policy, policy_version=lambda: POLICY_V,
+                     findings=Findings())
+    caller = find.Caller(user_id=USER, roles=("owner",), provider=True)
+    out = asyncio.run(find.find(caller, "owner", "q", deps=deps))
+    assert [c["id"] for c in out["cards"]] == ["fnd:good"]

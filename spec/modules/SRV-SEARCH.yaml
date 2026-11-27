@@ -457,6 +457,87 @@ requirements:
       request hash; `pivot_in_order(order, plus)` is the same over a given order. Bound: expected
       disagreements ≤ 3 · OPT over uniformly random orders (Ailon, Charikar and Newman 2005). [unit]
       test_greedy_unit.py.
+  - id: FR-SEARCH-22   # ADR-0039 revision, promoted in phase 2 (unit 2)
+    text: >-
+      **`find` entry, budget and response (B8).** `find(caller, channel, query, filters=None, k=None, budget=None,
+      judge_ctx=None, question_type=None)`; `caller` = (user id, course roles, provider presence). `query` is NFC,
+      trimmed, 1–1000 characters (`query_invalid`); `filters` keys come from the facets file (`filter_invalid`); `k`
+      1..k_max (`k_invalid`), unset = no count cap; `budget` an integer, below `budget_min` → `budget_invalid`, unset
+      = the channel's default, above the channel's maximum clamped to it (not an error); `question_type` only from
+      internal callers (the pipeline's fact-check route); `judge_ctx` from the caller (tutor, pipeline, `obs.eval`)
+      or, on the owner channel, built by FR-SEARCH-28. Token counts use SRV-AGENT's estimator on canonical JSON. The
+      response is `{brain_version, policy_version, budget: <effective>, cards: [...], judge_ran, judge_source?,
+      judge_skip?, degraded}`. **`degraded`** is true iff the query embed call failed (FR-SEARCH-7's full-text
+      fallback) or `judge_skip` ∈ {timeout, error, budget, saturated, quota_refused, no_provider}; it is false when the
+      judge ran or was skipped as `gate` or `slice_empty`. **Response budget accounting:** the cards' budget B = the
+      effective budget − estimate(the envelope in its largest form: `judge_source` and `judge_skip` both present with
+      their longest values, `degraded` and `judge_ran` as `false` (the longer literal), `budget` with the channel
+      maximum's digits, `cards` empty) − one
+      character's estimate per returned card for the `,` separating cards in the array, charged as each card is
+      selected (a card's cost in the greedy = its JSON estimate + 0.5); so the estimate of the whole canonical
+      response never exceeds the effective budget (INV-SEARCH-9). **A card's cost is the estimate of its whole
+      canonical JSON** (id, cite with quotes, source, next and text included; `judged` as `false`, the longer
+      literal), and the card budgets of B1 bound only
+      its `text`: L1 text is cut to `card_budgets.L1` estimated tokens; L2 text is cut to `leaf` for a node without
+      children, `root` for a top-level node and `chapter` otherwise, in this order: the title path is kept first (cut
+      itself only when it alone exceeds the budget, and then no quote), then the summary when an L2 summary overlay is
+      active (joined to the title path by a newline), and the node's quote (FR-SEARCH-30) takes what is left of that
+      same L2 text budget, cut at whitespace,
+      or is omitted when nothing is left (VEC-SEARCH-9 pins the order); L0 text to `L0`. On the pipeline channel for an
+      entitled caller L1 text is
+      not cut (B8 table: full span text; the pipeline's budget bounds the response). A cut is at the last whitespace at
+      or before the limit, hard when there is none; a limit of t tokens is ⌊t × chars_per_token_floor⌋ characters.
+      A card is `{id, layer, title, text, cite: [{spn, quote_sha256,
+      quote?}], source: {id, role, as_of, reliability, license}, next: [ids], judged, more?}`; `more: true` only for a
+      cut `shareable` L1 card. The request hash = sha256 of the canonical JSON {user id, sorted roles, channel, query,
+      filters, k, effective budget, brain_version, policy_version} (keys `user_id`, `roles`, `channel`, `query`,
+      `filters`, `k`, `budget`, `brain_version`, `policy_version`). No response is cached (round 1). An unknown
+      channel → `channel_invalid`. Interface (phase 2): `reader.search.find.find(caller, channel, query, *, …,
+      deps)` with `Deps(corpus, judge, policy, policy_version, links, findings)` ports; `cards.Card`, `cards.cost`,
+      `cards.cut`, `cards.l1_text`, `cards.l2_text`, `cards.l2_budget`. find also drops any L1 card the channel may
+      not serve (FR-SEARCH-30's eligibility), as a second guard behind the SQL filter. [unit, db]
+      test_find_unit.py.
+  - id: FR-SEARCH-23   # ADR-0039 revision, promoted in phase 2 (unit 2)
+    text: >-
+      **Step 1, route by rules (0 model calls).** Question type: the caller's `question_type` when given (only
+      `fact_check` is accepted, and only on the `pipeline` channel; anything else → `channel_invalid`); else `exact`
+      when any identifier regex of `question_rules`
+      matches the query; else `current_state` when a wording regex (any language) matches; else `thematic`. Route =
+      `routes[<channel>.<type>]`. Layers not yet built (L3, L5 before their specs; L4 while the `Findings` port is the
+      empty default) are skipped and the trace says which layers were
+      available. Identifiers found (the matched text, in order of first match) become the `exact` route's filter and
+      objective elements. [unit] test_find_unit.py.
+  - id: FR-SEARCH-24   # ADR-0039 revision, promoted in phase 2 (unit 2)
+    text: >-
+      **Steps 3–5: merge, gate, expansion and preselection (0 model calls).** (3) Cards linked by `same_point` above
+      the policy's τ are merged by the pivot algorithm (FR-SEARCH-27 c); the merged card keeps the pivot's text and
+      takes all members' citations and the maximum score. The links come from a `Links` port; its production default
+      returns no links until SRV-KB, so step 3 is the identity in stage V. (4) Gate: `never_judge` → separated;
+      `always_judge` → not separated; `margin` → separated iff there is at most one card or s1 − s2 ≥ margin over the
+      merged cards' scores. Separated → step 7 on the merged cards with `judge_skip: gate`. (5) Otherwise expand 1 hop:
+      each merged card adds its `next` targets (an L1 card: the next span in reading order and its section; L2: its
+      children), at most `expand_per_card` per card; a card reached only by expansion scores max over its parents of
+      parent score × `expand_decay`, a card that is also a candidate keeps its own score if higher. Keep the top
+      `expand_cap` of the expanded set by (score desc, id), then select with FR-SEARCH-27's budgeted greedy under
+      `preselect_factor` × the cards' budget, with no k (k applies in step 7 only). Expanded cards obey the route's
+      `layers` (a target of a layer the route does not list is not added, e.g. an L2 section on an L1-only route)
+      and the channel's eligibility (FR-SEARCH-30): no link into an ineligible L1 card is followed. [unit, db]
+      test_find_unit.py ([db] expansion over real next links lands with the candidates, unit 4).
+  - id: FR-SEARCH-29   # ADR-0039 revision, promoted in phase 2 (unit 2)
+    text: >-
+      **Step 7, final selection and order (B6).** Cards budget B. **Without an applied judge output:** one
+      FR-SEARCH-27 (a) pass over the merged cards (gate separated) or the capped expanded set (judge degraded or
+      `slice_empty`), order by
+      score, with the request's k; every card `judged: false`; `judge_ran: false`. **With an applied output:** pass 1
+      over the cards the judge kept, under B and the request's k, fill order = the judge's order; pass 2 over the
+      unjudged remainder (preselection minus the slice) under B − cost(pass 1) and k − |pass 1| (no pass 2 when that is
+      0), on f(· ∪ P1) − f(P1), fill order = score; cards the judge read and dropped are excluded. Response order:
+      pass-1 cards in the judge's order, then pass-2 cards by score. `judged: true` exactly for
+      pass-1 cards; `judge_ran: true`; `judge_source` live or recorded. A remainder card never displaces a kept one.
+      The response and the trace record `judge_skip` in the closed set {gate, slice_empty, timeout, error, budget,
+      saturated, quota_refused, no_provider} when no judge ran, and the trace the judged and unjudged token counts
+      (FR-SEARCH-33; `slice_empty` joins SRV-OBS's enum, kl_paired_changes). The judge's `sufficiency` is recorded for
+      the slice only and is not applied to the remainder. [unit] test_find_unit.py.
 
 invariants:
   - id: INV-SEARCH-1
@@ -507,6 +588,18 @@ invariants:
       clustering over all partitions; with k set and the k costliest cards fitting, the pass reaches ≥ (1 − 1/e) of the
       optimum over sets of ≤ k cards. No bound over the union of the two step-7 passes is asserted (ADR-0039 B5).
       Enumeration exists only in the tests. [unit] test_greedy_props.py.
+  - id: INV-SEARCH-9   # ADR-0039 revision, promoted in phase 2 (unit 2)
+    text: >-
+      **Budget and count never exceeded.** For any request (any budget from `budget_min` up, including one above the
+      channel maximum, any k) and any corpus, the estimate of the whole canonical response (envelope, cards and
+      separators, as serialised) ≤ the effective budget ≤ the channel maximum, the number of returned cards ≤ k when k
+      is set, and every card's `text` ≤ its layer's text budget (L1 not cut on the pipeline channel for an entitled
+      caller). Property test. [unit] test_find_props.py.
+  - id: INV-SEARCH-15   # ADR-0039 revision, promoted in phase 2 (unit 2)
+    text: >-
+      **Unreviewed findings never returned.** Cards of layer L4 come from a `Findings` port (production default: empty
+      until SRV-KB) and only reviewed findings are eligible on any channel or in judge input. [unit]
+      test_find_unit.py.
 
 nfr:
   - id: NFR-SEARCH-1
@@ -566,6 +659,12 @@ vectors:
   - id: VEC-SEARCH-7
     source: hand-computed pivot clusterings for fixed seeds, and set-cover cases
     file: spec/fixtures/SRV-SEARCH/pivot-cover.yaml
+  - id: VEC-SEARCH-8
+    source: synthetic questions (agent's wording, no book text) → question type and route per channel
+    file: spec/fixtures/SRV-SEARCH/routes.yaml
+  - id: VEC-SEARCH-10
+    source: judge slicing and mixed responses — preselection, cap, kept/dropped output, k across the two passes, expected order and judged flags; slice_empty cases (empty preselection; a first card whose rendered input exceeds 1.5 × a small budget) with no row and degraded false
+    file: spec/fixtures/SRV-SEARCH/judge-mixed.yaml
 
 # Test levels: [unit] pure functions and the service protocol with a fake encoder; [db] Postgres via testcontainers on
 # the reader-postgres image with pgvector, with a fake embed service returning deterministic hash-derived unit vectors;
@@ -965,64 +1064,7 @@ proposed_revisions:
 proposed_requirements:
   # FR-SEARCH-21 of the draft (the policy) moved to `requirements` as FR-SEARCH-34 with its Red test (phase 2,
   # 2026-11-27): FR-SEARCH-21 is taken by forget_legacy (paired change of V.kl-ingest-packs).
-  - id: FR-SEARCH-22
-    text: >-
-      **`find` entry, budget and response (B8).** `find(caller, channel, query, filters=None, k=None, budget=None,
-      judge_ctx=None, question_type=None)`; `caller` = (user id, course roles, provider presence). `query` is NFC,
-      trimmed, 1–1000 characters (`query_invalid`); `filters` keys come from the facets file (`filter_invalid`); `k`
-      1..k_max (`k_invalid`), unset = no count cap; `budget` an integer, below `budget_min` → `budget_invalid`, unset
-      = the channel's default, above the channel's maximum clamped to it (not an error); `question_type` only from
-      internal callers (the pipeline's fact-check route); `judge_ctx` from the caller (tutor, pipeline, `obs.eval`)
-      or, on the owner channel, built by FR-SEARCH-28. Token counts use SRV-AGENT's estimator on canonical JSON. The
-      response is `{brain_version, policy_version, budget: <effective>, cards: [...], judge_ran, judge_source?,
-      judge_skip?, degraded}`. **`degraded`** is true iff the query embed call failed (FR-SEARCH-7's full-text
-      fallback) or `judge_skip` ∈ {timeout, error, budget, saturated, quota_refused, no_provider}; it is false when the
-      judge ran or was skipped as `gate` or `slice_empty`. **Response budget accounting:** the cards' budget B = the
-      effective budget − estimate(the envelope in its largest form: `judge_source` and `judge_skip` both present with
-      their longest values, `degraded` and `judge_ran` as `false` (the longer literal), `budget` with the channel maximum's digits, `cards` empty) − one
-      character's estimate per returned card for the `,` separating cards in the array, charged as each card is
-      selected (a card's cost in the greedy = its JSON estimate + 0.5); so the estimate of the whole canonical
-      response never exceeds the effective budget (INV-SEARCH-9). **A card's cost is the estimate of its whole
-      canonical JSON** (id, cite with quotes, source, next and text included), and the card budgets of B1 bound only
-      its `text`: L1 text is cut to `card_budgets.L1` estimated tokens; L2 text is cut to `leaf` for a node without
-      children, `root` for a top-level node and `chapter` otherwise, in this order: the title path is kept first (cut
-      itself only when it alone exceeds the budget, and then no quote), then the summary when an L2 summary overlay is
-      active, and the node's quote (FR-SEARCH-30) takes what is left of that same L2 text budget, cut at whitespace,
-      or is omitted when nothing is left (VEC-SEARCH-9 pins the order); L0 text to `L0`. On the pipeline channel for an entitled caller L1 text is
-      not cut (B8 table: full span text; the pipeline's budget bounds the response). A cut is at the last whitespace at
-      or before the limit, hard when there is none. A card is `{id, layer, title, text, cite: [{spn, quote_sha256,
-      quote?}], source: {id, role, as_of, reliability, license}, next: [ids], judged, more?}`; `more: true` only for a
-      cut `shareable` L1 card. The request hash = sha256 of the canonical JSON {user id, sorted roles, channel, query,
-      filters, k, effective budget, brain_version, policy_version}. No response is cached (round 1). [unit, db]
-    tests_planned:
-      - "add server/tests/search/test_find_unit.py [unit]: each validation code; budget_min − 1 → budget_invalid, budget_min accepted; budget above max → clamped and echoed; degraded true for an embed failure and for each of timeout, error, budget, saturated, quota_refused, no_provider, false for a judged response, gate and slice_empty; the whole response's estimate ≤ the effective budget at the boundary (a selection that fills B exactly, with the largest envelope and n separators); a card's cost equals the estimate of its whole JSON; L1, L2 (leaf, chapter, root, with a quote counted in the L2 text budget) and L0 cuts at whitespace and hard; pipeline L1 not cut for an entitled caller; more only for shareable; request hash changes with each field; two identical calls make two candidate reads (no cache)"
-  - id: FR-SEARCH-23
-    text: >-
-      **Step 1, route by rules (0 model calls).** Question type: the caller's `question_type` when given (only
-      `fact_check` is accepted from internal callers); else `exact` when any identifier regex of `question_rules`
-      matches the query; else `current_state` when a wording regex matches; else `thematic`. Route = `routes[<channel>.
-      <type>]`. Layers not yet built (L3, L4, L5 before their specs) are skipped and the trace says which layers were
-      available. Identifiers found become the `exact` route's filter and objective elements. [unit]
-    tests_planned:
-      - "add server/tests/search/test_find_unit.py [unit]: VEC-SEARCH-8 classification and route lookup; unbuilt layers skipped"
-  - id: FR-SEARCH-24
-    text: >-
-      **Steps 3–5: merge, gate, expansion and preselection (0 model calls).** (3) Cards linked by `same_point` above
-      the policy's τ are merged by the pivot algorithm (FR-SEARCH-27 c); the merged card keeps the pivot's text and
-      takes all members' citations and the maximum score. The links come from a `Links` port; its production default
-      returns no links until SRV-KB, so step 3 is the identity in stage V. (4) Gate: `never_judge` → separated;
-      `always_judge` → not separated; `margin` → separated iff there is at most one card or s1 − s2 ≥ margin over the
-      merged cards' scores. Separated → step 7 on the merged cards with `judge_skip: gate`. (5) Otherwise expand 1 hop:
-      each merged card adds its `next` targets (an L1 card: the next span in reading order and its section; L2: its
-      children), at most `expand_per_card` per card; a card reached only by expansion scores max over its parents of
-      parent score × `expand_decay`, a card that is also a candidate keeps its own score if higher. Keep the top
-      `expand_cap` of the expanded set by (score desc, id), then select with FR-SEARCH-27's budgeted greedy under
-      `preselect_factor` × the cards' budget, with no k (k applies in step 7 only). Expanded cards obey the route's
-      `layers` (a target of a layer the route does not list is not added, e.g. an L2 section on an L1-only route)
-      and the channel's eligibility (FR-SEARCH-30): no link into an ineligible L1 card is followed. [unit, db]
-    tests_planned:
-      - "add server/tests/search/test_find_unit.py [unit]: gate modes and the margin rule at the boundary; expansion score rule (only-by-expansion, both, two parents); cap 50 by (score, id); the preselection's cost ≤ 1.5 × budget; Links fake with edges merges as VEC-SEARCH-7; an L2 target is not added on an L1-only route"
-      - "add server/tests/search/test_find_db.py [db]: expansion over real next links of an active pack; an ineligible L1 target is not added"
+  # FR-SEARCH-22, -23, -24 promoted to `requirements` with test_find_unit.py (phase 2, unit 2).
   # FR-SEARCH-25, -26, -27 promoted to `requirements` with test_greedy_unit.py (phase 2, unit 2).
   - id: FR-SEARCH-28
     text: >-
@@ -1060,22 +1102,7 @@ proposed_requirements:
       possible owner follow-up (kl_open_points 1). [db]
     tests_planned:
       - "add server/tests/search/test_judge_wait_db.py [db] (fake lane that reads the row, records an output and notifies): slice within min(1.5 × budget, 3,000) by the rendered estimate and in score order (VEC-SEARCH-10); a pipeline card over 600 tokens is cut in the judge input only; empty preselection → no row, no job, judge_skip slice_empty, degraded false; a budget so small that the first card's rendered input exceeds 1.5 × B → the same; created_at and deadline come from the database clock (a test with a skewed process clock); a recorded hit → no row, no job, judge_source recorded; no provider → no_provider; tutor channel without ctx → error; owner channel without ctx → a row with line mcp, a fresh run_id per request, run cap from policy, lesson_id null, the user's daily budget; a caller-given ctx is used unchanged; live output in time → applied, live; each payload code maps as stated; a bare-id payload → read as ok; no notification within the timeout → timeout, returned by timeout + 0.5 s; enqueue failure → the row deleted, error; listener down → error with no row; the row carries request_id and input_sha256; the registration precedes the insert (a lane that notifies at once is not missed); exactly one row and one job per find; the job args are exactly {request_id, input_sha256}; one LISTEN connection per process under 20 concurrent finds"
-  - id: FR-SEARCH-29
-    text: >-
-      **Step 7, final selection and order (B6).** Cards budget B. **Without an applied judge output:** one
-      FR-SEARCH-27 (a) pass over the merged cards (gate separated) or the capped expanded set (judge degraded or
-      `slice_empty`), order by
-      score, with the request's k; every card `judged: false`; `judge_ran: false`. **With an applied output:** pass 1
-      over the cards the judge kept, under B and the request's k, fill order = the judge's order; pass 2 over the
-      unjudged remainder (preselection minus the slice) under B − cost(pass 1) and k − |pass 1| (no pass 2 when that is
-      0), on f(· ∪ P1) − f(P1), fill order = score; cards the judge read and dropped are excluded. Response order: pass-1 cards in the judge's order, then pass-2 cards by score. `judged: true` exactly for
-      pass-1 cards; `judge_ran: true`; `judge_source` live or recorded. A remainder card never displaces a kept one.
-      The response and the trace record `judge_skip` in the closed set {gate, slice_empty, timeout, error, budget,
-      saturated, quota_refused, no_provider} when no judge ran, and the trace the judged and unjudged token counts
-      (FR-SEARCH-33; `slice_empty` joins SRV-OBS's enum, kl_paired_changes). The judge's `sufficiency` is recorded for the slice
-      only and is not applied to the remainder. [unit]
-    tests_planned:
-      - "add server/tests/search/test_find_unit.py [unit]: VEC-SEARCH-10 mixed responses — kept first in judge order, remainder by score, judged false on the remainder, dropped excluded, kept cards exceeding B chosen by the greedy not the judge order; degraded path selects from the capped expanded set; all-dropped → pass 2 only; k = 3 with 2 kept → pass 2 takes at most 1; k reached in pass 1 → no pass 2"
+  # FR-SEARCH-29 promoted to `requirements` with test_find_unit.py (phase 2, unit 2).
   - id: FR-SEARCH-30
     text: >-
       **Personal-use cards per channel and caller (B8 table).** `entitled(caller, pack)` is true iff the caller owns
@@ -1133,15 +1160,7 @@ proposed_requirements:
       - "add server/tests/search/test_find_obs_db.py [db]: the span tree and attributes for a gated, a judged and a degraded find (in-memory exporter); a canary in the query and in a span text appears in no span attribute and no log record; cards.read applies the MCP row for a non-entitled pack"
 
 proposed_invariants:
-  - id: INV-SEARCH-9
-    text: >-
-      **Budget and count never exceeded.** For any request (any budget from `budget_min` up, including one above the
-      channel maximum, any k) and any corpus, the estimate of the whole canonical response (envelope, cards and
-      separators, as serialised) ≤ the effective budget ≤ the channel maximum, the number of returned cards ≤ k when k
-      is set, and every card's `text` ≤ its layer's text budget (L1 not cut on the pipeline channel for an entitled
-      caller). Property test. [unit]
-    tests_planned:
-      - "add server/tests/search/test_find_props.py [unit] (Hypothesis): estimate(canonical JSON of the returned response) ≤ effective budget for every judge outcome (judged, each judge_skip value, embed degraded), budgets from budget_min to above the maximum, k set and unset; card count ≤ k; text budgets per layer"
+  # INV-SEARCH-9 promoted to `invariants` with test_find_props.py (phase 2, unit 2).
   # INV-SEARCH-10 promoted to `invariants` with test_greedy_props.py (phase 2, unit 2).
   - id: INV-SEARCH-11
     text: >-
@@ -1180,12 +1199,7 @@ proposed_invariants:
       collector are SRV-EVENTS'.) [db]
     tests_planned:
       - "add server/tests/search/test_judge_wait_db.py: canary over procrastinate_jobs args and job_keys"
-  - id: INV-SEARCH-15
-    text: >-
-      **Unreviewed findings never returned.** Cards of layer L4 come from a `Findings` port (production default: empty
-      until SRV-KB) and only reviewed findings are eligible on any channel or in judge input. [unit]
-    tests_planned:
-      - "add server/tests/search/test_find_unit.py [unit]: a fake Findings port with reviewed and unreviewed findings"
+  # INV-SEARCH-15 promoted to `invariants` with test_find_unit.py (phase 2, unit 2).
 
 proposed_nfr:
   - id: NFR-SEARCH-5
@@ -1212,21 +1226,12 @@ proposed_nfr:
 
 proposed_vectors:
   # VEC-SEARCH-6, -7 promoted to `vectors` with test_greedy_unit.py (phase 2, unit 2).
-  - id: VEC-SEARCH-8
-    source: synthetic questions (agent's wording, no book text) → question type and route per channel
-    file: spec/fixtures/SRV-SEARCH/routes.yaml
-    tests_planned:
-      - "test_find_unit.py reads it (FR-SEARCH-23)"
+  # VEC-SEARCH-8 and VEC-SEARCH-10 promoted to `vectors` (phase 2, unit 2).
   - id: VEC-SEARCH-9
     source: B8 per-channel table — channel × entitled × license × layer → card returned, text bound, quotes, next/open into L1; L2 cut order cases (title path alone over the budget → title cut, no quote; title fits → quote takes the rest, cut at whitespace; nothing left → quote omitted; summary between title and quote when active); a node past the pack's quote allowance → spn and quote_sha256 only
     file: spec/fixtures/SRV-SEARCH/personal-use.yaml
     tests_planned:
       - "test_cards_db.py reads it (FR-SEARCH-22, -30)"
-  - id: VEC-SEARCH-10
-    source: judge slicing and mixed responses — preselection, cap, kept/dropped output, k across the two passes, expected order and judged flags; slice_empty cases (empty preselection; a first card whose rendered input exceeds 1.5 × a small budget) with no row and degraded false
-    file: spec/fixtures/SRV-SEARCH/judge-mixed.yaml
-    tests_planned:
-      - "test_judge_wait_db.py and test_find_unit.py read it (FR-SEARCH-28, -29)"
 
 kl_paired_changes:
   - { spec: SRV-INGEST, task: V.kl-ingest-packs, change: "as drafted there (FR-INGEST-35..39, -44, -45, on V/kl-ingest-packs), plus: `reader.ingest.overlays.begin` (registration of a building overlay) used by FR-SEARCH-5 step 3; restore calls `reader.search.ensure` for a restored material whose pack has no sealed vector overlay and a dead embed key (FR-SEARCH-9); the import names its profile (and tags) overlays through request_activation at its seal and enqueues search.embed {owner_id, pack_id, overlay_id} with the overlay id from FR-INGEST-36's function; `request_activation(conn, owner_id, pack_id, {vectors: id})` then `try_activate(conn, owner_id, pack_id)` callable inside the embed job's run transaction, try_activate returning its reason code (pack_purged, pack_collected, not_sealed make the embed job roll back); **new read** `reader.ingest.packs.profile_for_pack(conn, owner_id, pack_id)` (named apart from the `pack_profiles` table) → {license, language, role, reliability, as_of} from the head entry's profile overlay when the pack is active, else the pending activation's named profile overlay, else the import's (FR-SEARCH-5, -6, -9 read only this); the 'collected' state the buildable predicate reads (no generations); SRV-INGEST status (FR-INGEST-12, the upload view) and Retry (requeue_dead) read the search.embed key as [owner_id, overlay_id] instead of the ingest-based key; option (a): a legacy pack over backfilled locators that gets its own span-vector overlay (no legacy chunk rows as a vector overlay, no dual read path, one search-dark window per material, proposed_owner_notes); GC and purge call search.forget_legacy(conn, owner_id, ingest_id) for legacy chunk rows; the guarantee that materials.sha256 is computed by our code from the user's bytes (FR-SEARCH-30); INV-SEARCH-2 revised onto locators" }

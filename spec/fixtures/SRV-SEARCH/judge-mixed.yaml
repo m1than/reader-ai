@@ -1,0 +1,82 @@
+# VEC-SEARCH-10 (FR-SEARCH-28 slice, FR-SEARCH-29 step 7). Costs are abstract card costs; f is the weighted
+# coverage of `elements` (weight 1 each) by the cards' `covers` (no relevance term in these cases).
+#
+# Slicing: the longest prefix of the preselection in score order whose rendered judge input
+# (render_find_input("q", [(id, text), ...])) estimates ≤ min(1.5 × the cards' budget, cap). Each text here is 100
+# characters, so the rendered estimates are 63, 116 and 169 tokens for 1, 2 and 3 cards.
+slices:
+  - name: the prefix that fits 1.5 × B
+    cards: [a, b, c]
+    budget: 80  # 1.5 × 80 = 120: 116 fits, 169 does not
+    cap: 3000
+    expect: [a, b]
+  - name: the cap binds
+    cards: [a, b, c]
+    budget: 1000
+    cap: 116
+    expect: [a, b]
+  - name: slice_empty when the first card does not fit
+    cards: [a, b, c]
+    budget: 41  # 61.5 < 63
+    cap: 3000
+    expect: []
+  - name: slice_empty on an empty preselection
+    cards: []
+    budget: 1000
+    cap: 3000
+    expect: []
+# Step 7. `preselection` is in score order; `slice` its judged prefix; `kept` the judge's output in its order (the
+# rest of the slice was read and dropped). `kept: null` means no applied output: one pass over `pool` by score.
+cards:
+  a: {score: 0.9, cost: 1, covers: [x1]}
+  b: {score: 0.8, cost: 1, covers: [x2]}
+  c: {score: 0.7, cost: 1, covers: [x3]}
+  d: {score: 0.6, cost: 1, covers: [x4]}
+  e: {score: 0.5, cost: 1, covers: [x5]}
+  A: {score: 0.95, cost: 5, covers: [y1, y2]}
+  C: {score: 0.75, cost: 5, covers: [y1]}
+elements: [x1, x2, x3, x4, x5, y1, y2]
+steps:
+  - name: kept first in the judge's order, then the remainder by score
+    preselection: [a, b, c, d, e]
+    slice: [a, b, c]
+    kept: [c, a]
+    budget: 100
+    expect: [c, a, d, e]
+    judged: [true, true, false, false]
+  - name: kept cards over B are chosen by the greedy, not the judge order
+    preselection: [A, C, d, e]
+    slice: [A, C]
+    kept: [C, A]
+    budget: 6
+    expect: [A, d]
+    judged: [true, false]
+  - name: all dropped leaves pass 2 only
+    preselection: [a, b, c, d, e]
+    slice: [a, b, c]
+    kept: []
+    budget: 100
+    expect: [d, e]
+    judged: [false, false]
+  - name: k 3 with 2 kept lets pass 2 take one
+    preselection: [a, b, c, d, e]
+    slice: [a, b, c]
+    kept: [c, a]
+    budget: 100
+    k: 3
+    expect: [c, a, d]
+    judged: [true, true, false]
+  - name: k reached in pass 1 leaves no pass 2
+    preselection: [a, b, c, d, e]
+    slice: [a, b, c]
+    kept: [c, a]
+    budget: 100
+    k: 2
+    expect: [c, a]
+    judged: [true, true]
+  - name: no applied output selects from the pool by score
+    pool: [e, c, a, d, b]
+    kept: null
+    budget: 3
+    expect: [a, b, c]
+    judged: [false, false, false]
