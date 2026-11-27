@@ -72,5 +72,5 @@ async def test_span_rows_hashes_and_scope(pg: Pg, tmp_path: Path) -> None:
         stored_b3 = await w.scalar(
             "SELECT quote_sha256 FROM material_spans WHERE ingest_id = :i AND locator = :l", i=i3, l=b3)
         got, texts = await rows(w, [b3, d3, f"{sha}:1"])
-        assert got == {b3: (1, "b", stored_b3), f"{sha}:1": (1, "b", stored_b3)}  # mapped legacy id: r3's hash
+        assert got == {b3: (1, "b", stored_b3), f"{sha}:1": (1, "b", stored_b3)}  # mapped: r3's hash
         assert texts == {k: v[:2] for k, v in got.items()}

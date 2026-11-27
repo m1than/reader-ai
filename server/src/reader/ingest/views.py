@@ -181,7 +181,8 @@ async def active_span_texts(
     conn: AsyncConnection, owner_id: uuid.UUID, ids: Sequence[str]
 ) -> dict[str, tuple[int, str]]:
     """span id → (page, text): `active_span_rows` without the hash."""
-    return {ref: (page, body) for ref, (page, body, _) in (await active_span_rows(conn, owner_id, ids)).items()}
+    rows = await active_span_rows(conn, owner_id, ids)
+    return {ref: (page, body) for ref, (page, body, _) in rows.items()}
 
 
 async def active_span_rows(
