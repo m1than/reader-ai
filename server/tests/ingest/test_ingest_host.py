@@ -401,8 +401,11 @@ def test_migrate_citations_runs_the_health_check_then_the_command(tmp_path: Path
     """FR-INGEST-41: the health check, then exactly the in-container command; exit 4 maps to `unmapped`."""
     cli = need("reader.ingest.host.cli")
     argv = ["--migrate-citations", "--config", str(config(tmp_path))]
+    sha = "c" * 64
+    unmapped = b'{"result":"unmapped","unmapped":{"' + sha.encode() + b'":3}}'
     for exit_code, body, want, code_text in ((0, b'{"result":"migrated","rows":{"t":2}}', 0, ""),
-                                             (4, b'{"result":"unmapped","unmapped":{}}', 4, "unmapped")):
+                                             (4, unmapped, 4, f"{sha} 3"),
+                                             (2, b'{"result":"no_targets"}', 2, "no_targets")):
         runner, spawn = FakeRunner(migrate_exit=exit_code, migrate_out=body), FakeSpawn()
         err = io.StringIO()
         assert cli.ingest(argv, deps(runner, spawn, None), io.StringIO(), err) == want

@@ -1614,6 +1614,17 @@ requirements:
       refused with that reason and seq, no map rows, no activation; a second run → `exists`; the kinds' keys, and the
       follow-up enqueue of `ingest.seqmap` only while no map is accepted. The step-1 and migration tests come with
       unit 4 (test_ingest_artifact.py, test_packs_db.py).
+      **Code review of unit A (2026-11-27), stated:** a `try_activate` that stores `seqmap_missing` also enqueues
+      `ingest.seqmap` for that legacy ingest and pack (`enqueue_known`, idempotent by the kind's key), so a
+      follow-up lost while the kind was unwired is recovered by the worker-start sweep. `seqmap.build` refuses
+      (`not_legacy`) a `from_ingest_id` that is not the owner's legacy ingest of the to-pack's material.
+      [db] test_seqmap_db.py: an unwired follow-up then the sweep with the kind wired builds the map; `after_end`
+      of a succeeded r3 import enqueues `ingest.seqmap`; an unwired kind logs `ingest kind_unwired` and enqueues
+      nothing; a from-ingest of another material is refused.
+      **Merge gate (code review of unit A, 2026-11-27):** the `CONVERTER_VERSION` change to r3 (unit 4) is built on
+      V/kl-ingest-packs but must not merge into the integration branch before (a) SRV-EVENTS' KIND_MODULES and
+      SRV-OBS's span-name list serve `ingest.seqmap` and `ingest.reanchor`, (b) `start_reconcile` and the sweep are
+      wired at worker start, and (c) the `seqmap_missing` re-enqueue above is in place (done).
   - id: FR-INGEST-41
     text: >-
       **Migration step 4: mutable citations** (P2 (4)). `python -I -m reader.ingest.migrate_citations` (run by
@@ -1635,6 +1646,14 @@ requirements:
       SRV-TUTOR's `reader.tutor.citations.REWRITERS` (paired; an empty list until SRV-TUTOR declares it). The
       `citation_migrations` row carries the instance owner. The never-run test through SRV-TUTOR's span load (the
       planned `spans_by_ids` through `resolve` case) comes with that paired SRV-TUTOR change.
+      **Code review of unit A (2026-11-27), stated:** citations may sit anywhere in a document (the VEC-TUTOR answer
+      shape holds them in `blocks[*].citations[*]`): the rewrite walks every object of the document and rewrites
+      the `span` key of each; after the rewrite no selected document may still hold a legacy id under a `span` key
+      (else it is counted as unmapped and everything rolls back). A legacy seq above 2^31 − 1 is unmapped. With no
+      target declared the command exits 2 `no_targets` and writes nothing. Only a missing
+      `reader.tutor.citations` module means "none declared"; any other import error, or a module without
+      `REWRITERS`, fails the command. On exit 4 the host prints the count per material. [db, unit]
+      test_migrate_citations_db.py: the VEC-TUTOR answer shape; a seq of 2^31 → exit 4; no targets → 2.
       [db] test_migrate_citations_db.py (a declared test-double target): legacy ids with an accepted map → rewritten
       with locator and quote_sha256 in one transaction; one unmapped material among the rows → exit 4 `unmapped`
       with its count, no row changed; a second run → 0 rows; a canary span text never appears in the output or the
@@ -1669,7 +1688,10 @@ requirements:
       `orphaned` for the same ref before; a hop whose target hash differs stops that chain while a chain from
       another starting pack still reaches the active pack; an anchor cycle terminates; a legacy id resolves through the map; the
       resolver's transaction is assigned no transaction id (it writes nothing, so no lesson_revisions row or blob
-      changes); another owner's refs are never served.
+      changes); another owner's refs are never served. Code review of unit A (2026-11-27): a legacy seq above
+      2^31 − 1 → `unmapped` (never an error); a locator held by an inactive pack under another hash → `orphaned`;
+      an anchor row with the same from-locator and another hash is not followed; a cycle between two non-active
+      packs terminates.
   - id: FR-INGEST-43
     text: >-
       **Re-anchoring** (P2 quote hash and re-anchoring, P8). The job `ingest.reanchor` {owner_id, from_pack_id,
@@ -1691,6 +1713,9 @@ requirements:
       ordinal; three empty figures in the old pack and two in the new → all three orphaned; a span moved to another
       page → orphaned; a second run reuses the anchor_runs row; the job ends with try_activate appending the waiting
       pack. The rollback's reverse pair is tested in test_manifest_db.py.
+      **Known limit (code review of unit A, stated):** a rollback anchors only the pair (head pack → rolled-back
+      pack); a citation minted on a pack two or more steps away resolves through the stored anchor chains that
+      reach the rolled-back pack, else as `inactive` (its pack still holds it) or `orphaned`, never wrongly.
   - id: FR-INGEST-46
     text: >-
       **Per-pack advisory locks** (ADR-0039 B7b; the lock contract of SRV-AGENT FR-AGENT-21 step 9).
@@ -2626,6 +2651,9 @@ proposed_owner_notes:
 #   oracle change. The packs tests' `imported` helper receives its legacy pack under r2 explicitly (with
 #   CONVERTER_VERSION set to r2 for that receive), since the VEC-INGEST-1 fixture is now r3; the upload test's
 #   span id prefix follows FR-INGEST-15's revised span id (`spn:<sha>:`).
+#   code review of unit A (2026-11-27): the reconcile-vs-activation deadlock test was vacuous (only the second pack's
+#   profile changed); both materials' profiles now change, so the first-locked pack appends while the other session
+#   holds the second, and both complete.
 #
 # Open points:
 #   1. FR-INGEST-41 runs as a one-shot command, not an Alembic migration (P2 (4) wording): startup migrations would

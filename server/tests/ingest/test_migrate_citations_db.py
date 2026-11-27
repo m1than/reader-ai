@@ -86,6 +86,73 @@ async def test_rewrite_all_or_nothing(pg: Pg, tmp_path: Path, caplog: Any) -> No
         assert CANARY not in caplog.text and CANARY not in json.dumps(reply)
 
 
-def test_the_declared_targets() -> None:
+def test_the_declared_targets(monkeypatch: Any) -> None:
+    import importlib
+    import types
+
     migrate = need("reader.ingest.migrate_citations")
-    assert all(isinstance(t, migrate.Target) for t in migrate.targets())
+    real = importlib.import_module
+
+    def fake(found: Any) -> Any:
+        def importer(name: str, *args: Any) -> Any:
+            if name != "reader.tutor.citations":
+                return real(name, *args)
+            if isinstance(found, BaseException):
+                raise found
+            return found
+        return importer
+
+    missing = ModuleNotFoundError("no module", name="reader.tutor.citations")
+    monkeypatch.setattr(migrate.importlib, "import_module", fake(missing))
+    assert migrate.targets() == []  # only the module itself missing means "none declared"
+    monkeypatch.setattr(migrate.importlib, "import_module", fake(ModuleNotFoundError("dep", name="jsonx")))
+    with pytest.raises(ModuleNotFoundError):
+        migrate.targets()
+    monkeypatch.setattr(migrate.importlib, "import_module", fake(types.SimpleNamespace()))
+    with pytest.raises(AttributeError):  # a module without REWRITERS fails, never a silent empty list
+        migrate.targets()
+    declared = migrate.Target("x", "SELECT 1", "SELECT 1")
+    module = types.SimpleNamespace(REWRITERS=(declared,))
+    monkeypatch.setattr(migrate.importlib, "import_module", fake(module))
+    assert migrate.targets() == [declared]
+
+
+async def test_tutor_answer_shape_overflow_and_no_targets(pg: Pg, tmp_path: Path) -> None:
+    """Code review of unit A: citations in blocks[*].citations[*] (the VEC-TUTOR answer shape) are rewritten;
+    a seq above 2^31 - 1 is unmapped (exit 4); no declared target exits 2 `no_targets`."""
+    migrate = need("reader.ingest.migrate_citations")
+    async with world(pg, tmp_path) as w:
+        owner = w.users["ivan"]
+        sha = sha_of("tutor")
+        legacy = await synthetic_pack(w, sha, R2, [(1, "a")])
+        await activate(w, legacy)
+        r3 = await synthetic_pack(w, sha, R3, [(1, "a")])
+        async with w.engine.begin() as conn:
+            await conn.execute(text(
+                "CREATE TABLE cite_probe (id int PRIMARY KEY, owner_id uuid, answer jsonb)"))
+            assert await need("reader.ingest.seqmap").build(conn, owner, await ingest_of(w, legacy), r3) == (
+                "accepted")
+        located = (await w.rows("SELECT locator, quote_sha256 FROM material_spans WHERE ingest_id = :i",
+                                i=await ingest_of(w, r3)))[0]
+
+        def answer(span: str) -> dict[str, Any]:
+            return {"blocks": [{"text": "t", "supported": True, "quote": "a",
+                                "citations": [{"span": span, "page": 1, "material_title": "T"}]}],
+                    "insufficient": False}
+
+        async with w.engine.begin() as conn:
+            for key, span in ((1, f"{sha}:0"), (2, f"{sha}:2147483648")):
+                await conn.execute(text("INSERT INTO cite_probe VALUES (:i, :o, CAST(:d AS jsonb))"),
+                                   {"i": key, "o": owner, "d": json.dumps(answer(span))})
+        before = await answers(w)
+        assert await migrate.run(w.engine, [probe_target()]) == (
+            4, {"result": "unmapped", "unmapped": {sha: 1}})
+        assert await answers(w) == before
+        async with w.engine.begin() as conn:
+            await conn.execute(text("DELETE FROM cite_probe WHERE id = 2"))
+        assert await migrate.run(w.engine, [probe_target()]) == (
+            0, {"result": "migrated", "rows": {"cite_probe.answer": 1}})
+        cite = (await answers(w))[0]["blocks"][0]["citations"][0]
+        assert cite == {"span": located[0], "quote_sha256": located[1], "page": 1, "material_title": "T"}
+        assert await migrate.run(w.engine, []) == (2, {"result": "no_targets"})
+        assert await w.scalar("SELECT count(*) FROM citation_migrations") == 1

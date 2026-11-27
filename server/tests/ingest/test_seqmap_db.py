@@ -95,3 +95,71 @@ async def test_the_job_is_declared_with_its_key(pg: Pg, tmp_path: Path) -> None:
         assert await w.scalar("SELECT state FROM seq_maps") == "accepted"
         async with w.engine.begin() as conn:  # an accepted map exists: nothing more
             assert await jobs.enqueue_followups(conn, w.users["ivan"], new) == []
+
+
+def _without(w: World, *names: str) -> Any:
+    from reader.jobs import Catalog
+
+    full = w.jobs.catalog
+    w.jobs.catalog = Catalog([full[n] for n in full if n not in names])
+    return full
+
+
+async def test_a_lost_followup_is_recovered_by_the_sweep(pg: Pg, tmp_path: Path, caplog: Any) -> None:
+    """Code review of unit A, blocking 4: an unwired kind logs and enqueues nothing; a try_activate that
+    stores seqmap_missing enqueues the map, so the worker-start sweep recovers a lost follow-up."""
+    import logging
+
+    from .test_overlays_db import activate, vectors
+
+    jobs, manifest = need("reader.ingest.jobs"), need("reader.ingest.manifest")
+    caplog.set_level(logging.INFO)
+    async with world(pg, tmp_path) as w:
+        owner = w.users["ivan"]
+        sha = sha_of("lost")
+        legacy = await synthetic_pack(w, sha, R2, [(1, "a")])
+        await activate(w, legacy)
+        new = await synthetic_pack(w, sha, R3, [(1, "a")])
+        full = _without(w, "ingest.seqmap", "ingest.reanchor")
+        async with w.engine.begin() as conn:
+            assert await jobs.enqueue_followups(conn, owner, new) == []
+            v = await vectors(conn, owner, new)
+            await manifest.request_activation(conn, owner, new, {"vectors": v})
+            assert await manifest.try_activate(conn, owner, new) == "seqmap_missing"
+        assert "ingest kind_unwired ingest.seqmap" in caplog.text
+        assert await w.scalar("SELECT count(*) FROM job_keys WHERE kind = 'ingest.seqmap'") == 0
+        w.jobs.catalog = full  # the paired wiring lands; the worker restarts
+        await manifest.sweep(w.engine)
+        assert await w.scalar("SELECT count(*) FROM job_keys WHERE kind = 'ingest.seqmap'") == 1
+        await w.work()
+        assert await w.scalar("SELECT state FROM seq_maps") == "accepted"
+        assert await w.scalar("SELECT count(*) FROM pending_activations WHERE pack_id = :p", p=new) == 0
+
+
+async def test_after_end_of_an_import_enqueues_the_map(pg: Pg, tmp_path: Path) -> None:
+    jobs = need("reader.ingest.jobs")
+    async with world(pg, tmp_path) as w:
+        sha = sha_of("after")
+        await synthetic_pack(w, sha, R2, [(1, "a")])
+        await synthetic_pack(w, sha, R3, [(1, "a")])
+        payload = {"material_sha256": sha, "converter_version": R3, "artifact_id": "e" * 64,
+                   "material_id": sha[:12]}
+        await jobs.after_end(w.engine, payload, "dead")
+        assert await w.scalar("SELECT count(*) FROM job_keys WHERE kind = 'ingest.seqmap'") == 0
+        await jobs.after_end(w.engine, payload, "succeeded")
+        assert await w.scalar("SELECT count(*) FROM job_keys WHERE kind = 'ingest.seqmap'") == 1
+
+
+async def test_build_refuses_an_ingest_that_is_not_the_materials_legacy(pg: Pg, tmp_path: Path) -> None:
+    seqmap = need("reader.ingest.seqmap")
+    async with world(pg, tmp_path) as w:
+        owner = w.users["ivan"]
+        s1, s2 = sha_of("m1"), sha_of("m2")
+        l1 = await synthetic_pack(w, s1, R2, [(1, "a")])
+        await synthetic_pack(w, s2, R2, [(1, "a")])
+        new2 = await synthetic_pack(w, s2, R3, [(1, "a")])
+        new1 = await synthetic_pack(w, s1, R3, [(1, "a")])
+        async with w.engine.begin() as conn:
+            assert await seqmap.build(conn, owner, await ingest_of(w, l1), new2) == "not_legacy"
+            assert await seqmap.build(conn, owner, await ingest_of(w, new1), new2) == "not_legacy"
+        assert await w.scalar("SELECT count(*) FROM seq_maps") == 0

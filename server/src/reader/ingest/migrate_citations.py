@@ -22,13 +22,15 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 from reader.ingest import locator, spanref, store
 
 UNMAPPED_EXIT = 4
+NO_TARGETS_EXIT = 2
+TARGETS_MODULE = "reader.tutor.citations"
 
 
 @dataclass(frozen=True)
 class Target:
     """A citation-bearing column declared by its owning spec: the select returns (key, owner_id, document)
-    rows locked FOR UPDATE, the document's `citations` holds `{span, …}` objects, the update takes :key and
-    :doc."""
+    rows locked FOR UPDATE; citations are any objects in the document with a `span` key (the VEC-TUTOR answer
+    holds them in `blocks[*].citations[*]`); the update takes :key and :doc."""
 
     name: str
     select_sql: str
@@ -36,38 +38,66 @@ class Target:
 
 
 def targets() -> list[Target]:
-    """The declared targets: SRV-TUTOR's `reader.tutor.citations.REWRITERS` (paired), empty until then."""
+    """The declared targets: SRV-TUTOR's `reader.tutor.citations.REWRITERS` (paired). Only that module being
+    absent means none is declared; any other import error, or no REWRITERS, fails."""
     try:
-        module = importlib.import_module("reader.tutor.citations")
-    except ModuleNotFoundError:
+        module = importlib.import_module(TARGETS_MODULE)
+    except ModuleNotFoundError as error:
+        if error.name != TARGETS_MODULE:
+            raise
         return []
-    return list(getattr(module, "REWRITERS", ()))
+    return list(module.REWRITERS)
+
+
+async def _walk(conn: Any, owner: Any, value: Any) -> tuple[Any, bool]:
+    """The value with every mapped legacy `span` rewritten, anywhere in it; unmapped ones stay as they are."""
+    if isinstance(value, list):
+        items = [await _walk(conn, owner, v) for v in value]
+        return [v for v, _ in items], any(c for _, c in items)
+    if not isinstance(value, dict):
+        return value, False
+    out: dict[str, Any] = {}
+    changed = False
+    for name, item in value.items():
+        out[name], sub = await _walk(conn, owner, item)
+        changed = changed or sub
+    span = out.get("span")
+    if isinstance(span, str) and locator.is_legacy_id(span):
+        found = await spanref.legacy_target(conn, owner, span)
+        if found is not None:
+            out, changed = {**out, "span": found[0], "quote_sha256": found[1]}, True
+    return out, changed
+
+
+def _legacy_left(value: Any) -> Counter[str]:
+    """Legacy ids still under a `span` key, per material."""
+    left: Counter[str] = Counter()
+    if isinstance(value, list):
+        for item in value:
+            left.update(_legacy_left(item))
+    elif isinstance(value, dict):
+        for item in value.values():
+            left.update(_legacy_left(item))
+        span = value.get("span")
+        if isinstance(span, str) and locator.is_legacy_id(span):
+            left[span.split(":")[0]] += 1
+    return left
 
 
 async def _rewrite(conn: Any, target: Target, unmapped: Counter[str]) -> int:
     changed_rows = 0
     for key, owner, doc in (await conn.execute(text(target.select_sql))).all():
-        citations = doc.get("citations") if isinstance(doc, dict) else None
-        if not isinstance(citations, list):
-            continue
-        out, changed = [], False
-        for cite in citations:
-            span = cite.get("span") if isinstance(cite, dict) else None
-            if isinstance(span, str) and locator.is_legacy_id(span):
-                found = await spanref.legacy_target(conn, owner, span)
-                if found is None:
-                    unmapped[span.split(":")[0]] += 1
-                else:
-                    cite, changed = {**cite, "span": found[0], "quote_sha256": found[1]}, True
-            out.append(cite)
+        out, changed = await _walk(conn, owner, doc)
+        unmapped.update(_legacy_left(out))  # no legacy id may remain after the rewrite: each one is unmapped
         if changed:
-            body = json.dumps({**doc, "citations": out})
-            await conn.execute(text(target.update_sql), {"key": key, "doc": body})
+            await conn.execute(text(target.update_sql), {"key": key, "doc": json.dumps(out)})
             changed_rows += 1
     return changed_rows
 
 
 async def run(engine: AsyncEngine, declared: Sequence[Target]) -> tuple[int, dict[str, Any]]:
+    if not declared:
+        return NO_TARGETS_EXIT, {"result": "no_targets"}
     async with engine.connect() as conn:
         await conn.begin()
         unmapped: Counter[str] = Counter()

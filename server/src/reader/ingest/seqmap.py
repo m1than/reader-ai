@@ -13,6 +13,7 @@ from typing import Final
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+import reader.ingest as ingest
 from reader.ingest import manifest
 
 log = logging.getLogger("reader.ingest")
@@ -34,8 +35,16 @@ def first_mismatch(old: list[tuple[int, str, str]], new: list[tuple[int, str, st
 async def build(
     conn: AsyncConnection, owner_id: uuid.UUID, from_ingest_id: uuid.UUID, to_pack_id: str
 ) -> str:
-    """`accepted`, `refused:<reason>:<seq>`, or `exists` when an accepted map from this ingest or a row for
-    this pair is already there."""
+    """`accepted`, `refused:<reason>:<seq>`, `exists` when an accepted map from this ingest or a row for
+    this pair is already there, or `not_legacy` when the ingest is not the owner's legacy ingest of the
+    to-pack's material (nothing written)."""
+    legacy = (await conn.execute(text(
+        "SELECT 1 FROM base_packs f JOIN base_packs t ON t.owner_id = f.owner_id"
+        " AND t.material_sha256 = f.material_sha256 AND t.pack_id = :p"
+        " WHERE f.owner_id = :o AND f.ingest_id = :i AND f.parse_config ->> 'converter_version' = ANY(:v)"),
+        {"o": owner_id, "i": from_ingest_id, "p": to_pack_id, "v": list(ingest.LEGACY_VERSIONS)})).first()
+    if legacy is None:
+        return "not_legacy"
     found = (await conn.execute(text(
         "SELECT 1 FROM seq_maps WHERE owner_id = :o AND from_ingest_id = :i"
         " AND (state = 'accepted' OR to_pack_id = :p)"),

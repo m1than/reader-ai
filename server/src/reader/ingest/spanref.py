@@ -17,7 +17,8 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 
 from reader.ingest import locator, manifest, packs
 
-_HEX64: Final = re.compile(r"^[0-9a-f]{64}$")
+_HEX64: Final = re.compile(r"[0-9a-f]{64}")  # used with fullmatch (`$` would accept a trailing newline)
+_INT4_MAX: Final = 2**31 - 1
 
 
 @dataclass(frozen=True)
@@ -31,6 +32,8 @@ class Resolved:
 
 async def _legacy(conn: AsyncConnection, owner_id: uuid.UUID, ref: str) -> tuple[str, str] | None:
     sha, seq = ref.split(":")
+    if int(seq) > _INT4_MAX:  # no seq column holds it: unmapped, never a driver error
+        return None
     row = (await conn.execute(text(
         "SELECT m.locator, m.quote_sha256 FROM span_seq_map m"
         " JOIN seq_maps s ON s.owner_id = m.owner_id AND s.from_ingest_id = m.from_ingest_id"
@@ -100,7 +103,7 @@ async def _one(conn: AsyncConnection, owner_id: uuid.UUID, head: dict[str, str],
         if target is None:
             return Resolved(None, None, None, None, "unmapped")
         ref, quote = target
-    elif quote is None or not _HEX64.match(quote):
+    elif quote is None or not _HEX64.fullmatch(quote):
         return Resolved(None, None, None, None, "invalid")
     try:
         parsed = locator.parse(ref)

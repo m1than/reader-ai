@@ -108,3 +108,38 @@ async def sql_collect(w: World, pack_ids: list[str]) -> None:
         for pid in pack_ids:
             await conn.execute(text("UPDATE base_packs SET collected_at = now() WHERE pack_id = :p"),
                                {"p": pid})
+
+
+async def anchor(w: World, src: str, dst: str, from_loc: str, quote: str, to_loc: str) -> None:
+    async with w.engine.begin() as conn:
+        await conn.execute(text(
+            "INSERT INTO anchor_maps (owner_id, from_pack_id, to_pack_id, from_locator, quote_sha256,"
+            " to_locator, state) VALUES (:o, :f, :t, :fl, :q, :tl, 'mapped')"),
+            {"o": w.users["ivan"], "f": src, "t": dst, "fl": from_loc, "q": quote, "tl": to_loc})
+
+
+async def test_code_review_unit_a_edges(pg: Pg, tmp_path: Path, monkeypatch: Any) -> None:
+    """Code review of unit A: seq overflow, another hash in an inactive pack, hash-bound hops, cycles."""
+    versions(monkeypatch)
+    seqmap = need("reader.ingest.seqmap")
+    async with world(pg, tmp_path) as w:
+        owner = w.users["ivan"]
+        sha = sha_of("edges")
+        legacy = await synthetic_pack(w, sha, R2, [(1, "a"), (1, "zz")])
+        await activate(w, legacy)
+        r3 = await synthetic_pack(w, sha, R3, [(1, "zz"), (1, "a")])
+        async with w.engine.begin() as conn:
+            assert (await seqmap.build(conn, owner, await ingest_of(w, legacy), r3)).startswith("refused")
+        assert await states(w, [(f"{sha}:2147483648", None), (f"{sha}:999999999999", None)]) == [
+            ("unmapped", None)] * 2
+        zz3, zz_legacy = await loc(w, r3, "zz"), await loc(w, legacy, "zz")
+        assert zz3 not in (zz_legacy, await loc(w, legacy, "a"))
+        got = await states(w, [(zz3, q("zz")), (zz3, q("other"))])
+        assert got == [("inactive", "zz"), ("orphaned", None)]
+        await anchor(w, r3, legacy, zz3, q("a"), zz_legacy)  # same from-locator, another hash: not followed
+        assert await states(w, [(zz3, q("zz"))]) == [("inactive", "zz")]
+        r4 = await synthetic_pack(w, sha, R4, [(1, "xyz"), (1, "zz")])  # never active; zz at 4-6
+        zz4 = await loc(w, r4, "zz")
+        await anchor(w, r3, r4, zz3, q("zz"), zz4)
+        await anchor(w, r4, r3, zz4, q("zz"), zz3)  # a cycle between two non-active packs terminates
+        assert await states(w, [(zz3, q("zz")), (zz4, q("zz"))]) == [("inactive", "zz")] * 2

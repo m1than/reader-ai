@@ -560,7 +560,11 @@ def _migrate_citations(deps: Deps, out: TextIO) -> int:
     container = worker_container(deps)
     code, reply = _exec(deps, container, "reader.ingest.migrate_citations", [], MIGRATE_TIMEOUT_S)
     if code == 4:
-        raise Stop("unmapped", 4, "an accepted seq map is missing; nothing was changed")
+        counts = reply.get("unmapped") if isinstance(reply, dict) else None
+        per = "; ".join(f"{sha} {n}" for sha, n in sorted(counts.items())) if isinstance(counts, dict) else ""
+        raise Stop("unmapped", 4, f"an accepted seq map is missing; nothing was changed ({per})")
+    if code == 2 and isinstance(reply, dict) and reply.get("result") == "no_targets":
+        raise Stop("no_targets", 2, "no citation target is declared yet")
     if code != 0 or not isinstance(reply, dict) or reply.get("result") != "migrated":
         raise Stop("migrate_failed", 5)
     out.write("citations migrated\n")

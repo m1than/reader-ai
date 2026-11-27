@@ -184,7 +184,11 @@ async def _precondition(conn: AsyncConnection, owner_id: uuid.UUID, pid: str, sh
         mapped = (await conn.execute(text(
             "SELECT 1 FROM seq_maps WHERE owner_id = :o AND from_ingest_id = :i AND state = 'accepted'"),
             {"o": owner_id, "i": legacy})).first()
-        if mapped is None:
+        if mapped is None:  # a follow-up lost while the kind was unwired is enqueued again (by its key)
+            from reader.ingest.jobs import SEQMAP_KIND, enqueue_known
+
+            await enqueue_known(SEQMAP_KIND, {"owner_id": str(owner_id), "material_sha256": sha,
+                                              "from_ingest_id": str(legacy), "to_pack_id": pid})
             return "seqmap_missing"
     if current is not None and current[0] != pid:
         anchored = (await conn.execute(text(

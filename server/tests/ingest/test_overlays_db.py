@@ -161,10 +161,10 @@ async def test_reconcile_reuses_overlays_and_keeps_vectors(pg: Pg, tmp_path: Pat
 
 
 async def test_reconcile_never_deadlocks_with_an_activation(pg: Pg, tmp_path: Path) -> None:
-    """Code review of unit 2, blocking 4: another session holds the second pack's lock and activates it."""
+    """Code review of unit 2, blocking 4: another session holds the second pack's lock and activates it, while
+    the reconcile appends for the first pack (both profiles change, so the first-locked pack appends)."""
     import asyncio
-
-    from reader.config import load_config
+    import types
 
     packs, manifest = need("reader.ingest.packs"), need("reader.ingest.manifest")
     async with world(pg, tmp_path) as w:
@@ -172,22 +172,32 @@ async def test_reconcile_never_deadlocks_with_an_activation(pg: Pg, tmp_path: Pa
         a, b = await imported(w), await imported(w, "b" * 64)
         await activate(w, a)
         await activate(w, b)
-        hi = max(a, b)
-        config = load_config(write_config(w, tmp_path, "en"))  # the profiles change
+        lo, hi = sorted([a, b])
+        async with w.engine.connect() as conn:
+            start = await manifest.active_view(conn, owner)
+        profiles = {e["pack_id"]: e["overlays"]["profile"] for e in start.entry["packs"]}
+        materials = [  # each material's language flips (reader.yaml: synthetic ru, other en)
+            types.SimpleNamespace(sha256=MATERIAL_SHA, license="personal-use", language="en"),
+            types.SimpleNamespace(sha256="b" * 64, license="shareable", language="ru"),
+        ]
         other = await w.engine.connect()
         await other.begin()
         await packs.lock_packs(other, [hi])
         v2 = await vectors(other, owner, hi, model="m2")
         await manifest.request_activation(other, owner, hi, {"vectors": v2})
-        task = asyncio.create_task(packs.reconcile(w.engine, owner, config.materials))
-        await asyncio.sleep(1.0)  # the reconcile has committed the first pack and waits on hi's lock
+        before = await w.scalar("SELECT max(seq) FROM manifest_entries")
+        task = asyncio.create_task(packs.reconcile(w.engine, owner, materials))
+        await asyncio.sleep(1.0)  # the reconcile has committed lo and waits on hi's lock
+        assert await w.scalar("SELECT max(seq) FROM manifest_entries") == before + 1  # lo appended first
         assert await manifest.try_activate(other, owner, hi) == "appended"
         await other.commit()
         await other.close()
-        await asyncio.wait_for(task, 20)
+        await asyncio.wait_for(task, 20)  # both complete
         async with w.engine.connect() as conn:
             view = await manifest.active_view(conn, owner)
-        assert {e["pack_id"]: e["overlays"]["vectors"] for e in view.entry["packs"]}[hi] == v2
+        heads = {e["pack_id"]: e["overlays"] for e in view.entry["packs"]}
+        assert heads[hi]["vectors"] == v2
+        assert heads[lo]["profile"] != profiles[lo] and heads[hi]["profile"] != profiles[hi]
 
 
 async def test_start_reconcile_and_shareable(pg: Pg, tmp_path: Path, monkeypatch: Any) -> None:
