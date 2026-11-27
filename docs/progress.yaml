@@ -1974,7 +1974,11 @@ tasks:
         not send (it sends integers only, never invented); the pin needs a mapping or a set rewrite, decided
         there. Pre-existing flake seen in local CI: tests/obs/test_tracing_db.py::
         test_worker_start_rows_and_their_pruning compares the database clock with the host clock (passed on
-        rerun); to fix later by reading the time from the database, with its spec",
+        rerun); to fix later by reading the time from the database, with its spec. A second pre-existing,
+        load-sensitive flake: tests/sandbox/test_supervisor.py::test_eviction_under_flood_keeps_pid1 (OPS-SANDBOX;
+        failed once in a full local CI run, passed alone and on the rerun; untouched by this branch). Code review
+        round 3: a complete Run without its dataset input gets only the input (FR-OBS-39 c amended); the
+        VEC-OBS-5 body-key check of the eval writes stays for V.kl-live or the pin task",
       what: "SRV-OBS and WEB-MANAGE revision (~500–800 lines): TOOL/ROUTER/RETRIEVER spans with ids, counts, brain_version,
         policy_version and hashes only (INV-OBS-1/2 kept; question-derived filters as concept ids or hashes); the
         judge.find job as its own linked trace; a local judge-evaluation job kind obs.eval writing scores only

@@ -366,15 +366,29 @@ async def test_a_refused_dataset_input_falls_back_to_both_experiments(pg: Any, p
 
 class FallbackWorld:
     """An MLflow that refuses a bench-only dataset as an eval Run input (400) and accepts the fallback one;
-    datasets are kept by experiment, and the Run's completeness is remembered."""
+    datasets are kept by experiment, the Run's completeness and its logged inputs are remembered, and a list of
+    injected failures (`fail[path]`: a status or an exception, used once each) stands for a dying job."""
 
     def __init__(self) -> None:
         from .test_phase2_unit import Mlflow
 
         self.datasets: list[dict[str, Any]] = []
         self.complete = False
+        self.inputs: list[str] = []  # dataset ids logged as the Run's input
+        self.fail: dict[str, list[Any]] = {}
+
+        def injected(path: str) -> Any:
+            queue = self.fail.get(path) or []
+            if not queue:
+                return None
+            failure = queue.pop(0)
+            if isinstance(failure, BaseException):
+                raise failure
+            return failure, {}
 
         def search(request: httpx.Request) -> tuple[int, dict[str, Any]]:
+            if (hit := injected("datasets/search")) is not None:
+                return hit  # type: ignore[no-any-return]
             wanted = set(json.loads(request.content)["experiment_ids"])
             return 200, {"datasets": [d for d in self.datasets if wanted & set(d["experiment_ids"])]}
 
@@ -385,15 +399,21 @@ class FallbackWorld:
             return 200, {"dataset": made}
 
         def log_inputs(request: httpx.Request) -> tuple[int, dict[str, Any]]:
+            if (hit := injected("log-inputs")) is not None:
+                return hit  # type: ignore[no-any-return]
             used = json.loads(json.loads(request.content)["datasets"][0]["dataset"]["source"])["dataset_id"]
             ok = any(d["dataset_id"] == used and "0" in d["experiment_ids"] for d in self.datasets)
+            if ok:
+                self.inputs.append(used)
             return (200, {}) if ok else (400, {})
 
         def runs_search(request: httpx.Request) -> tuple[int, dict[str, Any]]:
             if not self.complete:
                 return 200, {"runs": []}
             tags = [{"key": "reader.complete", "value": "true"}, {"key": "reader.ends", "value": "1"}]
-            return 200, {"runs": [{"info": {"run_id": "r1"}, "data": {"params": [], "tags": tags}}]}
+            inputs = {"dataset_inputs": [{"dataset": {"name": "brain-eval-v1", "digest": i}} for i in self.inputs]}
+            return 200, {"runs": [{"info": {"run_id": "r1"}, "data": {"params": [], "tags": tags},
+                                   "inputs": inputs}]}
 
         def set_tag(request: httpx.Request) -> tuple[int, dict[str, Any]]:
             if json.loads(request.content).get("key") == "reader.complete":
@@ -409,8 +429,9 @@ class FallbackWorld:
 
 async def test_two_executions_in_the_fallback_world_make_one_fallback_dataset(pg: Any, pinned: None,
                                                                              monkeypatch: Any) -> None:
-    """Code review round 2: check 0 closes the run and check 1 runs later; the fallback dataset is made once,
-    and a job that finds the Run complete writes nothing more."""
+    """Code review rounds 2 and 3: the job dies after FR-OBS-20's steps (the Run complete, its input not yet
+    logged); the next execution logs the input exactly once with one fallback dataset, and the one after writes
+    nothing."""
     ev = require("reader.obs.eval")
     engine = await engine_for(pg)
     try:
@@ -418,14 +439,44 @@ async def test_two_executions_in_the_fallback_world_make_one_fallback_dataset(pg
         world = FallbackWorld()
         monkeypatch.setattr(ev, "tracing_on", lambda: True)
         monkeypatch.setattr(ev, "client_factory", world.mlflow.client)
-        await _run(engine, eval_id)
-        world.complete = False  # a retry before the Run was marked complete: the fallback dataset is reused
-        await _run(engine, eval_id)
-        fallbacks = [d for d in world.datasets if "0" in d["experiment_ids"]]
-        assert len(fallbacks) == 1 and len(world.datasets) == 2
-        writes_before = len(world.mlflow.writes())
-        await _run(engine, eval_id)  # the Run is complete now: no write at all
-        assert len(world.mlflow.writes()) == writes_before
+        failures = ({"log-inputs": [httpx.ConnectError("down")]}, {"log-inputs": [400, 503]},
+                    {"datasets/search": [503]}, {"datasets/search": [httpx.ConnectError("down")]})
+        for fail in failures:  # each: a first execution dies after sync, a second recovers, a third is a no-op
+            world.datasets.clear()
+            world.inputs.clear()
+            world.complete = False
+            world.fail = {k: list(v) for k, v in fail.items()}
+            with pytest.raises((httpx.ConnectError, httpx.HTTPStatusError)):
+                await _run(engine, eval_id)
+            assert world.complete and world.inputs == []  # the Run is complete, its input missing
+            await _run(engine, eval_id)
+            fallbacks = [d for d in world.datasets if "0" in d["experiment_ids"]]
+            assert len(fallbacks) == 1 and len(world.inputs) == 1, fail
+            assert world.inputs == [fallbacks[0]["dataset_id"]]
+            creates = [p for p in world.mlflow.paths() if p.endswith("/runs/create")]
+            writes_before = len(world.mlflow.writes())
+            await _run(engine, eval_id)  # complete with its input: no write at all
+            assert len(world.mlflow.writes()) == writes_before and len(world.inputs) == 1
+            assert len([p for p in world.mlflow.paths() if p.endswith("/runs/create")]) == len(creates)
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.parametrize("status", [403, 409])
+async def test_another_4xx_on_the_dataset_input_raises_without_a_fallback(pg: Any, pinned: None,
+                                                                          monkeypatch: Any, status: int) -> None:
+    ev = require("reader.obs.eval")
+    runs = require("reader.obs.runs")
+    engine = await engine_for(pg)
+    try:
+        eval_id = await _closable(engine, monkeypatch)
+        world = FallbackWorld()
+        world.fail = {"log-inputs": [status]}
+        monkeypatch.setattr(ev, "tracing_on", lambda: True)
+        monkeypatch.setattr(ev, "client_factory", world.mlflow.client)
+        with pytest.raises(runs.ObsRunsRefused):
+            await _run(engine, eval_id)
+        assert [d["experiment_ids"] for d in world.datasets] == [["7"]]  # no [0, bench] dataset
     finally:
         await engine.dispose()
 

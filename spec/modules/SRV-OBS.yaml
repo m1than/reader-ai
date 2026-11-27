@@ -1535,9 +1535,12 @@ requirements:
           Run's input (FR-OBS-23 d's shape). Logging a `bench` dataset as an input of a Run in experiment 0 is
           not measured: the first [image] test pins it; the declared fallback is built: when MLflow answers 400 to
           that `log-inputs`, the job uses the dataset of that name in experiment 0, else creates it with
-          `experiment_ids` [0, bench], and logs it again (a 5xx is transient, no fallback). A job that finds the
-          Run already complete (`reader.complete`) writes nothing more (code review round 2), so a later check
-          never creates a second dataset.
+          `experiment_ids` [0, bench], and logs it again (a 5xx is transient, no fallback; any other 4xx raises
+          without a fallback). A job that finds the Run already complete (`reader.complete`) writes nothing more
+          when the run has no set or the Run already lists the set's dataset among its `inputs.dataset_inputs`;
+          when complete without that input (the job died after FR-OBS-20's steps), it skips those steps and only
+          logs the dataset input on the found Run (code review rounds 2 and 3), so a later check never creates a
+          second dataset and never loses the input.
       (d) Posting. `obs.judge_score` reads the score row and posts it as an LLM_JUDGE assessment by FR-OBS-14's
           lookup, retry and 404 rules, then stores `assessment_id`.
       With tracing off the jobs still score and store rows but post nothing and write no Run. Postgres is the

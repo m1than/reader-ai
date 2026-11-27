@@ -519,8 +519,10 @@ async def _close(engine: Any, args: RunArgs) -> tuple[Any, list[RecordRow], list
 
 
 async def handle_run(args: RunArgs, conn: Any, ctx: Any) -> None:
-    """Close first (own transaction), then, with tracing on, the Run and the dataset input; a retry after an
-    MLflow failure finds the run closed and writes the Run again (runs.sync is idempotent)."""
+    """Close first (own transaction), then, with tracing on, the Run and the dataset input. A retry after an
+    MLflow failure finds the run closed: an incomplete Run is written again (runs.sync is idempotent); a
+    complete Run without the set's dataset input gets only the input; a complete Run with it (or a run with no
+    set) gets nothing (FR-OBS-39 c)."""
     closed = await _close(conn.engine, args)
     if closed is None or not tracing_on():
         return
@@ -552,13 +554,22 @@ async def handle_run(args: RunArgs, conn: Any, ctx: Any) -> None:
         async with client_factory() as client:
             found = await runs._find(client, snap)
             tags = runs._kv(((found or {}).get("data") or {}).get("tags"))
-            if tags.get("reader.complete") == "true":
-                return  # a later check (or a retry) after the Run is complete writes nothing more
+            with_set = bool(run.set_name and run.set_doc)
+            if found is not None and tags.get("reader.complete") == "true":
+                if with_set and not _has_input(found, str(run.set_name)):
+                    await _log_dataset(client, str(found["info"]["run_id"]), run)
+                return  # complete (with its input): a later check or retry writes nothing more
             run_id = await runs.sync(snap, client)
-            if run.set_name and run.set_doc:
+            if with_set:
                 await _log_dataset(client, run_id, run)
     except MlflowRefused as refused:
         raise runs.ObsRunsRefused(str(refused.status)) from None
+
+
+def _has_input(found: Mapping[str, Any], set_name: str) -> bool:
+    """Whether the runs/search result lists the set's dataset among the Run's `inputs.dataset_inputs`."""
+    listed = ((found.get("inputs") or {}).get("dataset_inputs")) or []
+    return any(((d or {}).get("dataset") or {}).get("name") == set_name for d in listed if isinstance(d, dict))
 
 
 async def _again(args: RunArgs, seconds: float) -> None:
