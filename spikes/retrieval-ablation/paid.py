@@ -109,11 +109,15 @@ PRICES = json.loads(Path("/in/prices.json").read_text()) if Path("/in/prices.jso
 
 
 def recompute(row: dict) -> Decimal | None:
-    """Cross-check of the CLI's total_cost_usd from the token counts and pricing.yaml (micro, ROUND_HALF_UP)."""
+    """Cross-check of the CLI's total_cost_usd from the token counts and pricing.yaml (micro, ROUND_HALF_UP).
+
+    The usage is summed over every API request of the call (the CLI continues past the output cap with more
+    requests), so the >100k tier is judged on the largest single prompt, max(write, read) + input, not on the sum
+    (pricing.cost(summed=True) does the same; the first prefixes run applied it to the sum and overstated 67 rows 5x)."""
     rates = PRICES.get(row["model"])
     if not rates:
         return None
-    prompt = row["input"] + row["cache_write"] + row["cache_read"]
+    prompt = row["input"] + max(row["cache_write"], row["cache_read"])
     if prompt > 100_000 and "above_100k" in rates:
         rates = rates["above_100k"]
     w1h = row.get("cache_write_1h", row["cache_write"])
@@ -235,8 +239,9 @@ def prefixed_ids() -> set[int]:
 
 def cache_stats(rows: list[dict]) -> dict:
     """Over every row of the stage, all runs: the chapter context each later call should have read from cache."""
+    # a continued call reads the context once per request, so its read counts at most once (capped at ctx)
     expected = sum(r.get("ctx_expected", 0) for r in rows)
-    read = sum(r["cache_read"] for r in rows if r.get("ctx_expected", 0))
+    read = sum(min(r["cache_read"], r["ctx_expected"]) for r in rows if r.get("ctx_expected", 0))
     ratio = read / expected if expected else None
     return {"cache_read_tokens": read, "cache_expected_tokens": expected,
             "cache_ratio": None if ratio is None else round(ratio, 4),
@@ -246,7 +251,13 @@ def cache_stats(rows: list[dict]) -> dict:
 async def prefixes(led: Ledger, chapters: list[int], conc: int) -> dict:
     _, _, groups = book()
     out = TXT / "prefixes.jsonl"
-    have = prefixed_ids()
+
+    def done() -> set[int]:
+        """Prefixed spans, minus those whose latest call in this stage failed: a failed call's text is redone."""
+        latest = {r["id"]: r for r in led.rows}
+        return {i for i in prefixed_ids() if not (i in latest and latest[i].get("error"))}
+
+    have = done()
     sem = asyncio.Semaphore(conc)
     empty = 0
     misses: list[int] = []
@@ -259,17 +270,20 @@ async def prefixes(led: Ledger, chapters: list[int], conc: int) -> dict:
             return
         row: dict = {"id": s["seq"], "chapter": n, "error": "NotRecorded", "usd": None, "subtype": None}
         try:
-            text, got = await call(HAIKU, system, PREFIX_USER.format(span=s["text"]), 0.05, 300)
+            # output cap 1,024: at 300 the CLI continued long answers with up to 3 more requests (4 x 300 tokens)
+            # and then failed the call (ResultError), 54 times in group 0 in the first prefixes run
+            text, got = await call(HAIKU, system, PREFIX_USER.format(span=s["text"]), 0.05, 1024)
             row = got | {"id": s["seq"], "chapter": n, "ctx_expected": ctx, "empty": not text}
-            if text:
+            if text and not row["error"]:
                 append_text(out, {"id": s["seq"], "prefix": text})
-            else:
+            elif not text:
                 empty += 1
         finally:
             led.add(row, res)
-        if not ctx and row.get("input", 0) + row.get("cache_write", 0) + row.get("cache_read", 0) > 100_000:
+        # one request's prompt: usage is summed over the CLI's requests, so the largest single part counts
+        if not ctx and row.get("input", 0) + max(row.get("cache_write", 0), row.get("cache_read", 0)) > 100_000:
             led.stopped = f"chapter {n}'s first call passed 100,000 prompt tokens (Haiku's above_100k pricing)"
-        if ctx:  # a later call of the chapter: its context should come from cache
+        if ctx and not row.get("error"):  # a later call of the chapter: its context should come from cache
             misses.append(1 if row["cache_read"] < CACHE_RULE * ctx else 0)
             if sum(misses[-STOP_AFTER:]) == STOP_AFTER and not led.stopped:
                 led.stopped = (f"cache rule: {STOP_AFTER} consecutive calls in chapter {n} read < 80% of the "
@@ -283,7 +297,11 @@ async def prefixes(led: Ledger, chapters: list[int], conc: int) -> dict:
         async with sem:
             await one(n, system, todo[0], 0)    # this run's first call of the chapter writes (or reads) the cache
         first = led.rows[-1] if led.rows and led.rows[-1]["id"] == todo[0]["seq"] else None
-        ctx = (first["cache_write"] + first["cache_read"]) if first else 0
+        # the chapter context of one request: max, not sum, of write and read, because a first call that the CLI
+        # continued writes the context in its first request and reads it in the next (chapter 11 in the first
+        # prefixes run: 20,425 written + 20,060 read, so the sum doubled the context and later calls, reading
+        # 19,669, looked like cache misses)
+        ctx = max(first["cache_write"], first["cache_read"]) if first else 0
         if first and ctx == 0 and not led.stopped:
             led.stopped = f"cache rule: chapter {n}'s first call neither wrote nor read a cache"
 
@@ -291,7 +309,7 @@ async def prefixes(led: Ledger, chapters: list[int], conc: int) -> dict:
             async with sem:
                 await one(n, system, s, ctx)
         await asyncio.gather(*(guarded(s) for s in todo[1:]))
-    have = prefixed_ids()
+    have = done()
     stage_spans = [s["seq"] for n in chapters for s in groups[n]]
     indexed = [s["seq"] for g in groups.values() for s in g]
     return cache_stats(led.rows) | {
@@ -458,7 +476,10 @@ def whole_chapter_items() -> list[tuple[str, dict, list[str]]]:
 def summarise(stage: str, led: Ledger, res: dict, t0: float) -> dict:
     rows = led.rows
     run_usd = led.spent() - led.start_spent
-    same = [r for r in rows if r.get("usd_recomputed") is not None]
+    # recomputed from the tokens now, not from the stored value (rows of the first prefixes run stored the
+    # sum-based tier; calls.jsonl stays append-only)
+    fresh = [(r, recompute(r)) for r in rows if r.get("usd") is not None]
+    same = [r | {"usd_recomputed": float(c)} for r, c in fresh if c is not None]
     disk = {p: shutil.disk_usage(p)._asdict() for p in ("/home/worker", "/tmp") if Path(p).exists()}
     walls = sorted(r["wall_s"] for r in rows)
     out = res | {

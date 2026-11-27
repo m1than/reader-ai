@@ -64,6 +64,10 @@ for line in sys.stdin:
         usage = {"input_tokens": len(prompt.encode()) // 3, "output_tokens": 20,
                  "cache_creation_input_tokens": 0 if hit else size, "cache_read_input_tokens": size if hit else 0,
                  "cache_creation": {"ephemeral_1h_input_tokens": 0 if hit else size, "ephemeral_5m_input_tokens": 0}}
+        if os.environ.get("STUB_CONTINUE_FIRST") == "1" and not hit:
+            # a first call the CLI continued with a second request: usage summed, the context written then read
+            usage["cache_read_input_tokens"] = size
+            usage["output_tokens"] = 374
         send({"type": "assistant", "message": {"role": "assistant", "model": "stub",
                                                 "content": [{"type": "text", "text": text}]},
               "parent_tool_use_id": None, "session_id": "stub"})

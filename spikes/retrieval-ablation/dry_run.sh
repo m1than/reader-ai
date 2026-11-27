@@ -84,6 +84,9 @@ done
 rc=$(run nocache stage1 12.00 -e STUB_USD=0.0004 -e STUB_NOCACHE=1)
 n=$(sum .calls nocache stage1)
 check "no cache: stage1 stops (exit 3, $n calls)" '[[ $rc == 3 && $n -ge 4 && $n -le 7 && $(sum .stopped nocache stage1) == cache\ rule* ]]'
+# a chapter-first call the CLI continued (usage summed: context written and read): no false cache-rule stop
+rc=$(run continued stage1 12.00 -e STUB_USD=0.0004 -e STUB_CONTINUE_FIRST=1)
+check "continued first call: stage1 passes (no doubled context)" '[[ $rc == 0 && $(sum .cache_rule_pass continued stage1) == true ]]'
 # empty answers: counted, coverage incomplete, exit 3
 rc=$(run empty summaries 12.00 -e STUB_USD=0.0004 -e STUB_EMPTY=1)
 check "empty answers fail coverage" '[[ $rc == 3 && $(sum .coverage_complete empty summaries) == false ]]'
