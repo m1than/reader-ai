@@ -1,8 +1,8 @@
 """SRV-SEARCH FR-SEARCH-22..24, -29: the `find` cascade (ADR-0039 B6) over ports.
 
 Step 1 routes by rules, step 2 asks the `Corpus` for candidates, step 3 merges `Links` by pivot, step 4 gates,
-step 5 expands one hop and preselects under `preselect_factor` times the cards' budget, step 6 makes at most one
-`Judge` call on the top slice, step 7 selects under the cards' budget. Steps 1-5 and 7 make no model call.
+step 5 expands one hop and preselects under `preselect_factor` times the cards' budget, step 6 makes at most
+one `Judge` call on the top slice, step 7 selects under the cards' budget. Steps 1-5 and 7 make no model call.
 """
 
 from __future__ import annotations
@@ -240,7 +240,7 @@ def merge(cards: Sequence[Card], plus: Callable[[str, str], bool], seed: str) ->
 
 def expand(merged: Sequence[Card], neighbours: Mapping[str, Sequence[Card]], policy: Policy,
            layers: Sequence[str]) -> list[Card]:
-    """FR-SEARCH-24 (5): one hop, `expand_per_card` per card at most, decayed scores, capped by (score, id)."""
+    """FR-SEARCH-24 (5): one hop, `expand_per_card` per card at most, decayed scores, capped by score."""
     data = policy.data
     found: dict[str, Card] = {c.id: c for c in merged}
     for parent in merged:
