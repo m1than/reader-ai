@@ -95,6 +95,10 @@ async def material_imported(conn: AsyncConnection, owner_id: uuid.UUID, material
         return False
     from reader.ingest import views
 
-    # FR-PIPELINE-22: a deleted material (SRV-INGEST FR-INGEST-31) counts as not imported; it leaves the head
-    # manifest entry, so "imported" is "has an active pack" (FR-PIPELINE-2's paired change, INV-INGEST-16).
-    return await views.active_pack(conn, owner_id, material_sha256) is not None
+    # FR-PIPELINE-22: a deleted material (SRV-INGEST FR-INGEST-31) counts as not imported; "imported" is "has an
+    # active pack" (FR-PIPELINE-2's paired change, INV-INGEST-16), and the tombstone is checked as well.
+    live = await conn.execute(
+        text("SELECT 1 FROM materials WHERE owner_id = :o AND sha256 = :m AND deleted_at IS NULL"),
+        {"o": owner_id, "m": material_sha256},
+    )
+    return live.first() is not None and await views.active_pack(conn, owner_id, material_sha256) is not None
