@@ -250,6 +250,27 @@ per call), p50 1.59 s, p95 3.83 s per call.
    consecutive failed calls instead of 3 (at most ≈ $0.03 on a systemic failure); calls without a reported cost
    still stop it after 3.
 
+## `prefixes` run 2 (owner's run, 2026-11-27): stage complete
+
+| Measure | Value |
+| --- | --- |
+| Calls this run | 4,344: 4,290 never tried (chapters 11, 12, 14–23, then group 0) + 54 retries of run 1's failures, last |
+| Stage coverage | 8,282 of 8,282 stage spans; the book's 9,104 indexed spans all done (stage 1 + prefixes) |
+| `prefix: none` | **30** spans, all in group 0: retries that failed again (titles-only context); 24 of the 54 retries succeeded |
+| Failed calls, stage | 84 = run 1's 54 + run 2's 30 retries (all `ResultError`, group 0); no failure in chapters 1–23 |
+| USD | run 2 **$2.19591864** (projected $2.22–2.33); stage total $4.34040577, recomputed from tokens $4.340415 |
+| Cache reads / expected, stage | 271,921,823 / 275,073,322 = **0.9885** |
+| Wall | run 2 2,000.4 s at concurrency 4 (0.46 s per call); per call p50 1.63 s, p95 2.45 s |
+
+**Whole-book context prefixes (one pack): $4.7897** (stage 1 $0.4493 + prefixes $4.3404) for 9,104 spans and
+9,158 calls (822 + 8,336, of which 84 failed), about 1 h 12 min of runs at concurrency 4 (367 + 1,930 + 2,000 s);
+sequential at the measured p50 that is about 4.2 h. Initial `index` cap per pack for prefixes (B7, cost + 20%):
+**$5.75**. Paid so far $4.7897 of the $12.51 total ($7.72 left); caps left: summaries $0.19, judge $4.73, factcheck $2.42.
+
+**Next, in order:** the owner runs `paid.sh summaries`; the agent then runs `v12.sh` itself (free: local
+embedding in the embed image with `--network none`, no token, no model call); then the owner runs `paid.sh judge`
+and `paid.sh factcheck`.
+
 ## Paid runner (approved by the owner 2026-11-26, $12.00 staged; raised to $12.51 on 2026-11-27; the owner runs it)
 
 `paid.sh <stage> [concurrency]` follows `spikes/tutor-call/run.sh`: the Keychain item is piped on stdin into a

@@ -1,34 +1,37 @@
 {
- "cache_read_tokens": 142629403,
- "cache_expected_tokens": 133865206,
- "cache_ratio": 1.0655,
+ "cache_read_tokens": 271921823,
+ "cache_expected_tokens": 275073322,
+ "cache_ratio": 0.9885,
  "cache_rule_pass": true,
  "concurrency": 4,
  "empty_returns_this_run": 0,
  "stage_spans": 8282,
- "stage_spans_with_prefix": 3992,
+ "stage_spans_with_prefix": 8282,
  "book_indexed_spans": 9104,
- "book_spans_with_prefix": 4814,
- "coverage_complete": false,
+ "book_spans_with_prefix": 9104,
+ "coverage_complete": true,
+ "retried_this_run": 54,
+ "prefix_none_this_run": 30,
+ "book_spans_prefix_none": 30,
  "stage": "prefixes",
  "cap_usd": "4.72",
- "calls": 3992,
- "calls_this_run": 3992,
- "usd_stage_total": "2.14448713000000004255",
- "usd_this_run": "2.14448713000000004255",
- "usd_recomputed_total": "2.836783",
- "usd_reported_same_rows": "2.14448713000000004255",
- "stopped": "cache rule: 3 consecutive calls in chapter 11 read < 80% of the chapter context from cache",
- "run_wall_s": 1929.6,
+ "calls": 8336,
+ "calls_this_run": 4344,
+ "usd_stage_total": "4.34040577000000008537",
+ "usd_this_run": "2.19591864000000004282",
+ "usd_recomputed_total": "4.340415",
+ "usd_reported_same_rows": "4.34040577000000008537",
+ "stopped": null,
+ "run_wall_s": 2000.4,
  "tokens": {
-  "input": 8620,
-  "output": 526407,
-  "cache_write": 2269635,
-  "cache_read": 142649463
+  "input": 17534,
+  "output": 1036315,
+  "cache_write": 4770840,
+  "cache_read": 286632687
  },
- "wall_s_per_call_p50": 1.59,
- "wall_s_per_call_p95": 3.83,
- "failed_calls": 54,
+ "wall_s_per_call_p50": 1.63,
+ "wall_s_per_call_p95": 2.45,
+ "failed_calls": 84,
  "tmpfs_bytes": {
   "/home/worker": {
    "total": 536870912,
@@ -37,13 +40,13 @@
   },
   "/tmp": {
    "total": 536870912,
-   "used": 1486848,
-   "free": 535384064
+   "used": 1982464,
+   "free": 534888448
   }
  },
- "at": "2026-11-27T09:31:32+00:00",
+ "at": "2026-11-27T11:29:32+00:00",
  "home_bytes_per_call": 8,
- "home_extrapolated_bytes_9104_calls": 74729,
+ "home_extrapolated_bytes_9104_calls": 68674,
  "home_tmpfs_ok": true,
- "ledger_row": "- { task: V.spike.retrieval-ablation, usd: 2.14448713000000004255, date: 2026-11-27, funding: test_budget_usd, what: \"paid arm prefixes: 3992 calls this run, 3992 in total; spikes/retrieval-ablation/results/paid/prefixes/\" }"
+ "ledger_row": "- { task: V.spike.retrieval-ablation, usd: 2.19591864000000004282, date: 2026-11-27, funding: test_budget_usd, what: \"paid arm prefixes: 4344 calls this run, 8336 in total; spikes/retrieval-ablation/results/paid/prefixes/\" }"
 }
