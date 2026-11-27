@@ -1273,8 +1273,10 @@ requirements:
         spans), and sets `sealed` with `sealed_at` in the same run transaction.
       - **Immutability** (P1), enforced by triggers of the migration, each refusal a database error: an UPDATE of a
         `base_packs` row other than `building → sealed` and other than setting `collected_at` or `purged_at` once
-        each; any DELETE of `base_packs` or `ingests` rows (they are the pack's tombstone, kept for the foreign keys
-        of `freshness_reports` and `study_plans` and for the resolver's `removed` state); any INSERT, UPDATE or DELETE
+        each; any DELETE of `base_packs` rows or of an `ingests` row that is a pack's (they are the pack's tombstone,
+        kept for the foreign keys of `freshness_reports` and `study_plans` and for the resolver's `removed` state;
+        Green: a bare `ingests` row with no pack, which only other modules' [db] fixtures write, stays deletable,
+        as with the locator columns of FR-INGEST-14's revision); any INSERT, UPDATE or DELETE
         of `material_spans` or `material_outline` rows whose pack is `sealed`, except DELETE inside GC or purge, which
         set the transaction-local `reader.pack_delete = on` (the pattern of SRV-AGENT's `reader.judge_delete`).
       - A pack with `collected_at` or `purged_at` set is **gone**: its spans, outline, overlays and artifact are
@@ -1338,7 +1340,9 @@ requirements:
         otherwise it is built and sealed. Then `request_activation(…, {kind: id})` and `try_activate` run, and after
         a profile change SRV-SEARCH's `ensure(conn, owner_id, material_sha256)` (paired; FR-SEARCH-6, -7 keep the old
         vectors serving until the re-embed seals; called through the declared seam `packs.SearchEnsure`, a no-op
-        until SRV-SEARCH's revision binds it). It is idempotent: an unchanged state ends in `no_change`, and
+        until SRV-SEARCH's revision binds it). The pass with the sweep is `reader.ingest.jobs.start_reconcile(jobs)`;
+        it becomes the module's `on_worker_start` in the paired SRV-EVENTS change (FR-EVENTS-1's test pins the
+        declared hooks today). It is idempotent: an unchanged state ends in `no_change`, and
         values that go A → B → A → B reuse overlays A and B and end with B in the head. A material with no reader.yaml
         entry or upload row, or a reader.yaml that cannot be read, keeps its head profile unchanged. Green addition:
         migration `ingest_0004_packs` cannot read reader.yaml, so the profile it registers for a reader.yaml

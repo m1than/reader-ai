@@ -186,7 +186,11 @@ TRIGGERS = (
     " FOR EACH ROW EXECUTE FUNCTION ingest_base_packs_guard()",
     """CREATE FUNCTION ingest_ingests_guard() RETURNS trigger LANGUAGE plpgsql AS $$
     BEGIN
-        IF TG_OP = 'DELETE' THEN RAISE EXCEPTION 'ingests rows are tombstones'; END IF;
+        IF TG_OP = 'DELETE' THEN
+            IF EXISTS (SELECT 1 FROM base_packs WHERE ingest_id = OLD.id)
+            THEN RAISE EXCEPTION 'ingests rows of packs are tombstones'; END IF;
+            RETURN OLD;  -- a bare ingest (no pack): other modules' fixtures only
+        END IF;
         IF EXISTS (SELECT 1 FROM base_packs WHERE ingest_id = OLD.id AND state = 'sealed')
         THEN RAISE EXCEPTION 'the ingest of a sealed pack is immutable'; END IF;
         RETURN NEW;

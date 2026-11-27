@@ -163,8 +163,11 @@ async def after_end(engine: Any, payload: Mapping[str, Any], outcome: str) -> No
 JOB_KINDS: Final = make_kinds(ingest.BLOBS_DIR)
 
 
-async def on_worker_start(jobs: Any) -> None:
+async def start_reconcile(jobs: Any) -> None:
     """FR-INGEST-36, -39: the profile reconcile per owner with a manifest, then the pending-activation sweep.
+
+    Not yet `on_worker_start`: SRV-EVENTS FR-EVENTS-1's test pins the declared hooks (ingest exports none), so
+    the wiring is the paired SRV-EVENTS change of the revision block's KIND_MODULES note.
 
     Rule work only (0 model calls); a failure is logged by code and never stops the worker.
     """
