@@ -2143,10 +2143,15 @@ tasks:
         deviation recorded); unit 2 FR-SEARCH-22..27, -29, INV-SEARCH-9, -10, -15, VEC-SEARCH-6, -7, -8, -10:
         reader.search.greedy (budgeted, pivot, set_cover, coverage objective; exhaustive n <= 12 and pivot n <= 6
         bound tests), reader.search.cards (card shape, cost, cuts, eligibility), reader.search.find (cascade over
-        Corpus / Judge / Links / Findings ports). Remaining: unit 3 (entitlement over material rows, quote
-        allowance, open on sealed span ids: FR-SEARCH-30, -31, INV-SEARCH-12, -13, VEC-SEARCH-9), unit 4 (vector
-        overlays: search_0002, the embed job on overlays, forget_overlay, candidates over search_span_vectors as the
-        production Corpus, the legacy search() path; FR-SEARCH-3..7, -9, -10, -20 revisions), unit 5 (judge.find
+        Corpus / Judge / Links / Findings ports); unit 3 FR-SEARCH-30, -31, INV-SEARCH-12, -13, VEC-SEARCH-9:
+        reader.search.opening (Book cards per active pack, entitlement over material rows, per-material quote
+        allowance, open on sealed span ids; views.PackSpan gains the stored locator, paired); unit 4a FR-SEARCH-4
+        revision: search_0002 search_span_vectors with the P1 trigger, store.forget_overlay bound as SRV-INGEST's
+        GC/purge seam (SRV-INGEST FR-INGEST-45 paired note); code review of f573e0c: 4 blocking fixed with tests
+        (mutants killed but one equivalent). Remaining: unit 4b (the embed job on overlays with seal ->
+        request_activation -> try_activate, candidates over search_span_vectors as the production Corpus, the
+        legacy search() Hit contract, status/ensure on overlay keys, the ingest/uploads/obs paired key changes;
+        FR-SEARCH-3, -5..-10, -20 revisions), unit 5 (judge.find
         waiter with the process-wide LISTEN, owner judge_ctx, /api/find and /api/open, FR-SEARCH-28, -33,
         INV-SEARCH-11, -14; binding the policy load into api and worker start and obs.versions.POLICY)",
       needs: [V.kl-ingest-packs, V.spike.judge-gate, V.kl-agent-judges, V.kl-obs-spans],
