@@ -1,9 +1,9 @@
 # VEC-PIPELINE-3: the G2 report (FR-PIPELINE-8) on SRV-LESSON's deferred `g2` cases plus cases this spec adds.
-# Base notebook: spec/fixtures/SRV-LESSON/F01.ipynb (synthetic; lab verified, all claims cited) with stage records for
-# fact_check, adversarial_review and lab_verification on its sha256 and an empty `findings` delta.
+# Base notebook: spec/fixtures/SRV-LESSON/F01.ipynb (synthetic; lab verified, all claims cited); all four checks
+# (rules, lab_verification, fact_check, adversarial_review) ran on M's derivation, and an empty `findings` delta.
 # `ops` are JSON Patch operations on F01 (same paths as spec/fixtures/SRV-LESSON/invalid.yaml); `records` overrides
-# the stage records present on the last model-written revision. Expected: publishable and the failing checks, in
-# report order (labs, claims, stages, deltas).
+# the checks that ran on M's derivation (FR-PIPELINE-8 (c), ADR-0039 revision). Expected: publishable and the failing
+# checks, in report order (labs, claims, stages, deltas).
 source: spec/fixtures/SRV-LESSON/F01.ipynb
 cases:
   - { id: f01-clean, ops: [], publishable: true, failing: [] }
@@ -30,9 +30,13 @@ cases:
     publishable: false
     failing: [claims.blocking]
   - id: no-review-record
-    records: [fact_check, lab_verification]
+    records: [rules, lab_verification, fact_check]
     publishable: false
     failing: [stages.missing_adversarial_review]
+  - id: stopped-at-rules             # the run stopped on the rule check: no later check ran on M
+    records: [rules]
+    publishable: false
+    failing: [stages.missing_lab_verification, stages.missing_fact_check, stages.missing_adversarial_review]
   - id: delta-not-reproducible       # the final revision differs from apply(findings, lab stamp)(last model revision)
     tamper: final_revision_extra_cell
     publishable: false

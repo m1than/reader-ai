@@ -32,5 +32,15 @@ def test_l02_compile_ends_within_the_cap_without_task_budget_refusals() -> None:
     report = json.loads(result.stdout)
     assert report["state"] in ("converged", "open_findings", "budget_exhausted")
     assert "task_budget_exhausted" not in report["refusals"]
+    # FR-PIPELINE-13 revised (ADR-0039): up to 3 loops, a recorded stop, the effective budgets of the compile
+    # tasks equal the run cap (D6), and the loop plans with their judge part are reported for the owner
+    assert report["loops"] <= 3 and report["stop"] in ("passed", "loop_limit", "loop_cap", "budget_refused")
+    budgets = report["effective_task_budgets"]
+    for task in ("draft", "fact_check", "review", "judge.find"):  # judge.find: once route mode runs
+        if task == "judge.find" and task not in budgets:
+            continue
+        assert float(budgets[task]) == float(report["cap_usd"]), task
+    assert all("planned_usd" in p and "planned_judge_usd" in p for p in report["loop_plans"])
+    assert isinstance(report["wall_s"], float)
     assert float(report["spent_usd"]) <= float(report["cap_usd"])
     assert abs(float(report["settled_usd"]) - float(report["sdk_usd"])) < 1e-6

@@ -31,6 +31,26 @@ class Verdict:
     spans: tuple[str, ...]
     note: str
     forced: str | None  # the reason a `supported` verdict was forced to `unsupported`
+    credibility: int = 6  # Admiralty 1 to 6 after FR-PIPELINE-27's constraint
+
+
+# FR-PIPELINE-27: the credibility values each verdict allows, and the value an out-of-set one becomes.
+CREDIBILITY: Final[Mapping[str, tuple[frozenset[int], int]]] = {
+    "supported": (frozenset({1, 2, 3}), 3),
+    "unsupported": (frozenset({4, 6}), 6),
+    "contradicted": (frozenset({5}), 5),
+    "source_too_large": (frozenset({6}), 6),
+}
+
+
+def constrain_credibility(verdict: str, value: int, span_ids: Sequence[str]) -> int:
+    """FR-PIPELINE-27 (VEC-PIPELINE-6): the model's value kept when its verdict allows it, else the verdict's
+    default; 1 ("confirmed by independent sources") needs cited spans from two or more materials, else 2."""
+    allowed, default = CREDIBILITY[verdict]
+    out = value if value in allowed else default
+    if out == 1 and len({s.split(":", 1)[0] for s in span_ids}) < 2:
+        out = 2
+    return out
 
 
 @dataclass(frozen=True)
@@ -92,6 +112,9 @@ def validate_fact_report(
         verdict, spans, note = item.get("verdict"), item.get("spans", []), item.get("note", "")
         if not isinstance(cell, str) or verdict not in VERDICTS or not isinstance(note, str):
             raise invalid()
+        credibility = item.get("credibility")
+        if type(credibility) is not int or not 1 <= credibility <= 6:  # FR-PIPELINE-4: required, 1 to 6
+            raise invalid()
         if not isinstance(spans, list) or not all(isinstance(s, str) for s in spans):
             raise invalid()
         key: Key = (cell, claim)
@@ -104,10 +127,28 @@ def validate_fact_report(
                 forced = "citation_unknown_span"
             elif not spans:
                 forced = "no_span"
-        seen[key] = Verdict(cell, claim, "unsupported" if forced else str(verdict), known, note, forced)
+        final = "unsupported" if forced else str(verdict)
+        seen[key] = Verdict(
+            cell, claim, final, known, note, forced, constrain_credibility(final, credibility, known)
+        )
     if set(seen) != set(expected):
         raise invalid()
     return [seen[k] for k in expected]
+
+
+def check_failed(stage: str, report: Mapping[str, Any]) -> bool:
+    """FR-PIPELINE-4: each check's outcome from its stored report. `source_too_large` does not fail."""
+    if stage == "rules":
+        return bool(report.get("failures"))
+    if stage == "lab_verification":
+        results = (report.get("lab_report") or {}).get("results", {})
+        problems = (report.get("lab_report") or {}).get("problems", [])
+        return bool(problems) or any(not r.get("passed") for r in results.values())
+    if stage == "fact_check":
+        return any(v["verdict"] in ("unsupported", "contradicted") for v in report.get("verdicts", []))
+    if stage == "adversarial_review":
+        return any(f["blocking"] for f in report.get("findings", []))
+    return False
 
 
 def validate_review_report(raw: Any) -> list[Finding]:

@@ -1,6 +1,6 @@
-# @trace VEC-PIPELINE-2, FR-PIPELINE-5, FR-PIPELINE-6, FR-PIPELINE-8, FR-PIPELINE-12, INV-PIPELINE-1, INV-PIPELINE-2, INV-PIPELINE-3, INV-PIPELINE-4
-"""The compile loop end to end on the real job machinery: each VEC-PIPELINE-2 case and recompile, run state
-derivation, provenance, citations and logs. [db]"""
+# @trace VEC-PIPELINE-2, FR-PIPELINE-5, FR-PIPELINE-6, FR-PIPELINE-8, FR-PIPELINE-12, FR-PIPELINE-23, FR-PIPELINE-24, FR-PIPELINE-27, INV-PIPELINE-1, INV-PIPELINE-2, INV-PIPELINE-3, INV-PIPELINE-4
+"""The compile loop end to end on the real job machinery, in the four-check order: each VEC-PIPELINE-2 case and
+recompile, run state, stop and loops, provenance, citations, credibility and logs. [db]"""
 
 from __future__ import annotations
 
@@ -20,6 +20,7 @@ from .conftest import (
     MATERIAL,
     Pg,
     fresh_pg,
+    lab_modes,
     load_yaml,
     need,
     pipeline_env,
@@ -60,10 +61,23 @@ async def _spent(env: Any, run: uuid.UUID) -> Decimal:
     return await ledger.spent(env.engine, run_id=run)  # type: ignore[no-any-return]
 
 
-async def _prior_spend(env: Any, task: str, usd: float) -> None:
+class _Counting:
+    """Wraps the provider's loop_fits_limit and counts the asks (FR-PIPELINE-23)."""
+
+    def __init__(self, real: Any) -> None:
+        self.real, self.calls = real, 0
+        self.planned: list[list[str]] = []
+
+    async def __call__(self, *args: Any) -> Any:
+        self.calls += 1
+        self.planned.append([p.task for p in args[3]])
+        return await self.real(*args)
+
+
+async def _prior_spend(env: Any, task: str, usd: float, cap: Decimal = Decimal(100)) -> None:
     from reader.agent import ledger
 
-    caps = ledger.Caps(Decimal(100), None, None, None)
+    caps = ledger.Caps(cap, None, None, None)
     rid = await ledger.reserve(
         env.engine,
         ledger.Scope(env.users["ivan"], uuid.uuid4(), env.lesson, "x", task, 0),
@@ -84,12 +98,13 @@ async def _prior_spend(env: Any, task: str, usd: float) -> None:
 
 async def _run_case(env: Any, case: dict[str, Any]) -> tuple[uuid.UUID, dict[str, Any]]:
     env.cli.scripts[:] = scripts_for(case["results"], case.get("labs", "pass"))
+    env.verify.modes[:] = lab_modes(case["results"])
     if not env.lesson:
         await env.import_plan()
     for task, usd in (case.get("prior_runs_spent") or {}).items():
         await _prior_spend(env, task, usd)
     run = await env.compile(str(case.get("cap", DEFAULTS["cap"])))
-    for _ in range(4):  # the worker drains; transient retries are re-enqueued with no delay
+    for _ in range(6):  # the worker drains; transient retries are re-enqueued with no delay
         await env.work()
     return run, await env.state(run)
 
@@ -104,6 +119,17 @@ async def test_loop_case(
         assert status["state"] == case["expect_state"], status
         assert [s["stage"] for s in status["steps"]] == case["expect_stages"]
         assert env.cli.scripts == []  # every scripted model call happened, no more
+        assert env.verify.modes == []  # every lab outcome was used
+        if "expect_stop" in case:
+            assert status["stop"] == case["expect_stop"]
+            assert status["loops"] == case["expect_loops"]
+            assert status["target_usd"] == "4.35"
+        limits = {"loop_cap_run": "run", "loop_cap_task": "task", "budget_exhausted": "run"}
+        if case.get("expect_refusals"):
+            assert status["refused_limit"] == limits[case["expect_refusals"][0]]
+        # FR-PIPELINE-5: a refused model step writes no compile_steps row (a dead step is listed as pending)
+        recorded = len(case["expect_stages"]) - (case["expect_state"] == "stage_failed")
+        assert await env.scalar("SELECT count(*) FROM compile_steps WHERE run_id = :r", r=run) == recorded
         if "expect_refusals" in case:
             assert status["refusals"] == case["expect_refusals"]
         if "expect_spent" in case:
@@ -116,14 +142,22 @@ async def test_loop_case(
         if case["expect_state"] != "stage_failed" and not any("error" in r for r in case["results"]):
             assert await _spent(env, run) == settled  # INV-PIPELINE-1: spend = the reported costs, within cap
         assert await _spent(env, run) <= Decimal(str(case.get("cap", DEFAULTS["cap"])))
+        # FR-PIPELINE-21 rows carry FR-PIPELINE-6's loops, stop and refused_limit
+        runs = need("reader.pipeline.runs")
+        (row,) = [r for r in await runs.history(env.engine, env.jobs, env.users["ivan"], env.lesson) if r["run_id"] == str(run)]
+        assert (row["loops"], row["stop"], row["refused_limit"]) == (
+            status["loops"], status["stop"], status["refused_limit"]
+        )
+        if case["name"] == "clean-first-pass":  # FR-PIPELINE-8: every check ran on M, nothing open
+            assert status["g2"]["publishable"] is True, status["g2"]
         # INV-PIPELINE-4: no source text, prompt or output in any log line
         assert CANARY not in "\n".join(r.getMessage() for r in caplog.records)
         assert "Claim 1." not in "\n".join(r.getMessage() for r in caplog.records)
 
 
 async def test_provenance_and_citations_of_every_revision(pg: Pg, tmp_path: Path) -> None:
-    """FR-PIPELINE-12 and INV-PIPELINE-3 on the measured outcome (not converged after one loop)."""
-    case = BY_NAME["not-converged-after-loop"]
+    """FR-PIPELINE-12 and INV-PIPELINE-3 on a run that fails each check once (stop loop_limit)."""
+    case = BY_NAME["four-checks-fail-once"]
     async with pipeline_env(pg, tmp_path, **_env_kwargs(case)) as env:
         run, status = await _run_case(env, case)
         records = await env.rows(
@@ -134,7 +168,26 @@ async def test_provenance_and_citations_of_every_revision(pg: Pg, tmp_path: Path
         for _, provenance, _sha in records:
             assert set(provenance) <= {"input_sha256", "prompt_version", "model", "cost_usd", "duration_s"}
             assert {"input_sha256", "cost_usd", "duration_s"} <= set(provenance)
-        assert records[0][1]["model"] == "claude-opus-5-5" and records[1][1]["model"] == "claude-sonnet-5-5"
+        models = {stage: provenance.get("model") for stage, provenance, _ in records}
+        assert models["draft"] == "claude-opus-5-5" and models["fact_check"] == "claude-sonnet-5-5"
+        assert models["rules"] is None and models["lab_verification"] is None  # no model call
+        # FR-PIPELINE-24: the rule check spends nothing
+        assert await env.scalar(
+            "SELECT count(*) FROM agent_spend WHERE run_id = :r AND stage = 'rules'", r=run
+        ) == 0
+        # FR-PIPELINE-27: each fact_check revision differs from its input only in credibility, on every item
+        for i, (stage, _, sha) in enumerate(records):
+            if stage != "fact_check":
+                continue
+            before, after = await env.notebook(records[i - 1][2]), await env.notebook(sha)
+            for cell in after["cells"]:
+                for claim in cell["metadata"]["reader"].get("claims", []):
+                    assert claim["credibility"] in (2, 6, 5)
+            stripped = json.loads(json.dumps(after))
+            for cell in stripped["cells"]:
+                for claim in cell["metadata"]["reader"].get("claims", []):
+                    claim.pop("credibility")
+            assert stripped == before
         spans = {s.span_id: s for s in env.spans.spans}
         for _, _, sha in records:
             nb = await env.notebook(sha)
@@ -151,26 +204,31 @@ async def test_provenance_and_citations_of_every_revision(pg: Pg, tmp_path: Path
 
 
 async def test_recompiles_reuse_unchanged_steps(pg_container: tuple[Pg, Any], tmp_path: Path) -> None:
-    """INV-PIPELINE-2: a model step never calls the provider when an earlier step of the lesson had its input."""
-    prior = BY_NAME["not-converged-after-loop"]
+    """INV-PIPELINE-2: a model step (or a rule check) never runs again when an earlier step of the lesson had its
+    input; a loop whose calls are all reusable starts without loop_fits_limit (FR-PIPELINE-23)."""
+    prior = BY_NAME["one-loop-converges"]
     for recompile in CASES["recompiles"]:
         sub = tmp_path / recompile["name"]
         sub.mkdir()
         async with pipeline_env(fresh_pg(pg_container), sub, **_env_kwargs(prior)) as env:
             await _run_case(env, prior)
             changed = recompile["changed"]
-            if "adversarial_review.prompt_version" in changed:
-                p = env.runtime.prompts
-                env.runtime.prompts = p.with_text(
-                    "adversarial_review", p.text("adversarial_review") + "\nNew rule."
-                )
+            for stage in ("adversarial_review", "fact_check"):
+                if f"{stage}.prompt_version" in changed:
+                    p = env.runtime.prompts
+                    env.runtime.prompts = p.with_text(stage, p.text(stage) + "\nNew rule.")
             if "source" in changed:
                 env.spans.spans[:] = synthetic_spans(extra=" (edited)")
             results = recompile.get("results", prior["results"] if "source" in changed else [])
             env.cli.scripts[:] = scripts_for(results, "pass")
+            env.verify.modes[:] = lab_modes(results) if "source" in changed else []
             calls_before = len(env.cli.requests)
+            counting = _Counting(env.runtime.provider.loop_fits_limit)
+            env.runtime.provider.loop_fits_limit = counting
+            if recompile["name"] == "recompile-unchanged":  # the month is spent to the cap: asking would refuse
+                await _prior_spend(env, "draft", 1000.0, cap=Decimal(2000))
             run = await env.compile()
-            for _ in range(3):
+            for _ in range(6):
                 await env.work()
             status = await env.state(run)
             reused = [s["stage"] for s in status["steps"] if s["reused"]]
@@ -181,6 +239,10 @@ async def test_recompiles_reuse_unchanged_steps(pg_container: tuple[Pg, Any], tm
                 assert await _spent(env, run) == Decimal(str(recompile["expect_spent"]))
             if "expect_state" in recompile:
                 assert status["state"] == recompile["expect_state"]
+            if recompile["name"] == "recompile-unchanged":
+                assert counting.calls == 0  # every call of the loop was reusable: no ask, even at the month cap
+            if "expect_planned" in recompile:  # FR-PIPELINE-23: the loop plan, reuse checked first
+                assert counting.planned == recompile["expect_planned"], recompile["name"]
 
 
 async def test_converged_run_with_a_finding_has_no_deltas_mismatch(pg: Pg, tmp_path: Path) -> None:
@@ -279,3 +341,28 @@ async def test_source_comes_from_the_lessons_page_range(pg: Pg, tmp_path: Path) 
         assert all(s.page == 61 for s in spans)
         payload = json.dumps([s.text for s in spans])
         assert CANARY in payload
+
+
+async def test_g2_stages_need_the_derivation_of_m(pg: Pg, tmp_path: Path) -> None:
+    """FR-PIPELINE-8 (c) revised: a check counts on M only when the notebook it judged is M's deterministic
+    derivation; the same run's report naming another notebook makes that check missing."""
+    steps_mod = need("reader.pipeline.steps")
+    runs = need("reader.pipeline.runs")
+    case = BY_NAME["clean-first-pass"]
+    async with pipeline_env(pg, tmp_path, **_env_kwargs(case)) as env:
+        run, status = await _run_case(env, case)
+        assert "stages.missing_fact_check" not in status["g2"]["failing"]
+        async with env.engine.begin() as conn:
+            row = await runs.load_run(conn, run)
+            done = await runs.load_steps(conn, run)
+            tampered = [
+                s if s.stage != "fact_check" else
+                runs.StepRow(s.id, s.step, s.stage, s.input_sha256, s.output_sha256,
+                             {**s.report, "notebook_sha256": "0" * 64}, s.reused_from, s.model, s.cost_usd,
+                             s.duration_s)
+                for s in done
+            ]
+            final = await env.notebook(done[-1].output_sha256)
+            await steps_mod._finish(conn, env.runtime, row, tampered, final, done[-1].output_sha256)
+        g2 = await env.scalar("SELECT g2 FROM compile_runs WHERE id = :r", r=run)
+        assert "stages.missing_fact_check" in g2["failing"] and g2["publishable"] is False

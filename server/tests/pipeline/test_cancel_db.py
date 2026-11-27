@@ -131,7 +131,8 @@ async def test_cancel_during_a_lab_run(pg: Pg, tmp_path: Path, monkeypatch: Any)
             body = (await c.get(f"/api/compiles/{run}")).json()
         assert body["state"] == "cancelled"
         stages = [r[0] for r in await env.rows("SELECT stage FROM compile_steps WHERE run_id = :r ORDER BY step", r=run)]
-        assert "lab_verification" not in stages and stages[-1] == "findings"
+        # ADR-0039 order: lab verification is the second check, after the rule check
+        assert "lab_verification" not in stages and stages[-1] == "rules"
         assert await env.scalar("SELECT g2 FROM compile_runs WHERE id = :r", r=run) is None  # no _finish
         assert await env.scalar(
             "SELECT count(*) FROM lesson_revision_stages WHERE lesson_id = :l AND stage = 'lab_verification'",
@@ -285,9 +286,10 @@ async def test_run_history(pg: Pg, tmp_path: Path) -> None:
         for age in range(21, 0, -1):
             await _sql(
                 env,
-                "INSERT INTO compile_runs (owner_id, lesson_id, cap_usd, task_budgets, g2, created_at, finished_at)"
-                " VALUES (:o, :l, 8.00, '{}'::jsonb, '{\"blocking_open\": 0}'::jsonb,"
-                " now() - make_interval(hours => :a), now() - make_interval(hours => :a))",
+                # finished runs of the approved order (order_version 1): they derive by the approved rule
+                "INSERT INTO compile_runs (owner_id, lesson_id, cap_usd, task_budgets, g2, created_at, finished_at,"
+                " order_version) VALUES (:o, :l, 8.00, '{}'::jsonb, '{\"blocking_open\": 0}'::jsonb,"
+                " now() - make_interval(hours => :a), now() - make_interval(hours => :a), 1)",
                 o=ivan, l=lesson, a=age,
             )
         async with client(env) as c:
@@ -302,7 +304,9 @@ async def test_run_history(pg: Pg, tmp_path: Path) -> None:
             assert len(listed) == 20 and listed[0]["run_id"] == run
             assert set(listed[0]) == {
                 "run_id", "state", "created_at", "finished_at", "spent_usd", "cap_usd", "steps", "error",
+                "loops", "stop", "refused_limit",  # FR-PIPELINE-6 revised (ADR-0039)
             }
+            assert (listed[0]["loops"], listed[0]["stop"], listed[0]["refused_limit"]) == (0, None, None)
             assert listed[0]["state"] == "stalled" and listed[1]["state"] == "converged"
             assert [x["created_at"] for x in listed] == sorted((x["created_at"] for x in listed), reverse=True)
             assert await _keys(env, run) == 0  # read-only: no ensure

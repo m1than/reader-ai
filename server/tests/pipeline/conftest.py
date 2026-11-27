@@ -132,15 +132,17 @@ class FakeVerify:
 
     mode: str = "pass"
     calls: int = 0
+    modes: list[str] = field(default_factory=list)  # per call, in order; `mode` once they are used up
 
     async def run(self, notebook: dict[str, Any]) -> Any:
         verify = need("reader.pipeline.verify")
         findings = need("reader.pipeline.findings")
         self.calls += 1
+        mode = self.modes.pop(0) if self.modes else self.mode
         results: dict[str, Any] = {}
         problems: list[Any] = []
         for _, cell in findings.labs_of(notebook):
-            passed = self.mode == "pass"
+            passed = mode == "pass"
             results[cell["id"]] = {
                 "runs": 2,
                 "passed": passed,
@@ -162,7 +164,9 @@ CLAIMS = 6
 _COUNTER = [0]
 
 
-def draft_output(labs: str) -> str:
+def draft_output(labs: str, *, uncited: bool = False) -> str:
+    """A notebook in the model's compact form; `uncited` leaves claim c1 without a citation, which fails the
+    rule check (FR-PIPELINE-24 `claim_uncited`)."""
     _COUNTER[0] += 1
     cells: list[dict[str, Any]] = [
         {
@@ -171,7 +175,11 @@ def draft_output(labs: str) -> str:
             "sectors": ["consensus"],
             "source": f"## Consensus\n\nVersion {_COUNTER[0]}.",
             "claims": [
-                {"id": f"c{i}", "text": f"Claim {i}.", "citations": [{"span": f"s{(i % 3) + 1}"}]}
+                {
+                    "id": f"c{i}",
+                    "text": f"Claim {i}.",
+                    "citations": [] if uncited and i == 1 else [{"span": f"s{(i % 3) + 1}"}],
+                }
                 for i in range(1, CLAIMS + 1)
             ],
         },
@@ -187,6 +195,7 @@ def draft_output(labs: str) -> str:
                 "kernel": "python3",
                 "network": "none",
                 "asserts": ["x == 42"],
+                "reference": {"kind": "second_implementation"},  # FR-PIPELINE-25
             },
         )
     return json.dumps({"cells": cells})
@@ -206,6 +215,7 @@ def fact_output(unsupported: int, contradicted: int) -> str:
                 "claim": f"c{i}",
                 "verdict": verdict,
                 "spans": [] if verdict == "unsupported" else [f"s{(i % 3) + 1}"],
+                "credibility": {"supported": 2, "unsupported": 6, "contradicted": 5}[verdict],  # FR-PIPELINE-4
                 "note": f"n{i}",
             }
         )
@@ -234,6 +244,8 @@ def scripts_for(results: list[dict[str, Any]], labs: str) -> list[Any]:
     out = []
     for r in results:
         stage = r["stage"]
+        if "refused" in r:  # refused before the call (FR-AGENT-9): the CLI is never reached
+            continue
         if r.get("error") == "rate_limited":
             up = r["upstream"]
             out.append(
@@ -249,13 +261,23 @@ def scripts_for(results: list[dict[str, Any]], labs: str) -> list[Any]:
         if r.get("invalid") == "summary_only":
             text = json.dumps({"all_supported": True, "count": CLAIMS})
         elif stage in ("draft", "revise"):
-            text = draft_output(labs)
+            text = draft_output(labs, uncited=r.get("rules") == "fail")
         elif stage == "fact_check":
             text = fact_output(r.get("unsupported", 0), r.get("contradicted", 0))
         else:
             text = review_output(r.get("blocking", 0), r.get("nonblocking", 0))
         out.append(Script(text=text, cost=r["cost"]))
     return out
+
+
+def lab_modes(results: list[dict[str, Any]]) -> list[str]:
+    """The lab outcome of each notebook that reaches lab verification, in order: every draft or revise that
+    passes the rule check, with its `lab` flag (pass by default)."""
+    return [
+        "assert_fails" if r.get("lab") == "fail" else "pass"
+        for r in results
+        if r["stage"] in ("draft", "revise") and "cost" in r and r.get("rules") != "fail"
+    ]
 
 
 # --- Postgres, jobs, runtime ---------------------------------------------------------------------------------------

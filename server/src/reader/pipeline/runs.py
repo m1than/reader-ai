@@ -29,6 +29,7 @@ from reader.pipeline import runtime as runtime_mod
 from reader.pipeline.courses import lock_course
 from reader.pipeline.errors import PipelineError
 from reader.pipeline.prompts import canonical_sha256, input_sha256
+from reader.pipeline.reports import check_failed
 from reader.pipeline.runtime import Runtime
 from reader.pipeline.source import Source, render
 from reader.pipeline.stages import Done, next_stage
@@ -47,6 +48,16 @@ STAGE_ERROR_CODES: Final = frozenset(
     }
 )
 OPEN_RUNS_MAX: Final = 100  # bounds.open_runs_max (FR-PIPELINE-17)
+ORDER_VERSION: Final = 2  # FR-PIPELINE-20 revised: ADR-0039's check order; 1 = runs created before it
+DEPLOY_ACTOR: Final = uuid.UUID(int=0)  # the actor of the deploy's cancel audit rows; no user has it
+TARGET_USD: Final = "4.35"  # ADR-0005's per-lesson target, reported beside spent_usd (FR-PIPELINE-6)
+CHECKS: Final = ("rules", "lab_verification", "fact_check", "adversarial_review")
+# Report keys that record a check's decision, not its judgement (FR-PIPELINE-5, -23).
+DECISION_KEYS: Final = frozenset({"next", "stop", "refused_limit", "planned_usd", "planned_judge_usd"})
+REFUSED_LIMITS: Final = {
+    "loop_cap_run": "run", "loop_cap_task": "task", "loop_cap_month": "month",
+    "budget_exhausted": "run", "task_budget_exhausted": "task", "monthly_budget_exhausted": "month",
+}
 KIND_STAGE: Final = "pipeline.stage"
 KIND_VERIFY: Final = "pipeline.verify"
 NOTEBOOK_STAGES: Final = frozenset({"draft", "revise"})
@@ -85,6 +96,8 @@ class RunRow:
     final_sha256: str | None
     stage_error: Mapping[str, Any] | None = None  # FR-PIPELINE-16: {step, input_sha256, code}
     cancelled_at: Any = None  # FR-PIPELINE-20
+    order_version: int = ORDER_VERSION  # FR-PIPELINE-20 revised: 1 = the approved order, 2 = ADR-0039's
+    loops: int = 0
 
 
 @dataclass(frozen=True)
@@ -102,7 +115,8 @@ async def load_run(
         await conn.execute(
             text(
                 "SELECT id, owner_id, lesson_id, cap_usd, task_budgets, budget_refused, finished_at, g2,"
-                " final_sha256, stage_error, cancelled_at FROM compile_runs WHERE id = :r"
+                " final_sha256, stage_error, cancelled_at, order_version, loops"
+                " FROM compile_runs WHERE id = :r"
             ),
             {"r": run_id},
         )
@@ -110,7 +124,8 @@ async def load_run(
     if row is None or (owner_id is not None and row[1] != owner_id):
         return None
     return RunRow(
-        row[0], row[1], row[2], Decimal(row[3]), row[4] or {}, row[5], row[6], row[7], row[8], row[9], row[10]
+        row[0], row[1], row[2], Decimal(row[3]), row[4] or {}, row[5], row[6], row[7], row[8], row[9],
+        row[10], int(row[11]), int(row[12] or 0),
     )
 
 
@@ -174,16 +189,41 @@ async def load_lesson(
 
 
 def done_list(steps: Sequence[StepRow]) -> list[Done]:
-    out = []
-    for s in steps:
-        if s.stage == "fact_check":
-            problems = any(v["verdict"] != "supported" for v in s.report.get("verdicts", []))
-        elif s.stage == "adversarial_review":
-            problems = any(f["blocking"] for f in s.report.get("findings", []))
-        else:
-            problems = False
-        out.append(Done(s.stage, problems))
-    return out
+    """The steps with each check's outcome and its recorded decision (FR-PIPELINE-5)."""
+    return [
+        Done(s.stage, check_failed(s.stage, s.report), s.report.get("next"), s.report.get("stop"))
+        for s in steps
+    ]
+
+
+def judgement(report: Mapping[str, Any]) -> dict[str, Any]:
+    """A check's report without its decision fields: what a revise or findings step takes as input."""
+    return {k: v for k, v in report.items() if k not in DECISION_KEYS}
+
+
+def last_check(steps: Sequence[StepRow]) -> StepRow | None:
+    return next((s for s in reversed(steps) if s.stage in CHECKS), None)
+
+
+def checks_on(steps: Sequence[StepRow]) -> list[StepRow]:
+    """The check steps after the last model-written notebook (the final pass)."""
+    out: list[StepRow] = []
+    for s in reversed(steps):
+        if s.stage in NOTEBOOK_STAGES:
+            break
+        if s.stage in CHECKS:
+            out.append(s)
+    return list(reversed(out))
+
+
+def stop_of(run: RunRow, steps: Sequence[StepRow]) -> str | None:
+    """FR-PIPELINE-6: passed, loop_limit, loop_cap, budget_refused, or None while no stop is recorded."""
+    if run.order_version < ORDER_VERSION:
+        return None
+    if run.budget_refused:
+        return "loop_cap" if run.budget_refused.startswith("loop_cap_") else "budget_refused"
+    last = last_check(steps)
+    return None if last is None else last.report.get("stop")
 
 
 def model_sha(steps: Sequence[StepRow]) -> str | None:
@@ -207,18 +247,53 @@ def stage_model(rt: Runtime, stage: str) -> str | None:
     return resolve_model(task.model) if task else None
 
 
-def step_input(rt: Runtime, lesson: Lesson, steps: Sequence[StepRow], stage: str) -> str:
-    """FR-PIPELINE-3: sha256 over (stage, source, the stage's inputs, prompt version and content, model)."""
+def strip_list(steps: Sequence[StepRow]) -> list[list[Any]]:
+    """The last model step's citation strip list (FR-PIPELINE-7, -24)."""
+    producer = next((s for s in reversed(steps) if s.stage in NOTEBOOK_STAGES), None)
+    return [list(k) for k in (producer.report.get("stripped", []) if producer else [])]
+
+
+def rules_inputs(rt: Runtime, steps: Sequence[StepRow]) -> list[str]:
+    """FR-PIPELINE-24's input (the source sha256 is part of every input_sha256)."""
+    from reader.pipeline import rules as rules_mod
+    from reader.pipeline import verify as verify_mod
+
+    declared = {
+        "rules": list(rt.pipeline.rules),
+        "reference_libraries": list(rt.pipeline.reference_libraries),
+    }
+    bounds = [verify_mod.LAB_RUNS, verify_mod.LAB_EXEC_TIMEOUT_S, verify_mod.VERIFY_JOB_TIMEOUT_S]
+    return [
+        latest_sha(steps) or "",
+        canonical_sha256(strip_list(steps)),
+        canonical_sha256(declared),
+        canonical_sha256(bounds),
+        rules_mod.RULES_VERSION,
+    ]
+
+
+def step_input(
+    rt: Runtime, lesson: Lesson, steps: Sequence[StepRow], stage: str, refused: str | None = None
+) -> str:
+    """FR-PIPELINE-3: sha256 over (stage, source, the stage's inputs, prompt version and content, model).
+
+    `findings` also hashes the run's refusal code, so the findings job of a refused run never shares its key
+    with a stale findings job enqueued while the recorded decision still admitted a loop (FR-PIPELINE-5)."""
     m = model_sha(steps) or ""
-    fact, review = last_report(steps, "fact_check"), last_report(steps, "adversarial_review")
-    reports = [canonical_sha256(fact) if fact else "", canonical_sha256(review) if review else ""]
     if stage == "draft":
         inputs = [canonical_sha256(lesson.title)]
-    elif stage in ("fact_check", "adversarial_review"):
-        inputs = [m]
-    elif stage in ("revise", "findings"):
-        inputs = [m, *reports]
-    else:
+    elif stage == "rules":
+        inputs = rules_inputs(rt, steps)
+    elif stage == "revise":  # the notebook and the report of the check that failed (FR-PIPELINE-3 (a))
+        failing = last_check(steps)
+        inputs = [m, canonical_sha256(judgement(failing.report)) if failing else ""]
+    elif stage == "findings":
+        inputs = [
+            latest_sha(steps) or "",
+            *(canonical_sha256(judgement(s.report)) for s in checks_on(steps)),
+            refused or "",
+        ]
+    else:  # lab_verification, fact_check, adversarial_review: the notebook the previous check passed
         inputs = [latest_sha(steps) or ""]
     model = stage_model(rt, stage)
     prompts = rt.prompts if model is not None else None
@@ -236,8 +311,12 @@ def step_args(run: RunRow, step: int, stage: str, input_sha: str) -> dict[str, A
 async def enqueue_next(jobs: Any, rt: Runtime, run: RunRow, lesson: Lesson, steps: Sequence[StepRow]) -> None:
     stage = next_step(rt, run, steps)
     if stage is not None:
-        args = step_args(run, len(steps) + 1, stage, step_input(rt, lesson, steps, stage))
-        await jobs.enqueue(kind_for(stage), args)
+        input_sha = step_input(rt, lesson, steps, stage, run.budget_refused)
+        args = step_args(run, len(steps) + 1, stage, input_sha)
+        result = await jobs.enqueue(kind_for(stage), args)
+        if stage == "findings" and getattr(result, "kind", None) == "dead":
+            # FR-PIPELINE-5: a findings key that died while stale (input_not_ready) runs now that it is next
+            await jobs.requeue_dead(kind_for(stage), idempotency_key(jobs.catalog[kind_for(stage)], args))
 
 
 def _str(value: Decimal) -> str:
@@ -259,9 +338,10 @@ async def derive(engine: AsyncEngine, jobs: Any, owner_id: uuid.UUID, run_id: uu
             state = "cancelled"
         elif run.finished_at is not None:
             g2 = run.g2 or {}
+            passed = run.order_version < ORDER_VERSION or stop_of(run, steps) == "passed"  # v1: approved rule
             if run.budget_refused:
                 state = "budget_exhausted"
-            elif g2.get("blocking_open", 0) == 0:
+            elif passed and g2.get("blocking_open", 0) == 0:
                 state = "converged"
             else:
                 state = "open_findings"
@@ -271,7 +351,8 @@ async def derive(engine: AsyncEngine, jobs: Any, owner_id: uuid.UUID, run_id: uu
             if stage is not None:
                 try:
                     lesson = await load_lesson(conn, rt, owner_id, run.lesson_id)
-                    args = step_args(run, len(steps) + 1, stage, step_input(rt, lesson, steps, stage))
+                    input_sha = step_input(rt, lesson, steps, stage, run.budget_refused)
+                    args = step_args(run, len(steps) + 1, stage, input_sha)
                 except (PipelineError, AgentError):  # unloadable lesson or unresolvable model: no args
                     args = None
                 status = "none"
@@ -314,6 +395,12 @@ async def derive(engine: AsyncEngine, jobs: Any, owner_id: uuid.UUID, run_id: uu
         "spent_usd": _str(spent),
         "task_budgets": dict(run.task_budgets),
         "refusals": [run.budget_refused] if run.budget_refused else [],
+        "loops": run.loops,
+        "stop": stop_of(run, steps),
+        "refused_limit": (
+            REFUSED_LIMITS.get(run.budget_refused or "") if run.order_version >= ORDER_VERSION else None
+        ),
+        "target_usd": TARGET_USD,
         "g2": run.g2,
         "latest_sha256": latest,
         "error": error,
@@ -467,9 +554,39 @@ async def history(
                 "cap_usd": derived["cap_usd"],
                 "steps": int(steps),
                 "error": derived["error"],
+                "loops": derived["loops"],  # FR-PIPELINE-6 revised: also on the history rows (FR-PIPELINE-21)
+                "stop": derived["stop"],
+                "refused_limit": derived["refused_limit"],
             }
         )
     return out
+
+
+async def cancel_legacy(engine: AsyncEngine, jobs: Any) -> list[uuid.UUID]:
+    """FR-PIPELINE-20 revised (a): at worker start, one statement cancels every open run of the approved
+    order (`order_version` 1), whatever its jobs' state, with one audit row each (actor DEPLOY_ACTOR); after
+    commit, one `obs.runs` end per run as FR-PIPELINE-18 does. Idempotent: a second start finds no open v1
+    run."""
+    async with engine.begin() as conn:
+        rows = (
+            await conn.execute(
+                text(
+                    "UPDATE compile_runs SET cancelled_at = now(), finished_at = now(),"
+                    " ends = least(ends + 1, 100)"
+                    " WHERE finished_at IS NULL AND cancelled_at IS NULL AND order_version = 1"
+                    " RETURNING id, ends, lesson_id, owner_id"
+                )
+            )
+        ).all()
+        for run_id, _ends, lesson_id, _owner in rows:
+            detail = {"lesson_id": str(lesson_id)}
+            await audit.record(conn, DEPLOY_ACTOR, "compile.cancel", str(run_id), detail)
+    if rows:
+        from reader.obs import runs as obs_runs
+
+        for run_id, ends, _lesson, _owner in rows:
+            await obs_runs.enqueue_end("compile", str(run_id), int(ends), jobs)
+    return [r[0] for r in rows]
 
 
 async def ensure_all(engine: AsyncEngine, jobs: Any) -> None:

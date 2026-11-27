@@ -2,9 +2,10 @@
 
 The findings step appends one `open` cell per distinct problem; its id is `f-` + 16 hex of sha256(kind,
 cell, claim, text), so problems with the same id collapse (blocking if any is) and a rerun adds nothing.
-`stamp_labs` writes lab verification's results into the lab cells and appends its failures. Both are pure
-functions over the notebook dict, so G2 can recompute the final revision from the stored inputs
-(INV-PIPELINE-5).
+`stamp_labs` writes lab verification's results into the lab cells and `stamp_credibility` the fact-check's
+credibility into the claims (FR-PIPELINE-9, -27); failures reach the notebook only through the findings
+step. All are pure functions over the notebook dict, so G2 can recompute the final revision from the stored
+inputs (INV-PIPELINE-5).
 """
 
 from __future__ import annotations
@@ -73,10 +74,24 @@ def slice_items(notebook: Mapping[str, Any]) -> list[Problem]:
     return items
 
 
+CHECK_NOT_RUN_TEXT: Final = "The {check} check did not run on this revision: the compile stopped before it."
+
+
 def problems_from(
-    verdicts: Sequence[Verdict], review: Sequence[Finding], notebook: Mapping[str, Any]
+    verdicts: Sequence[Verdict],
+    review: Sequence[Finding],
+    notebook: Mapping[str, Any],
+    *,
+    rule_failures: Sequence[Mapping[str, Any]] = (),
+    lab_problems: Sequence[Problem] = (),
+    not_run: Sequence[str] = (),
 ) -> list[Problem]:
+    """FR-PIPELINE-10: the remaining problems of the stop, from the checks that ran on the final notebook."""
     problems = [
+        Problem("rules", f.get("cell"), f.get("claim"), str(f["text"]), "rules", True) for f in rule_failures
+    ]
+    problems += list(lab_problems)
+    problems += [
         Problem(
             "fact_check",
             v.cell,
@@ -86,13 +101,47 @@ def problems_from(
             True,
         )
         for v in verdicts
-        if v.verdict in ("unsupported", "contradicted")
+        if v.verdict in ("unsupported", "contradicted", "source_too_large")
     ]
     problems += [
         Problem("adversarial_review", f.cell, f.claim, f.text, "adversarial_review", f.blocking)
         for f in review
     ]
+    problems += [
+        Problem("check_not_run", None, None, CHECK_NOT_RUN_TEXT.format(check=check), check, True)
+        for check in not_run
+    ]
     return problems + slice_items(notebook)
+
+
+def _credible_items(notebook: dict[str, Any]) -> list[tuple[tuple[str, str | None], dict[str, Any]]]:
+    """(key, the dict that carries `credibility`) for every claim and every `changed` or `erratum` cell."""
+    out: list[tuple[tuple[str, str | None], dict[str, Any]]] = []
+    for cell in notebook.get("cells", []):
+        reader = cell.get("metadata", {}).get("reader", {})
+        if reader.get("kind") == "explain":
+            out.extend(((str(cell["id"]), str(c["id"])), c) for c in reader.get("claims", []))
+        elif reader.get("kind") in ("changed", "erratum"):
+            out.append(((str(cell["id"]), None), reader))
+    return out
+
+
+def stamp_credibility(notebook: Mapping[str, Any], verdicts: Sequence[Verdict]) -> dict[str, Any]:
+    """FR-PIPELINE-27: each judged claim's, and `changed` or `erratum` cell's, credibility; nothing else."""
+    out = copy.deepcopy(dict(notebook))
+    by_key = {(v.cell, v.claim): v.credibility for v in verdicts}
+    for key, holder in _credible_items(out):
+        if key in by_key:
+            holder["credibility"] = by_key[key]
+    return out
+
+
+def fill_credibility(notebook: Mapping[str, Any]) -> dict[str, Any]:
+    """FR-PIPELINE-10: an item no fact_check judged gets credibility 6, "cannot be judged"."""
+    out = copy.deepcopy(dict(notebook))
+    for _, holder in _credible_items(out):
+        holder.setdefault("credibility", 6)
+    return out
 
 
 def _open_cell(cid: str, problem: Problem, blocking: bool, stage: str) -> dict[str, Any]:
@@ -149,7 +198,8 @@ def _append(notebook: Mapping[str, Any], problems: Sequence[Problem], stage: str
 
 
 def append_findings(notebook: Mapping[str, Any], problems: Sequence[Problem]) -> dict[str, Any]:
-    return _append(notebook, problems, "findings")
+    """The findings step: credibility 6 where none was judged, then one open cell per distinct problem."""
+    return _append(fill_credibility(notebook), problems, "findings")
 
 
 def labs_of(notebook: Mapping[str, Any]) -> list[tuple[int, dict[str, Any]]]:
@@ -189,9 +239,11 @@ def labs_sha256(notebook: Mapping[str, Any]) -> str:
 
 
 def stamp_labs(notebook: Mapping[str, Any], report: LabReport) -> dict[str, Any]:
+    """FR-PIPELINE-9 revised: the results into the lab cells only; failures become open cells through the
+    findings step when the run stops on them."""
     out = copy.deepcopy(dict(notebook))
     for _, cell in labs_of(out):
         result = report.results.get(cell["id"])
         if result is not None:
             cell["metadata"]["reader"]["verified"] = dict(result)
-    return _append(out, report.problems, "lab_verification")
+    return out

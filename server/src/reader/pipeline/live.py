@@ -13,20 +13,41 @@ import json
 import os
 import sys
 import time
+from collections.abc import Mapping
 from decimal import Decimal
 from typing import Any, Final
 
 from sqlalchemy import text
 
+from reader.config.effective import effective_settings
 from reader.db import make_engine
 from reader.jobs import load_kinds
 from reader.jobs.queue import Jobs
 from reader.jobs.worker import make_app
 from reader.pipeline import runs
+from reader.pipeline import runtime as runtime_mod
+from reader.pipeline.stages import Pipeline
 from reader.serve.main import Env, _target
 
 WAIT_S: Final = 3600.0
 POLL_S: Final = 10.0
+CAP: Final = Decimal("8.00")  # bounds.run_cap_usd
+
+
+class BudgetsNotCap(Exception):
+    """FR-PIPELINE-13 (D6): a compile task's effective budget differs from the run cap."""
+
+    def __init__(self, tasks: list[str]) -> None:
+        super().__init__("task budgets differ from the run cap: " + ", ".join(tasks))
+        self.tasks = tasks
+
+
+def check_budgets(pipeline: Pipeline, task_budgets: Mapping[str, Decimal | None]) -> None:
+    """FR-PIPELINE-13 (D6): every compile task's effective budget equals the run cap, else BudgetsNotCap."""
+    tasks = sorted({s.task for s in pipeline.stages.values() if s.task is not None})
+    wrong = [t for t in tasks if task_budgets.get(t) != CAP]
+    if wrong:
+        raise BudgetsNotCap(wrong)
 
 
 async def _run(plan_lesson_id: str) -> dict[str, Any]:
@@ -46,7 +67,13 @@ async def _run(plan_lesson_id: str) -> dict[str, Any]:
                     {"p": plan_lesson_id},
                 )
             ).one()
-        run = await runs.create_run(engine, jobs, owner, lesson, Decimal("8.00"))
+        rt = runtime_mod.get(engine)
+        async with engine.connect() as conn:  # FR-PIPELINE-13 revised: effective budgets, not the snapshot
+            settings = await effective_settings(conn, rt.config)
+        budgets = {k: str(v) for k, v in settings.task_budgets.items() if v is not None}
+        check_budgets(rt.pipeline, settings.task_budgets)  # before any spend; the run is not started
+        started = time.monotonic()
+        run = await runs.create_run(engine, jobs, owner, lesson, CAP)
         deadline = time.monotonic() + WAIT_S
         status = await runs.status(engine, jobs, owner, run)
         while status["state"] in ("running", "stalled") and time.monotonic() < deadline:
@@ -62,7 +89,34 @@ async def _run(plan_lesson_id: str) -> dict[str, Any]:
                     {"r": run},
                 )
             ).one()
+            by_task = {
+                str(t): str(u)
+                for t, u in await conn.execute(
+                    text(
+                        "SELECT task, coalesce(sum(settled_usd), 0) FROM agent_spend WHERE run_id = :r"
+                        " AND kind = 'settle' GROUP BY task"
+                    ),
+                    {"r": run},
+                )
+            }
+            planned = [
+                {"planned_usd": r[0], "planned_judge_usd": r[1]}
+                for r in await conn.execute(
+                    text(
+                        "SELECT report ->> 'planned_usd', report ->> 'planned_judge_usd' FROM compile_steps"
+                        " WHERE run_id = :r AND report ? 'planned_usd' ORDER BY step"
+                    ),
+                    {"r": run},
+                )
+            ]
         return {
+            "wall_s": round(time.monotonic() - started, 1),
+            "effective_task_budgets": budgets,
+            "spent_by_task": by_task,
+            "loop_plans": planned,
+            "loops": status["loops"],
+            "stop": status["stop"],
+            "refused_limit": status["refused_limit"],
             "run_id": str(run),
             "state": status["state"],
             "refusals": status["refusals"],
@@ -81,7 +135,12 @@ def main() -> int:
     if len(sys.argv) != 2:
         sys.stderr.write("usage: python -I -m reader.pipeline.live <plan lesson id>\n")
         return 2
-    sys.stdout.write(json.dumps(asyncio.run(_run(sys.argv[1]))) + "\n")
+    try:
+        report = asyncio.run(_run(sys.argv[1]))
+    except BudgetsNotCap as wrong:
+        sys.stderr.write(f"{wrong}\n")  # task names only
+        return 3
+    sys.stdout.write(json.dumps(report) + "\n")
     return 0
 
 

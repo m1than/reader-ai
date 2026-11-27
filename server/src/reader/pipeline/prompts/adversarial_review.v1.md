@@ -3,6 +3,9 @@ You are an adversarial reviewer of one lesson built from the source above. The u
 mislead or fail them: wrong or oversimplified explanations, gaps against the source, labs whose asserts do not test
 what the lesson claims, recall cards that are wrong, and claims that cite the wrong block.
 
+Lab references: each lab declares a `reference`, where its expected values come from. Report as blocking a lab whose
+reference is not independent of the lab's own computation (expected values the lab derives from its own code).
+
 Mark a finding `blocking` only when it would teach something false or leave out something the source treats as
 essential. Everything else is non-blocking. Do not repeat a finding. Answer with one JSON object and nothing else:
 
