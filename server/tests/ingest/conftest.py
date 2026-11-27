@@ -322,12 +322,14 @@ async def session_for(w: World, handle: str) -> str:
 
 
 @asynccontextmanager
-async def client(w: World, handle: str | None = "ivan") -> AsyncIterator[httpx.AsyncClient]:
+async def client(w: World, handle: str | None = "ivan", *, jobs: Any = None) -> AsyncIterator[httpx.AsyncClient]:
     from reader.api.app import create_app
 
     app = create_app(w.settings, w.engine, run_cleanup_task=False)
     app.state.blobs_root = w.blobs
     app.state.ingest_materials = w.config.materials
+    if jobs is not None:  # the api's job runtime (routes that enqueue)
+        app.state.jobs = jobs
     cookies = {SESSION_COOKIE: await session_for(w, handle)} if handle else {}
     transport = httpx.ASGITransport(app=app)
     async with httpx.AsyncClient(

@@ -1238,8 +1238,13 @@ requirements:
       the brain_version of the entry before the delete.
   - id: FR-INGEST-32
     text: >-
-      **Tombstones only, and no live course on a deleted material.** No route of this amendment deletes a row of
-      materials, ingests, material_spans, material_outline or uploads, or a file under the blobs root. After every
+      **Routes delete nothing, and no live course on a deleted material** (revision 3, unit 5: P6 replaces the
+      tombstone-only rule for span, outline and overlay data). No route deletes a row of materials, ingests,
+      material_spans, material_outline or uploads, or a file under the blobs root; span, outline and overlay rows and
+      artifact directories are deleted only by the GC and purge jobs (FR-INGEST-44, -45); rows of `materials`,
+      `ingests` and `base_packs` are never deleted (`ingests` and `base_packs` are the pack's tombstone). The [db]
+      row-count oracle below stays the routes' oracle; GC and purge are covered by test_gc_db.py and
+      test_purge_db.py. After every
       request of this amendment and of SRV-LESSON's, no course that is not deleted has the `material_sha256` of a
       deleted material (delete cascades or refuses; course restore refuses while the material is deleted). Every
       route of this amendment runs FR-AUTH-12
@@ -1716,6 +1721,100 @@ requirements:
       **Known limit (code review of unit A, stated):** a rollback anchors only the pair (head pack → rolled-back
       pack); a citation minted on a pack two or more steps away resolves through the stored anchor chains that
       reach the rolled-back pack, else as `inactive` (its pack still holds it) or `orphaned`, never wrongly.
+  - id: FR-INGEST-44
+    text: >-
+      **Garbage collection** (P6), background only, never by a route. The scanner job `ingest.gc` {slot}, key
+      [slot] (the UTC date of the daily periodic entry, SRV-EVENTS paired), reads candidates without locks and
+      enqueues **one job per pack**, `ingest.gc_pack` {owner_id, pack_id, slot}, key [owner_id, pack_id, slot], and
+      one per lone overlay, `ingest.gc_overlay` {owner_id, overlay_id, slot}, key [owner_id, overlay_id, slot]. A
+      deleter collects a pack (its `material_spans` and `material_outline` rows, its overlays and their rows; the
+      `ingests` and `base_packs` rows stay as the tombstone with `collected_at` set) or an overlay only when all hold,
+      re-checked under the pack's lock (FR-INGEST-46) in the deleting transaction, in the order job key → pack lock →
+      reads and deletes:
+      - it is absent from the owner's last `ingest.gc.keep_entries` manifest entries (`bounds.gc_keep_entries`);
+      - it was sealed more than `ingest.gc.age_floor_days` ago, or, for a `building` overlay, created more than that
+        ago **and its pack is not in the head entry** (a long build for an active pack, such as a prefix overlay
+        stopped on its cap, is never collected); a base pack is never `building` after its import transaction (it
+        seals in it, FR-INGEST-35), so there is no building-pack case;
+      - it is not cited by a published lesson revision (`revision_packs`, SRV-LESSON paired), not the target of an
+        accepted seq map (every legacy revision of its material cites it through the map), and not cited by a finding
+        (a seam returning none until SRV-KB);
+      - it is not the pack of, nor an overlay desired by, a `pending_activations` row (a waiting activation keeps
+        what it waits to activate; a pack whose rows are only stale desires leaves with its row when the owner purges
+        it).
+      Each pack is collected in its own transaction with `reader.pack_delete = on`; the transaction also calls
+      `judges.forget_pack`, `judges.forget_overlay` (SRV-AGENT), SRV-SEARCH's `forget_overlay` for each of its
+      vector overlays and SRV-SEARCH's `search.forget_legacy(conn, owner_id, ingest_id)` for its `ingests` row, which
+      deletes that ingest's legacy `search_chunks` and `search_embeds` rows (paired; a no-op for an r3 pack). **After it
+      has committed**, the job removes the pack's artifact directory from the blobs volume when no `ingests` row of any
+      owner whose pack is not collected or purged names that artifact id; a crash between the commit and the removal
+      leaves a directory the next scanner removes by the same rule. `freshness_reports` and `study_plans` rows that
+      reference the tombstoned `ingests` row stay valid (FK RESTRICT). Material rows, the owner's soft delete and the
+      inbox originals are never touched (P6). This replaces FR-INGEST-32's tombstone-only rule for span, outline and
+      overlay data.
+      **Green (phase 2 unit 5), stated.** `reader.ingest.gc` holds the scanner, the deleters and purge; the four
+      kinds are declared in `reader.ingest.jobs.PACK_KINDS` (served once SRV-EVENTS' paired KIND_MODULES change
+      takes them, with `ingest.gc`'s daily periodic entry). The seams to other modules are one declared record,
+      `reader.ingest.gc.Seams` (`SEAMS[0]` is the production binding; tests pass doubles): `forget_pack` and
+      `forget_overlay` are SRV-AGENT's `reader.agent.judges` functions; SRV-SEARCH's `forget_overlay` and
+      `forget_legacy` are no-ops until SRV-SEARCH's revision binds them (its legacy `search_chunks` rows carry no
+      foreign key, so the ingest's rows stay until then); **`cited` fails closed**: until SRV-LESSON's
+      `revision_packs` and SRV-KB's findings bind it, every pack counts as cited, so the GC collects lone overlays
+      but no pack (a collected pack can never be rebuilt under its id, FR-INGEST-35). The deleter takes the bounds as
+      parameters (`keep_entries` ≥ 1, `age_floor_days`, `now`), the job passes the initial values and the clock.
+      [db] test_gc_db.py (Seams doubles): a pack outside the last N entries and older than the floor is collected —
+      spans, outline, overlays and their rows gone, each seam called once with its id (forget_pack, forget_overlay per
+      overlay, search forget_overlay per vector overlay, forget_legacy with its ingest id), ingests and base_packs
+      rows kept with collected_at — while a freshness_reports row and a study_plans row referencing its ingest stay
+      and still read; kept when within N, younger than the floor, cited, the target of an accepted seq map, active,
+      or named (pack or desired overlay) by a pending_activations row; a building overlay past the floor is collected
+      when its pack is outside the head and kept when its pack is in the head; the default seams keep every pack
+      (fail closed); the scanner enqueues one gc_pack job per candidate pack and one gc_overlay job per lone
+      overlay, and a repeat in the same slot enqueues none; the artifact directory is removed only after commit (a
+      rolled-back collection leaves it), kept while another live ingest names it, and a leftover directory of a
+      collected pack is removed by the next scanner; material and uploads rows unchanged. **Races** (two
+      connections): restore racing GC of the same pack — GC holding the pack lock first collects it and the restore
+      appends no entry naming it; the restore committing first keeps the pack (it is in the head); never an entry
+      naming a collected pack. A rollback racing `ingest.gc_overlay` of an overlay the rolled-back entry names (pack
+      unchanged, overlay id differs from the head's) — GC first: the rollback is refused `overlay_collected`;
+      rollback first: GC keeps the overlay; never an entry naming a collected overlay.
+  - id: FR-INGEST-45
+    text: >-
+      **Owner purge** (P6, ADR-0017 data ownership).
+      `GET /api/materials/{material_id}/packs` (owner only) lists the material's packs of the session's owner as
+      `[{pack_id, converter_version, state, active, collected_at, purged_at}]` in converter-version
+      order, so the owner can name the pack to purge. `POST /api/materials/{material_id}/packs/{pack_id}/purge` with
+      `{confirm}` (FR-INGEST-31's confirm rule, owner only, FR-AUTH-12) answers 202 and enqueues `ingest.purge`
+      {owner_id, pack_id}, key [owner_id, pack_id]; the route itself deletes nothing (no deletion on a request path).
+      The route answers 404 `not_found` when `pack_id` is not a pack of that material of the session's owner. The job,
+      in the order job key → pack lock (FR-INGEST-46) → the rest, appends one manifest entry without the pack if it
+      is active (CAS, FR-INGEST-38), sets `purged_at`, and collects as GC does but without the N, age and citation
+      conditions (including `search.forget_legacy`); the `ingests` and `base_packs` rows stay as the tombstone. In the
+      same transaction it also deletes
+      the `judge_inputs` rows (SRV-OBS seam) and pending `judge_requests` rows (SRV-EVENTS seam) whose cards cite the
+      pack, and the pack's `pending_activations` row; the artifact directory is removed after commit by GC's rule.
+      Citations keep their locator and resolve as `removed` (FR-INGEST-42). An earlier manifest entry that names the
+      purged pack stays (append-only); a rollback to it is refused `pack_purged`. A second purge answers 202 and its
+      job does nothing.
+      **Recorded deviation (phase 2 unit 5, coordinator 2026-11-27):** the revision gated this promotion on the
+      paired SRV-AGENT `PackGuard` change (FR-INGEST-46); it is promoted without it. Until PackGuard lands, a judge
+      output written by a `judge.find` whose transaction commits after the purge's can still name the purged pack (its
+      `pack_ids`); such a row holds ids and outputs, no span text, and expires with judge.find's retention (30 days).
+      The `judge_requests` seam is a no-op until SRV-EVENTS' paired change adds its purge function; a pending request
+      expires at its deadline plus grace. Both are listed in the FR-INGEST-46-guard-tests block.
+      **Green, stated:** the route answers 202 `{pack_id, enqueued}` (`enqueued` false when the key already exists),
+      503 `unavailable` when the api holds no job runtime, 400 `bad_request` for a body other than `{confirm}`; a
+      deleted material's packs are listed and purgeable.
+      [db] test_purge_db.py (Seams doubles): purge of an active pack → one entry without it; spans, outline,
+      overlays and their rows gone, forget_pack, judge_inputs and judge_requests seams called with the pack id;
+      purge of a migrated r2 pack calls search forget_legacy once with its ingest id; ingests and base_packs rows
+      kept with purged_at; a freshness report and a study plan referencing it stay valid; citations resolve
+      `removed`; purge of a cited inactive pack collects it anyway; purge of a pack with a pending_activations row
+      deletes that row; rollback to an entry naming it → pack_purged; a second purge does nothing; the packs listing
+      route shows each pack with its state, owner only; the purge route answers 202 with zero rows deleted before
+      the job runs; learner 403 owner_only; another owner's material 404; a pack_id that exists only for another
+      owner (same book) → 404 and nothing enqueued; a pack_id of another material of the same owner → 404;
+      confirm_mismatch.
   - id: FR-INGEST-46
     text: >-
       **Per-pack advisory locks** (ADR-0039 B7b; the lock contract of SRV-AGENT FR-AGENT-21 step 9).
@@ -1947,6 +2046,14 @@ invariants:
       either rewrites every legacy id of every target or none; the resolver and re-anchoring write no citation-bearing
       row of another module; re-anchoring orphans whenever equal-hash counts differ. [db] test_seqmap_db.py,
       test_migrate_citations_db.py, test_spanref_db.py, test_reanchor_db.py.
+  - id: INV-INGEST-14
+    text: >-
+      **No deletion on a request path; locks before deletes.** No module importable by the api role deletes from the
+      tables of this revision or calls GC or purge internals (import-graph and source scan, as INV-INGEST-8); every
+      DELETE of pack data runs in a transaction that holds the pack's lock and set `reader.pack_delete`. [unit, db]
+      test_gc_db.py: only `reader.ingest.jobs` imports `reader.ingest.gc`, and the DELETE statements of span,
+      outline and overlay rows appear only in `reader/ingest/gc.py`; a DELETE of a sealed pack's spans without the
+      setting is refused.
 
 nfr:
   - id: NFR-INGEST-1
@@ -2314,7 +2421,6 @@ proposed_requirements:
       - "add to test_manifest_db.py [db]: **rollback drops deleted materials**: entries naming materials A and B; B deleted; a rollback to the earlier entry appends an entry naming A's element only; restore of B then activates B by its pending or last element"
       - "add to test_manifest_db.py [db]: superseded — a pending row of an r3 pack while the head names the material's r4 pack → the row is deleted, nothing appended; prefix_mismatch — an element whose vectors' prefix_overlay_id differs from its desired prefixes id waits; delete of a material the head does not name appends no entry; restore whose last element's pack was collected makes no request for it and calls ensure when the remaining pending row has no vectors"
       - "add to test_manifest_db.py [db]: try_activate whose append loses the CAS on every retry (a concurrent appender held at the unique key) stores manifest_conflict and keeps the row; the worker-start sweep then appends it; rollback and restore onto another pack with no anchor_runs row re-anchor inline and append in one transaction, the rollback's lock set taken in its first call"
-      - "add to test_gc_db.py [db]: restore racing GC of the same pack (two connections, the GC holding the pack lock first) → GC collects and the restore appends nothing for it, its pending row waiting with pack_collected, or the restore commits first and GC keeps the pack; never an entry naming a collected pack; and a rollback racing `ingest.gc_overlay` of an overlay the rolled-back entry names (pack unchanged, overlay id differs from the head's) → the same two outcomes, never an entry naming a collected overlay"
       - "change server/tests/ingest/test_manage_db.py [db] (FR-INGEST-31 revised): the delete–restore cycle also asserts exactly two manifest entries and the restored brain_version"
   # FR-INGEST-40..43 are promoted into `requirements` (phase 2, unit 3); FR-INGEST-40 step 1's artifact tests in
   # unit 4 (FR-INGEST-10, -11 revised). The two below wait for SRV-SEARCH's span-level embed and SRV-TUTOR (paired).
@@ -2322,65 +2428,13 @@ proposed_requirements:
     tests_planned:
       - "add to test_packs_db.py [db]: an r2 material imported by browser upload (an uploads row in `received`, its ingest under r2) → after ingest_0004 a sealed legacy pack in the first entry; the (fake) embed of its span-level overlay seals and try_activate appends one entry naming that vectors overlay with no seq map; search over it is empty before and returns its spans after"
       - "add to test_spanref_db.py [db] (with the paired SRV-TUTOR change): with tutor rows still holding legacy ids and the command never run, the tutor's span load (spans_by_ids through resolve) and search return the same spans and results as after the command"
-  - id: FR-INGEST-44
-    text: >-
-      **Garbage collection** (P6), background only, never by a route. The scanner job `ingest.gc` {slot}, key
-      [slot] (the UTC date of the daily periodic entry, SRV-EVENTS paired), reads candidates without locks and
-      enqueues **one job per pack**, `ingest.gc_pack` {owner_id, pack_id, slot}, key [owner_id, pack_id, slot], and
-      one per lone overlay, `ingest.gc_overlay` {owner_id, overlay_id, slot}, key [owner_id, overlay_id, slot]. A
-      deleter collects a pack (its
-      `material_spans` and `material_outline` rows, its overlays and their rows; the `ingests` and `base_packs` rows
-      stay as the tombstone with `collected_at` set) or an overlay only when all hold, re-checked under the pack's
-      lock (FR-INGEST-46) in the deleting transaction, in the order job key → pack lock → reads and deletes:
-      - it is absent from the owner's last `ingest.gc.keep_entries` manifest entries (`bounds.gc_keep_entries`);
-      - it was sealed more than `ingest.gc.age_floor_days` ago, or, for a `building` overlay, created more than that
-        ago **and its pack is not in the head entry** (a long build for an active pack, such as a prefix overlay
-        stopped on its cap, is never collected); a base pack is never `building` after its import transaction (it
-        seals in it, FR-INGEST-35), so there is no building-pack case;
-      - it is not cited by a published lesson revision (`revision_packs`, SRV-LESSON paired), not the target of an
-        accepted seq map (every legacy revision of its material cites it through the map), and not cited by a finding
-        (a seam returning none until SRV-KB);
-      - it is not the pack of, nor an overlay desired by, a `pending_activations` row (a waiting activation keeps
-        what it waits to activate; a pack whose rows are only stale desires leaves with its row when the owner purges
-        it).
-      Each pack is collected in its own transaction with `reader.pack_delete = on`; the transaction also calls
-      `judges.forget_pack`, `judges.forget_overlay` (SRV-AGENT), SRV-SEARCH's `forget_overlay` for each of its
-      vector overlays and SRV-SEARCH's `search.forget_legacy(conn, owner_id, ingest_id)` for its `ingests` row, which
-      deletes that ingest's legacy `search_chunks` and `search_embeds` rows (paired; a no-op for an r3 pack). **After it
-      has
-      committed**, the job removes the pack's artifact directory from the blobs volume when no `ingests` row of any
-      owner whose pack is not collected or purged names that artifact id; a crash between the commit and the removal
-      leaves a directory the next scanner removes by the same rule. `freshness_reports` and `study_plans` rows that
-      reference the tombstoned `ingests` row stay valid (FK RESTRICT). Material rows, the owner's soft delete and the
-      inbox originals are never touched (P6). This replaces FR-INGEST-32's tombstone-only rule for span, outline and
-      overlay data.
-    tests_planned:
-      - "add server/tests/ingest/test_gc_db.py [db]: a pack outside the last N entries and older than the floor is collected — spans, outline, overlays, judge outputs, vector rows and the legacy search_chunks and search_embeds rows of its ingest gone, ingests and base_packs rows kept with collected_at — while a freshness_reports row and a study_plans row referencing its ingest stay and still read; kept when within N, younger than the floor, cited by a revision_packs row, the target of an accepted seq map, active, or named (pack or desired overlay) by a pending_activations row; a building overlay past the floor is collected when its pack is outside the head and kept when its pack is in the head; the scanner enqueues one gc_pack job per candidate and a repeat in the same slot enqueues none; the artifact directory is removed only after commit (a rolled-back collection leaves it) and kept while another owner's live ingest names it; material and uploads rows unchanged; no route of reader.ingest.routes or any other api module calls the GC (import-graph test)"
-  - id: FR-INGEST-45
-    text: >-
-      **Owner purge** (P6, ADR-0017 data ownership). Promoted only together with the paired SRV-AGENT `PackGuard`
-      change (FR-INGEST-46), since a purge without the guard could race a judge write.
-      `GET /api/materials/{material_id}/packs` (owner only) lists the material's packs of the session's owner as
-      `[{pack_id, converter_version, state, active, collected_at, purged_at}]` in converter-version
-      order, so the owner can name the pack to purge. `POST /api/materials/{material_id}/packs/{pack_id}/purge` with
-      `{confirm}` (FR-INGEST-31's confirm rule, owner only, FR-AUTH-12) answers 202 and enqueues `ingest.purge`
-      {owner_id, pack_id}, key [owner_id, pack_id]; the route itself deletes nothing (no deletion on a request path).
-      The route answers 404 `not_found` when `pack_id` is not a pack of that material of the session's owner. The job,
-      in the order job key → pack lock (FR-INGEST-46) → the rest, appends one manifest entry without the pack if it
-      is active (CAS, FR-INGEST-38), sets `purged_at`, and collects as GC does but without the N, age and citation
-      conditions (including `search.forget_legacy`); the `ingests` and `base_packs` rows stay as the tombstone. In the
-      same transaction it also deletes
-      the `judge_inputs` rows (SRV-OBS seam) and pending `judge_requests` rows (SRV-EVENTS seam) whose cards cite the
-      pack, and the pack's `pending_activations` row; the artifact directory is removed after commit by GC's rule.
-      Citations keep their locator and resolve as `removed` (FR-INGEST-42). An earlier manifest entry that names the
-      purged pack stays (append-only); a rollback to it is refused `pack_purged`. A second purge answers 202 and its
-      job does nothing.
-    tests_planned:
-      - "add server/tests/ingest/test_purge_db.py [db]: purge of an active pack → one entry without it; spans, outline, overlays, judge outputs, judge_inputs, pending judge_requests and vector rows gone; purge of a migrated r2 pack deletes its ingest's search_chunks and search_embeds rows (search.forget_legacy called once with that ingest id); ingests and base_packs rows kept with purged_at; the packs listing route shows each pack with its state, owner only; a freshness report and a study plan referencing it stay valid; citations resolve `removed`; purge of a cited inactive pack collects it anyway; purge of a pack with a pending_activations row deletes that row; rollback to an entry naming it → pack_purged; the route answers 202 with zero rows deleted before the job runs; learner 403 owner_only; another owner's material 404; a pack_id that exists only for another owner (same book) → 404 and nothing enqueued; a pack_id of another material of the same owner → 404; confirm_mismatch"
-  # FR-INGEST-46's PackGuard tests wait for the paired SRV-AGENT revision:
+  # FR-INGEST-44 and -45 are promoted into `requirements` (phase 2, unit 5); FR-INGEST-45 without PackGuard
+  # (recorded deviation there). FR-INGEST-46's PackGuard tests wait for the paired SRV-AGENT revision, and the
+  # purge's judge_requests seam for SRV-EVENTS' paired purge function:
   - id: FR-INGEST-46-guard-tests
     tests_planned:
       - "add to server/tests/ingest/test_pack_locks_db.py [db]: lock_active true for active packs, false after purge, false for a building or inactive pack; a purge waiting on a held guard lock deletes after the guard's transaction and the guard's judge output is then gone"
+      - "add to test_purge_db.py [db] (with SRV-EVENTS' paired judge_requests purge function): the production Seams delete the pending judge_requests rows whose pack_ids name the purged pack"
   - id: FR-INGEST-47
     text: >-
       **Conditional on retrieval-ablation keeping context prefixes.** Context-prefix overlay (B1, B7, decision 19):
@@ -2470,16 +2524,6 @@ proposed_revisions:
     tests_planned:
       - "change test_ingest_db.py's route tests [db]: inactive material 404"
   # FR-INGEST-31's revision is applied in `requirements` (phase 2, unit 3).
-  - id: FR-INGEST-32
-    text: >-
-      **No live course on a deleted material** (unchanged), and **routes delete nothing**: no route deletes a row of
-      materials, ingests, material_spans, material_outline or uploads, or a file under the blobs root. Span, outline
-      and overlay rows and artifact directories are deleted only by the GC and purge jobs (FR-INGEST-44, -45); rows
-      of `materials`, `ingests` and `base_packs` are never deleted (`ingests` and `base_packs` are the pack's
-      tombstone). P6 replaces the tombstone-only rule for span, outline and overlay data. The auth matrix is
-      unchanged.
-    tests_planned:
-      - "change test_manage_db.py [db]: the row-count oracle is kept for routes; GC and purge are covered by test_gc_db.py and test_purge_db.py"
   - id: INV-INGEST-7
     text: >-
       As revised in `invariants`, plus: a tags overlay rebuild leaves every locator unchanged (once a tags overlay
@@ -2537,13 +2581,6 @@ proposed_invariants:
         the citation's `quote_sha256`.
     tests_planned:
       - "add server/tests/ingest/test_packs_property_db.py [db, property]: the rules above; the model as a plain Python structure; a citation pool sampled after each activation"
-  - id: INV-INGEST-14
-    text: >-
-      **No deletion on a request path; locks before deletes.** No module importable by the api role deletes from the
-      tables of this revision or calls GC or purge internals (import-graph and source scan, as INV-INGEST-8); every
-      DELETE of pack data runs in a transaction that holds the pack's lock and set `reader.pack_delete`. [unit, db]
-    tests_planned:
-      - "add to test_gc_db.py: the import-graph and source-scan test; a DELETE without the setting refused"
   # INV-INGEST-15 is promoted into `invariants` (phase 2, unit 3).
   - id: INV-INGEST-16
     text: >-
