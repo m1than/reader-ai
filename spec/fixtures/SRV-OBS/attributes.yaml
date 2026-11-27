@@ -8,8 +8,14 @@
 #                        models = the pricing table's full model ids (SRV-AGENT);
 #                        error_codes = the union of the declared error catalogues (the `errors` lists of SRV-AGENT,
 #                        SRV-TUTOR and SRV-PIPELINE, SRV-EVENTS' job codes exhausted, stalled, orphaned, timeout,
-#                        session_lost, wrapper_error, unknown_kind and no_key_row)
+#                        session_lost, wrapper_error, unknown_kind and no_key_row);
+#                        ADR-0039 (V.kl-obs-spans, FR-OBS-36): find_routes = the route ids of SRV-SEARCH's declared
+#                        route table; facet_values.<facet> = the facets file's values of that facet (role, form);
+#                        topic_paths = reader.yaml `sectors` paths; judge_slots = VEC-OBS-5 labels.judge_slots
+#                        (judge.find and the five judge.eval.* slots). Until SRV-SEARCH publishes its route table and
+#                        facets file (paired V.kl-search-find) those three sets are empty and their keys are dropped.
 #   pattern: <regex>     matched with fullmatch
+#   type: bool           a bool only (no rule)
 #   range: [min, max]    inclusive, for int and float
 # Every string value is at most 128 characters after its rule.
 version: 1
@@ -22,6 +28,8 @@ span_names:
   # V.obs-analytics (FR-OBS-12 e, FR-OBS-13): the session marker and the child spans.
   - { pattern: "^job\\.session$" }
   - { pattern: "^(tutor\\.retrieve|tutor\\.citations|verify\\.claims|verify\\.lab|kernel\\.run|ingest\\.parse|ingest\\.chunk|embed\\.batch)$" }
+  # ADR-0039 (FR-OBS-36, -37): the text-free find subtree, pack builds and link runs.
+  - { pattern: "^(find|find\\.route|find\\.retrieve|find\\.preselect|find\\.judge_wait|find\\.select|pack\\.build|link\\.run)$" }
 fallback_name: reader.unlisted
 
 attributes:
@@ -79,6 +87,81 @@ attributes:
   reader.chunks: { type: int, range: [0, 10000000] }
   reader.embed.vectors: { type: int, range: [0, 10000000] }
   reader.embed.batch: { type: int, range: [0, 100000] }
+  # ADR-0039 (FR-OBS-21, -39): job-root versions and the evaluation id.
+  reader.policy_version: { type: string, pattern: "^[0-9a-f]{64}$" }
+  reader.eval_id: { type: string, pattern: "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$" }
+  # FR-OBS-36: the find subtree. Ids, enums, counts and hashes only; never a string from a query, card or filter.
+  reader.find.channel: { type: string, enum: [mcp, tutor, pipeline, owner] }
+  reader.caller.model: { type: string, enum_from: models }
+  reader.brain_version: { type: string, pattern: "^[0-9a-f]{64}$" }
+  reader.find.question_type: { type: string, enum: [exact, thematic, current_state, fact_check] }
+  reader.find.entitled: { type: bool }
+  reader.find.k: { type: int, range: [0, 1000] }
+  reader.find.budget_tokens: { type: int, range: [0, 10000000] }
+  reader.find.cards: { type: int, range: [0, 100000] }
+  reader.find.tokens: { type: int, range: [0, 1000000000] }
+  reader.find.judged_tokens: { type: int, range: [0, 1000000000] }
+  reader.find.unjudged_tokens: { type: int, range: [0, 1000000000] }
+  reader.judge_ran: { type: bool }
+  reader.judge_source: { type: string, enum: [live, recorded] }
+  reader.judge_skip: { type: string, enum: [gate, timeout, error, budget, saturated, quota_refused, no_provider] }
+  reader.find.route: { type: string, enum_from: find_routes }
+  reader.find.filter.role: { type: string, enum_from: facet_values.role }
+  reader.find.filter.form: { type: string, enum_from: facet_values.form }
+  reader.find.filter.reliability_min: { type: string, enum: [A, B, C, D, E, F] }
+  reader.find.filter.topic: { type: string, enum_from: topic_paths }
+  reader.find.filter.identifiers: { type: int, range: [0, 1000] }
+  reader.find.filter.identifiers_sha256: { type: string, pattern: "^[0-9a-f]{64}$" }
+  # A concept id is never exported in clear (a term concept's id may carry book text): its hash only.
+  reader.find.filter.concept_uri: { type: string, pattern: "^reader://h/[0-9a-f]{64}$" }
+  reader.layer: { type: string, enum: [L1, L2, L3, L4] }
+  reader.find.method: { type: string, enum: [dense, dense_fts_rrf, outline, registry] }
+  reader.find.merged: { type: int, range: [0, 100000] }
+  reader.find.gate: { type: string, enum: [separated, not_separated] }
+  reader.find.expanded: { type: bool }
+  reader.find.candidates_in: { type: int, range: [0, 100000] }
+  reader.judge.input_sha256: { type: string, pattern: "^[0-9a-f]{64}$" }
+  reader.judge.input_tokens: { type: int, range: [0, 1000000000] }
+  reader.judge.kept: { type: int, range: [0, 50] }
+  reader.judge.dropped: { type: int, range: [0, 50] }
+  # FR-OBS-37: pack builds and link runs. reader.build.usd is for reading only: never reader.cost_usd, no
+  # mlflow.llm.cost (each model call carries its own cost on its agent.call).
+  reader.pack.id: { type: string, pattern: "^[0-9a-f]{64}$" }
+  reader.overlay.version: { type: string, pattern: "^[0-9a-f]{64}$" }
+  reader.overlay.kind: { type: string, enum: [base, profile, tags, vectors, prefixes, summaries, concept_evidence] }
+  reader.pack.state: { type: string, enum: [building, sealed, failed] }
+  reader.pack.spans: { type: int, range: [0, 100000000] }
+  reader.pack.outline_nodes: { type: int, range: [0, 10000000] }
+  reader.pack.rows: { type: int, range: [0, 100000000] }
+  reader.build.calls: { type: int, range: [0, 10000000] }
+  reader.build.usd: { type: float, range: [0, 100000] }
+  reader.build.cap_hit: { type: bool }
+  reader.pack.a: { type: string, pattern: "^[0-9a-f]{64}$" }
+  reader.pack.b: { type: string, pattern: "^[0-9a-f]{64}$" }
+  reader.link.mentions: { type: int, range: [0, 100000000] }
+  reader.link.concepts_proposed: { type: int, range: [0, 10000000] }
+  reader.link.pairs_blocked: { type: int, range: [0, 100000000] }
+  reader.link.pairs_kept: { type: int, range: [0, 100000000] }
+  reader.link.judge_calls: { type: int, range: [0, 10000000] }
+  reader.link.judge_replayed: { type: int, range: [0, 10000000] }
+  reader.link.links: { type: int, range: [0, 100000000] }
+
+# FR-OBS-36: key families, expanded into listed keys at load (`<i>` from 0 to 24), so every exported key is a
+# listed one. 25 documents is the cap: find.select carries at most 25 x 4 + 5 keys, under the OpenTelemetry SDK's
+# default limit of 128 attributes per span (FR-OBS-1 sets no SpanLimits). `uri` is clear only for a PDF span
+# locator, a finding or a lesson; every other id is reader://h/<sha256 of the id> (reader.obs.find.doc_uri).
+key_families:
+  reader.doc.<i>:
+    i: [0, 24]
+    keys:
+      uri: { type: string, pattern: "^reader://(spn:[0-9a-f]{64}:p[0-9]{1,5}:[0-9]{1,7}-[0-9]{1,7}(#[0-9]{1,4})?|(fnd|les):[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}|h/[0-9a-f]{64})$" }
+      sha256: { type: string, pattern: "^[0-9a-f]{64}$" }
+      tokens: { type: int, range: [0, 1000000] }
+      judged: { type: bool }
+    spans:
+      find.retrieve: [uri, sha256, tokens]
+      find.preselect: [uri, sha256, tokens]
+      find.select: [uri, sha256, tokens, judged]
 
 # Which span may carry which key (a listed key on another span is removed too).
 keys_by_span:
@@ -87,7 +170,8 @@ keys_by_span:
   job: [reader.job.kind, reader.job.id, reader.job.attempt, reader.job.outcome, reader.error_code, reader.error_class,
     reader.run_id,
     reader.step, reader.stage, reader.question_id, reader.ingest_id, reader.material_sha256,
-    reader.lesson.id, reader.course.id, reader.tutor.state, reader.prompt.version, reader.version_key]
+    reader.lesson.id, reader.course.id, reader.tutor.state, reader.prompt.version, reader.version_key,
+    reader.policy_version, reader.eval_id, reader.judge.input_sha256]   # ADR-0039: FR-OBS-21, -39, -36 (e)
   agent.call: [reader.task, reader.stage, gen_ai.request.model, gen_ai.usage.input_tokens, gen_ai.usage.output_tokens,
     gen_ai.usage.cache_read.input_tokens, gen_ai.usage.cache_write.input_tokens, reader.cost_usd,
     reader.stop_reason, reader.error_code, gen_ai.operation.name, gen_ai.provider.name, reader.cost_input_usd,
@@ -101,6 +185,28 @@ keys_by_span:
   ingest.parse: [reader.pages, reader.bytes]
   ingest.chunk: [reader.chunks]
   embed.batch: [reader.embed.vectors, reader.embed.batch]
+  # FR-OBS-36; the find.retrieve, find.preselect and find.select lists gain the reader.doc.<i> keys of `key_families`.
+  find: [reader.find.channel, reader.caller.model, reader.brain_version, reader.policy_version,
+    reader.find.question_type, reader.find.entitled, reader.find.k, reader.find.budget_tokens, reader.find.cards,
+    reader.find.tokens, reader.find.judged_tokens, reader.find.unjudged_tokens, reader.judge_ran,
+    reader.judge_source, reader.judge_skip]
+  find.route: [reader.find.route, reader.find.filter.role, reader.find.filter.form,
+    reader.find.filter.reliability_min, reader.find.filter.topic, reader.find.filter.identifiers,
+    reader.find.filter.identifiers_sha256, reader.find.filter.concept_uri]
+  find.retrieve: [reader.layer, reader.find.method, reader.retrieval.candidates, reader.retrieval.hits]
+  find.preselect: [reader.find.merged, reader.find.gate, reader.find.expanded, reader.find.candidates_in,
+    reader.find.cards, reader.find.tokens, reader.find.budget_tokens]
+  find.judge_wait: [reader.judge.input_sha256, reader.judge.input_tokens, reader.judge.kept, reader.judge.dropped,
+    reader.judge_ran, reader.judge_source, reader.judge_skip]
+  find.select: [reader.find.cards, reader.find.tokens, reader.find.judged_tokens, reader.find.unjudged_tokens,
+    reader.find.budget_tokens]
+  # FR-OBS-37.
+  pack.build: [reader.pack.id, reader.overlay.version, reader.material_sha256, reader.overlay.kind,
+    reader.pack.state, reader.pack.spans, reader.pack.outline_nodes, reader.pack.rows, reader.build.calls,
+    reader.build.usd, reader.build.cap_hit]
+  link.run: [reader.pack.a, reader.pack.b, reader.overlay.version, reader.link.mentions,
+    reader.link.concepts_proposed, reader.link.pairs_blocked, reader.link.pairs_kept, reader.link.judge_calls,
+    reader.link.judge_replayed, reader.link.links, reader.build.usd, reader.build.cap_hit]
 
 # FR-OBS-5 (b): argument fields copied from a job's validated args to its root span. No other field is ever read.
 job_args:
@@ -121,6 +227,15 @@ job_args:
   obs.bench: {}
   obs.label: {}
   obs.health: {}
+  # ADR-0039 (V.kl-obs-spans): the judge job copies the key of its recorded output (FR-OBS-36 e); obs.eval its run
+  # id; the other new kinds copy nothing. SRV-INGEST's pack-build kinds join with V.kl-ingest-packs ({} unless that
+  # spec lists an id).
+  judge.find: { input_sha256: reader.judge.input_sha256 }
+  obs.eval: { eval_id: reader.eval_id }
+  obs.eval_run: {}
+  obs.eval_sample: {}
+  obs.judge_score: {}
+  obs.align: {}
 
 resource: { keys: [service.name, service.version], service.name: { enum: [reader-api, reader-worker] } }
 instrumentation_scope: { name: reader, version: null }

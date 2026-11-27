@@ -99,11 +99,18 @@
 # caps, recorded judge outputs, the `judge.find` lane job, the loop-fit check (B7, B7a, B7b; the ADR-0005
 # amendment). deep-reviewer (Fable) round 1 changes, round 2 approve (2026-11-26); the round-2 notes are folded in.
 # Promoted with Red tests: FR-AGENT-6, -9, -10, -12, -17 revised; FR-AGENT-18..23; INV-AGENT-8..10; VEC-AGENT-5.
-# Still proposed (end of file) until the OPS-DEPLOY `agentnet` subnet and fixed addresses land in the same
-# integration merge (V.kl-deploy-judge-lane): FR-AGENT-3's client identity, INV-AGENT-1 and INV-AGENT-6 as
-# revised for worker-judge, INV-AGENT-7, VEC-AGENT-6. Until then agent-proxy has no client table: the lane's
-# `client_quota` mapping and `revoke_all` exist on the worker side and answer as for an older proxy (revoke_all →
-# None). Each promoted item keeps its `tests_planned` list (H2).
+# Promoted in V.kl-deploy-judge-lane (2026-11-26, with OPS-DEPLOY FR-DEPLOY-16's agentnet addresses; deep-reviewer
+# (Fable) approve in round 3 of that task's spec review): FR-AGENT-3's client identity (plus `--bind`),
+# INV-AGENT-1 and INV-AGENT-6 as revised for worker-judge, INV-AGENT-7, VEC-AGENT-6, `bounds.client_quota` and the
+# errors `client_unknown`, `client_quota`; `reader.agent.lane` exports `JOB_KINDS` wired to SRV-EVENTS'
+# `judge_requests.STORE` (the seam below gets its production default). Each item keeps its `tests_planned` (H2).
+# `ProxySettings.clients` defaults to `CLIENTS`; the loopback harnesses (SRV-FRESH, conftest `make_proxy`) pass
+# their own table. Red tests (2026-11-26): the in-process harness (conftest `Proxy.client`) sends from the worker's
+# CLIENTS address by default and from the lane's on request; test_proxy_clients.py holds FR-AGENT-3's client cases,
+# the INV-AGENT-7 state machine and VEC-AGENT-6; the INV-AGENT-6 property draws lane requests too. Green: proxy.py
+# (CLIENTS, quotas, TTLs, revoke-all, --bind) and lane.py's JOB_KINDS; tests reformatted for ruff, no oracle changed.
+# Code review round 1 (non-blocking): the client-table test also pins proxy.RUN_TOKENS_MAX to the sum of the quotas
+# and proxy.LANE_TOKEN_TTL_S equal to lane.LANE_TOKEN_TTL_S; `client_unknown` and `client_quota` are PROXY_REFUSALS.
 #
 # Ownership (ADR-0039 B11). SRV-AGENT: the judge slot table, judge versions, the recorded-output table and its
 # replay, the `index` and `eval` ledger lines and their caps, the `judge.find` job handler that runs on the
@@ -164,7 +171,7 @@ title: Agent runtime — credential-injecting agent-proxy, no-tool Agent SDK pro
 status: approved
 approved_by: agent
 approved_at: 2026-11-22
-review: "deep-reviewer (Fable): rounds 1-2 changes, round 3 approve (2026-11-22); ADR-0030 amendment rounds 1-2 changes, round 3 approve (2026-11-23); ADR-0039 revision round 1 changes, round 2 approve (2026-11-26), approved_by agent"
+review: "deep-reviewer (Fable): rounds 1-2 changes, round 3 approve (2026-11-22); ADR-0030 amendment rounds 1-2 changes, round 3 approve (2026-11-23); ADR-0039 revision round 1 changes, round 2 approve (2026-11-26), approved_by agent; client-identity items promoted with V.kl-deploy-judge-lane after its deep-reviewer (Fable) rounds 1-2 changes, round 3 approve (2026-11-26)"
 layer: server
 track: ai
 adr: [ADR-0005, ADR-0011, ADR-0023, ADR-0025, ADR-0026, ADR-0006, ADR-0017, ADR-0030, ADR-0039]
@@ -228,6 +235,8 @@ bounds:
                                 # + 512 x $0.50/M = $0.0012; rounded up
   judge_find_input_tokens_max: 3000  # B6 step 6 initial cap, by FR-AGENT-9's estimator; re-checked by the lane
   lane_issue_timeout_s: 1.0     # the lane's agent-proxy client timeout (the worker keeps 10 s)
+  client_quota: { worker: 28, worker-judge: 4 }   # 28 + 4 = run_tokens_max 32. worker: concurrency 1 (FR-EVENTS-9),
+                                   # 28 keeps today's evict-oldest headroom; worker-judge: its concurrency (B7b)
 
 tables:
   agent_spend: { owner_id: true, columns: "id bigint identity pk, owner_id → users.id, run_id uuid, lesson_id uuid null, stage text, task text, attempt int, kind text (reserve|settle|void), reservation_id bigint null (settle and void → their reserve), model text, usd numeric(12,6), sdk_usd numeric(12,6) null, settled_usd numeric(12,6) null (settle only: the amount counted, FR-AGENT-9), upstream jsonb null (settle only: the run_token's upstream record), input, output, cache_write_5m, cache_write_1h, cache_read (bigint, settle only), thinking bigint null (settle only: output_tokens_details.thinking_tokens, part of output, not priced; agent_0002), created_at; append-only: a trigger refuses UPDATE, DELETE and TRUNCATE; agent_0004 adds line text null CHECK (line IN (compile, tutor, freshness, mcp, index, eval)), null on rows written before it" }
@@ -241,7 +250,8 @@ errors: [budget_exhausted, task_budget_exhausted, monthly_budget_exhausted, prov
   rate_limited, run_token_unknown, tools_mismatch, model_mismatch, output_cap, body_not_json, sdk_error, output_invalid, unknown_model,
   usage_unmapped, daily_budget_exhausted, upstream_retry, deadline_exceeded, body_not_utf8, tools_not_allowed,
   search_cap, request_cap, lane_saturated, line_invalid, cap_missing, index_budget_exhausted,
-  eval_budget_exhausted, replay_miss, judge_window_too_long, judge_input_too_large]
+  eval_budget_exhausted, replay_miss, judge_window_too_long, judge_input_too_large,
+  client_unknown, client_quota]   # the last two are agent-proxy's own codes (FR-AGENT-3); FR-AGENT-6 maps them
 
 requirements:
   - id: FR-AGENT-1
@@ -261,18 +271,45 @@ requirements:
       user's token. Tokens are held as `Secret` and never logged, echoed or written.
   - id: FR-AGENT-3
     text: >-
-      Run tokens. `POST /run-tokens {"user": "<handle>", "max_output_tokens": n, "model": "<full id>"}` returns
-      `{"run_token": "<43-char urlsafe base64 of 32 random bytes>"}` bound to that user, that output cap and that
-      model for `bounds.run_token_ttl_s`; `POST
-      /run-tokens/revoke {"run_token": "..."}` revokes it (in the body, never in a path, so it appears in no URL) and
-      returns the token's upstream record `{"requests": k, "statuses": [...], "any_2xx": bool, "refused": [...],
-      "in_flight": n, "failed": m}`: every upstream response status seen for it in order, the codes of the proxy's own
-      refusals (FR-AGENT-4), which never reach upstream, the requests still being relayed at revoke (`in_flight`,
-      code review B2: a request forwarded but not finished may still be billed), and the requests that failed after
-      the connection was made (`failed`: written upstream, outcome unknown). Revoking an unknown token (never issued, already revoked, or evicted) answers 404 `run_token_unknown`
-      and no record. At most `bounds.run_tokens_max` live tokens; the oldest is revoked when
-      exceeded. Only the worker reaches the port (agentnet). A user without a loaded token gets 409 `provider_missing`.
-      Tokens are stored only as sha256 digests and compared in constant time.
+      Run tokens, per client (revised for ADR-0039 B7b; promoted in V.kl-deploy-judge-lane with OPS-DEPLOY's
+      agentnet addresses). agent-proxy establishes the calling client from the connection's source address on
+      `agentnet` and never from a request field or header: `CLIENTS` (data in proxy.py) maps each fixed IPv4
+      address that OPS-DEPLOY declares to a client name with its quota, TTL and full-table rule — `worker`: quota
+      `bounds.client_quota.worker`, TTL `bounds.run_token_ttl_s`, oldest own token revoked when exceeded;
+      `worker-judge`: quota `bounds.client_quota.worker-judge`, TTL `bounds.lane_token_ttl_s`, the issue refused
+      when full and, with `tools: false`, never given a tool allowance: a `web_search` field from worker-judge → 400
+      `tools_not_allowed` whatever its task (only `worker` has `tools: true`). `main()` passes
+      `proxy_headers=False` to `uvicorn.run`, so `X-Forwarded-For` is never read, and takes `--bind <ipv4>:<port>`
+      (default `0.0.0.0:8080`; OPS-DEPLOY FR-DEPLOY-16 (d) passes the agentnet address, so nothing listens on
+      loopback or on the `egress` side; a malformed value exits 2). Any request from an
+      address not in `CLIENTS` (another service, the proxy's `egress` side) gets 403 `client_unknown` on every route,
+      and nothing is issued, revoked or forwarded. `POST /run-tokens {"user": "<handle>", "max_output_tokens": n,
+      "model": "<full id>"}` returns `{"run_token": "<43-char urlsafe base64 of 32 random bytes>"}` bound to that
+      user, output cap, model and client for the client's TTL. Before every issue, revoke and forward the proxy
+      purges every expired entry (age > its TTL), so an expired token never counts against a quota; purge, quota
+      count and insert run with no `await` between them, so concurrent issues cannot both pass a quota. A client at its
+      quota: `worker` revokes its own oldest token; `worker-judge` gets 429 `client_quota` and no token. One client's
+      issue never evicts another client's token. `POST /run-tokens/revoke {"run_token": "..."}` revokes a token of the
+      calling client only and returns its upstream record `{"requests": k, "statuses": [...], "any_2xx": bool,
+      "refused": [...], "in_flight": n, "failed": m}` (upstream statuses in order, the proxy's own refusal codes,
+      requests still relayed at revoke, requests failed after connect; the token travels in the body, never in a
+      path); an unknown, expired, evicted or other client's token answers 404 `run_token_unknown`, returns no record
+      and leaves the other client's token live. `POST /run-tokens/revoke-all {}` revokes every token of the calling
+      client and returns `{"revoked": n}`; records are dropped. A `worker` restart's revoke-all removes tokens the
+      dead worker process held (worker concurrency 1, and the hook runs before the first job); another worker-client
+      caller sharing the address, such as a live check run by `docker exec` in the worker container, may lose its
+      token, and its call then settles at the reserve (unknown record), the safe direction. FR-AGENT-5's route
+      templates gain `/run-tokens/revoke-all`, logged like the other two (no new field). A forwarded request's bearer
+      must name a live token of the calling client (FR-AGENT-4's 401 `run_token_unknown` otherwise). A user without
+      a loaded token gets 409 `provider_missing`. Tokens are stored only as sha256 digests and compared in constant
+      time. FR-AGENT-15's `task` and `web_search` fields are unchanged.
+    tests_planned:
+      - "change server/tests/agent/test_proxy.py: the ASGI transport sends from the worker's CLIENTS address; the eviction test uses the worker quota (28) instead of 32"
+      - "change server/tests/agent/test_websearch.py: the same worker source address in its proxy fixture"
+      - "add server/tests/agent/test_proxy_clients.py [unit]: unknown address 403 on all three routes and on /v1/messages; X-Forwarded-For ignored; fifth worker-judge issue 429 client_quota with 4 live; saturated lane never evicts a worker token; a 29th worker token evicts the worker's oldest only; expired lane token purged (clock) frees its slot and its revoke is 404; worker-judge revoke of a worker token 404 and the worker token still forwards; revoke-all revokes the caller's tokens only; a worker-judge token used from the worker address is 401"
+      - "add the killed-lane case to test_proxy_clients.py: 4 lane tokens issued and never revoked (a crashed lane), revoke-all from the lane address → {revoked: 4}, lane count 0, worker token live"
+      - "add to test_proxy_clients.py: worker-judge issue with web_search (task freshness_web and any other) → 400 tools_not_allowed; 8 concurrent lane issues (asyncio.gather) leave exactly 4 live; the revoke-all route logs its template and nothing else (caplog); main() calls uvicorn.run with proxy_headers=False and the --bind host and port (monkeypatched uvicorn.run); a malformed --bind exits 2"
+      - "add server/tests/agent/test_proxy_network.py [image: build; opt-in with READER_TEST_IMAGE_BUILD=1]: on a throwaway network with OPS-DEPLOY's subnet and fixed addresses, a container at the worker's address issues 200 and a container at another address gets 403 client_unknown"
   - id: FR-AGENT-4
     text: >-
       Forwarding allow-list (REF-AGENT-4). Only `POST /v1/messages` with the query exactly `beta=true` or empty is
@@ -679,8 +716,11 @@ requirements:
 invariants:
   - id: INV-AGENT-1
     text: >-
-      No provider token in the worker or any kernel service: absent from env, `/proc/*/environ`, `/run/secrets`,
-      `~/.claude`, `docker inspect` and logs (ADR-0025 verified_by). [live]
+      No provider token in the worker, worker-judge or any kernel service: absent from env, `/proc/*/environ`,
+      `/run/secrets`, `~/.claude`, `docker inspect` and logs, and a request from either service without a live
+      run_token gets no credential (ADR-0025 verified_by, amended by ADR-0039 B7b). [live]
+    tests_planned:
+      - "change server/tests/agent/test_live.py: the INV-AGENT-1 checks parametrised over worker and worker-judge; OPS-SANDBOX's no-valid-handle test (INV-SANDBOX-7) runs against both"
   - id: INV-AGENT-2
     text: >-
       A run_token maps to exactly one user's token: user A's run_token never yields user B's token, a revoked or expired
@@ -703,7 +743,20 @@ invariants:
       forwarded only on a token with a `web_search` allowance and only in one of FR-AGENT-15's two shapes; on such a
       token every forwarded `max_uses` ≤ `searches_per_request_max`, their sum ≤ `searches_max`, and at most
       `requests_max` requests are forwarded; `mcp_servers` is never forwarded non-empty (property test against a stub
-      upstream).
+      upstream). Amended (ADR-0039 B7b): no token issued to `worker-judge` ever carries a `web_search` allowance, so
+      no body with non-empty `tools` is ever forwarded for worker-judge.
+    tests_planned:
+      - "change server/tests/agent/test_websearch.py's INV-AGENT-6 property test: requests drawn from both client addresses; worker-judge never gets an allowance and never forwards tools"
+  - id: INV-AGENT-7
+    text: >-
+      For any sequence of issue, revoke, revoke-all and forward requests from `worker`, `worker-judge` and unknown
+      addresses, with clock advances: each client's live tokens ≤ its quota (worker-judge ≤ 4); no request of one
+      client revokes, evicts or forwards with another client's token; an unknown address is never issued a token and
+      nothing it sends is forwarded; no expired token is forwarded; after a client's revoke-all it holds 0 tokens and
+      the other client's tokens are unchanged; no worker-judge token carries a `web_search` allowance (property test
+      against a stub upstream; extends INV-AGENT-2).
+    tests_planned:
+      - "add a Hypothesis state machine in server/tests/agent/test_proxy_clients.py"
   - id: INV-AGENT-8
     text: >-
       One call, one process, one token: a `judge.find` job makes at most one `Provider.run`; each run starts at most
@@ -745,6 +798,11 @@ vectors:
   - id: VEC-AGENT-5
     source: judge.find outputs over ordinals 1..n (FR-AGENT-22) — valid, fenced, drop absent or given, and refused shapes (sufficiency absent, out-of-range, duplicate, non-complement drop, non-integer ordinals, NaN, Infinity, -Infinity, ±(400-digit integer) and 1e400 sufficiency, boolean or string numbers, unknown key, duplicate key, not an object), with the expected card-id parse or output_invalid
     file: spec/fixtures/SRV-AGENT/judge-find-outputs.yaml
+  - id: VEC-AGENT-6
+    source: agent-proxy client sequences per FR-AGENT-3 revised — lane quota, purge by clock, revoke-all, cross-client revoke and forward, unknown address, worker-judge issue with web_search (400 tools_not_allowed) — with the expected statuses and live counts
+    file: spec/fixtures/SRV-AGENT/client-sequences.yaml
+    tests_planned:
+      - "test_proxy_clients.py reads it (FR-AGENT-3, INV-AGENT-7)"
 
 defers:
   - "Shared packs (SRV-SHARE): `judges.forget_pack` deletes one owner's rows; when a pack can be shared across owners, SRV-SHARE states whether a purge forgets every owner's rows citing it."
@@ -758,92 +816,3 @@ defers:
 owner_notes:
   - "ADR-0025 hypothesis 1 passed against a stub (spikes/agent-proxy-handshake, zero credit). FR-AGENT-11 checks the real upstream (≈ $0.03) under the owner's $30 test budget (budget.test_budget_usd, 2026-11-22), which covers live checks and live L02 compiles without further consent; every spend goes to the ledger and the per-run cap still applies."
   - "Spend is the Agent SDK credit of the subscription (ADR-0005). The ledger records it; docs/progress.yaml's budget ledger keeps the development spend."
-
-# ---- Still proposed (ADR-0039 B7b; approved in review round 2, Green only with OPS-DEPLOY's agentnet change) ----
-#
-# FR-AGENT-3's client identity needs `agentnet`'s explicit subnet and fixed addresses (OPS-DEPLOY,
-# V.kl-deploy-judge-lane); `deploy/compose.yaml` has none today, so merged alone it would refuse every worker
-# request with `client_unknown`. These items therefore join `requirements` / `invariants` / `vectors` with their Red
-# tests only in the same integration merge as that OPS-DEPLOY change (docs/progress.yaml). The [image] oracle in
-# FR-AGENT-3's tests_planned (a real worker issue succeeds through the Compose network) is the gate.
-# `ProxySettings.clients` defaults to `CLIENTS`; the loopback harnesses (SRV-FRESH, conftest `make_proxy`) pass
-# their own table.
-
-proposed_bounds:
-  client_quota: { worker: 28, worker-judge: 4 }   # 28 + 4 = run_tokens_max 32. worker: concurrency 1 (FR-EVENTS-9),
-                                   # 28 keeps today's evict-oldest headroom; worker-judge: its concurrency (B7b)
-
-proposed_errors: [client_unknown, client_quota]   # agent-proxy's own codes; FR-AGENT-6 maps them
-
-proposed_revisions:
-  - id: FR-AGENT-3
-    text: >-
-      Run tokens, per client. agent-proxy establishes the calling client from the connection's source address on
-      `agentnet` and never from a request field or header: `CLIENTS` (data in proxy.py) maps each fixed IPv4
-      address that OPS-DEPLOY declares to a client name with its quota, TTL and full-table rule — `worker`: quota
-      `bounds.client_quota.worker`, TTL `bounds.run_token_ttl_s`, oldest own token revoked when exceeded;
-      `worker-judge`: quota `bounds.client_quota.worker-judge`, TTL `bounds.lane_token_ttl_s`, the issue refused
-      when full and, with `tools: false`, never given a tool allowance: a `web_search` field from worker-judge → 400
-      `tools_not_allowed` whatever its task (only `worker` has `tools: true`). `main()` passes
-      `proxy_headers=False` to `uvicorn.run`, so `X-Forwarded-For` is never read. Any request from an
-      address not in `CLIENTS` (another service, the proxy's `egress` side) gets 403 `client_unknown` on every route,
-      and nothing is issued, revoked or forwarded. `POST /run-tokens {"user": "<handle>", "max_output_tokens": n,
-      "model": "<full id>"}` returns `{"run_token": "<43-char urlsafe base64 of 32 random bytes>"}` bound to that
-      user, output cap, model and client for the client's TTL. Before every issue, revoke and forward the proxy
-      purges every expired entry (age > its TTL), so an expired token never counts against a quota; purge, quota
-      count and insert run with no `await` between them, so concurrent issues cannot both pass a quota. A client at its
-      quota: `worker` revokes its own oldest token; `worker-judge` gets 429 `client_quota` and no token. One client's
-      issue never evicts another client's token. `POST /run-tokens/revoke {"run_token": "..."}` revokes a token of the
-      calling client only and returns its upstream record `{"requests": k, "statuses": [...], "any_2xx": bool,
-      "refused": [...], "in_flight": n, "failed": m}` (meanings as before: upstream statuses in order, the proxy's own
-      refusal codes, requests still relayed at revoke, requests failed after connect); an unknown, expired, evicted
-      or other client's token answers 404 `run_token_unknown`, returns no record and leaves the other client's token
-      live. `POST /run-tokens/revoke-all {}` revokes every token of the calling client and returns
-      `{"revoked": n}`; records are dropped. A `worker` restart's revoke-all removes tokens the dead worker process
-      held (worker concurrency 1, and the hook runs before the first job); another worker-client caller sharing the
-      address, such as a live check run by `docker exec` in the worker container, may lose its token, and its call
-      then settles at the reserve (unknown record), the safe direction. FR-AGENT-5's route templates gain `/run-tokens/revoke-all`, logged like the other two (no new
-      field). A forwarded request's bearer must name a live token of the calling
-      client (FR-AGENT-4's 401 `run_token_unknown` otherwise). A user without a loaded token gets 409
-      `provider_missing`. Tokens are stored only as sha256 digests and compared in constant time. FR-AGENT-15's
-      `task` and `web_search` fields are unchanged.
-    tests_planned:
-      - "change server/tests/agent/test_proxy.py: the ASGI transport sends from the worker's CLIENTS address; the eviction test uses the worker quota (28) instead of 32"
-      - "change server/tests/agent/test_websearch.py: the same worker source address in its proxy fixture"
-      - "add server/tests/agent/test_proxy_clients.py [unit]: unknown address 403 on all three routes and on /v1/messages; X-Forwarded-For ignored; fifth worker-judge issue 429 client_quota with 4 live; saturated lane never evicts a worker token; a 29th worker token evicts the worker's oldest only; expired lane token purged (clock) frees its slot and its revoke is 404; worker-judge revoke of a worker token 404 and the worker token still forwards; revoke-all revokes the caller's tokens only; a worker-judge token used from the worker address is 401"
-      - "add the killed-lane case to test_proxy_clients.py: 4 lane tokens issued and never revoked (a crashed lane), revoke-all from the lane address → {revoked: 4}, lane count 0, worker token live"
-      - "add to test_proxy_clients.py: worker-judge issue with web_search (task freshness_web and any other) → 400 tools_not_allowed; 8 concurrent lane issues (asyncio.gather) leave exactly 4 live; the revoke-all route logs its template and nothing else (caplog); main() calls uvicorn.run with proxy_headers=False (monkeypatched uvicorn.run)"
-      - "add server/tests/agent/test_proxy_network.py [image]: on a Compose network with OPS-DEPLOY's subnet and fixed addresses, a real worker container's issue returns 200 and a container at another address gets 403 client_unknown (the promotion gate)"
-  # Not in ADR-0039's Rework table; revised at deep-reviewer round 1's request for worker-judge (Green with OPS-SANDBOX).
-  - id: INV-AGENT-1
-    text: >-
-      No provider token in the worker, worker-judge or any kernel service: absent from env, `/proc/*/environ`,
-      `/run/secrets`, `~/.claude`, `docker inspect` and logs, and a request from either service without a live
-      run_token gets no credential (ADR-0025 verified_by, amended by ADR-0039 B7b). [live]
-    tests_planned:
-      - "change server/tests/agent/test_live.py: the INV-AGENT-1 checks parametrised over worker and worker-judge; OPS-SANDBOX's no-valid-handle test (INV-SANDBOX-3, V.kl-deploy-judge-lane) runs against both"
-  - id: INV-AGENT-6
-    text: >-
-      As approved, plus: no token issued to `worker-judge` ever carries a `web_search` allowance, so no body with
-      non-empty `tools` is ever forwarded for worker-judge (property test against a stub upstream).
-    tests_planned:
-      - "change server/tests/agent/test_websearch.py's INV-AGENT-6 property test: requests drawn from both client addresses; worker-judge never gets an allowance and never forwards tools"
-
-proposed_invariants:
-  - id: INV-AGENT-7
-    text: >-
-      For any sequence of issue, revoke, revoke-all and forward requests from `worker`, `worker-judge` and unknown
-      addresses, with clock advances: each client's live tokens ≤ its quota (worker-judge ≤ 4); no request of one
-      client revokes, evicts or forwards with another client's token; an unknown address is never issued a token and
-      nothing it sends is forwarded; no expired token is forwarded; after a client's revoke-all it holds 0 tokens and
-      the other client's tokens are unchanged; no worker-judge token carries a `web_search` allowance (property test
-      against a stub upstream; extends INV-AGENT-2).
-    tests_planned:
-      - "add a Hypothesis state machine in server/tests/agent/test_proxy_clients.py"
-
-proposed_vectors:
-  - id: VEC-AGENT-6
-    source: agent-proxy client sequences per FR-AGENT-3 revised — lane quota, purge by clock, revoke-all, cross-client revoke and forward, unknown address, worker-judge issue with web_search (400 tools_not_allowed) — with the expected statuses and live counts
-    file: spec/fixtures/SRV-AGENT/client-sequences.yaml
-    tests_planned:
-      - "test_proxy_clients.py reads it (FR-AGENT-3, INV-AGENT-7)"

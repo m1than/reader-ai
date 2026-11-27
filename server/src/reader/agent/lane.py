@@ -17,12 +17,14 @@ import contextlib
 import functools
 import logging
 import math
+import os
 import uuid
-from collections.abc import Callable, Mapping, Sequence
-from contextlib import AbstractAsyncContextManager
+from collections.abc import AsyncIterator, Callable, Mapping, Sequence
+from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal
+from pathlib import Path
 from typing import Any, Final, Protocol
 
 from pydantic import BaseModel, ConfigDict
@@ -34,7 +36,7 @@ from reader.agent.errors import AgentError, agent_error
 from reader.agent.ledger import CHARS_PER_TOKEN_FLOOR
 from reader.agent.pricing import resolve_model
 from reader.agent.provider import PROXY_URL, HttpProxyClient, Provider, StageCall
-from reader.config import ReaderConfig
+from reader.config import ReaderConfig, load_config
 from reader.jobs.model import JobContext, JobKind
 
 # Bounds (spec `bounds`).
@@ -46,6 +48,8 @@ LANE_ISSUE_TIMEOUT_S: Final = 1.0
 KIND: Final = "judge.find"
 QUEUE: Final = "judge"
 NOTIFY_CHANNEL: Final = "judge_done"
+KEY_RETENTION_S: Final = 86_400  # SRV-EVENTS FR-EVENTS-11 (amended): a request-id key is never reused
+DEFAULT_CONFIG: Final = "/etc/reader/reader.yaml"  # OPS-CLI's read-only bind (READER_CONFIG)
 
 log = logging.getLogger("reader.agent.lane")
 
@@ -229,7 +233,34 @@ def make_kind(deps: Deps) -> JobKind:
         handler=functools.partial(judge_find, deps),
         max_attempts=1,
         timeout_s=LANE_TOKEN_TTL_S,
+        key_retention_s=KEY_RETENTION_S,
     )
+
+
+def _config() -> ReaderConfig:
+    return load_config(Path(os.environ.get("READER_CONFIG", DEFAULT_CONFIG)))
+
+
+@asynccontextmanager
+async def _agent_provider(engine: AsyncEngine) -> AsyncIterator[Provider]:
+    """The production provider: the lane's agent-proxy client (1 s issue timeout), closed after the call."""
+    from reader.agent.provider import AgentProvider
+
+    proxy = proxy_client()
+    try:
+        yield AgentProvider(engine, _config(), proxy)
+    finally:
+        await proxy.aclose()
+
+
+def default_deps() -> Deps:
+    """Production wiring (V.kl-deploy-judge-lane): SRV-EVENTS' `judge_requests` store serves the requests."""
+    from reader.jobs.judge_requests import STORE
+
+    return Deps(provider=_agent_provider, config=_config, requests=STORE)
+
+
+JOB_KINDS: Final = (make_kind(default_deps()),)  # SRV-EVENTS KIND_MODULES lists this module
 
 
 class _RevokeAll(Protocol):

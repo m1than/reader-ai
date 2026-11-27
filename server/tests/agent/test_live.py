@@ -45,7 +45,7 @@ def test_one_sonnet_call_through_agent_proxy_lands_in_the_ledger() -> None:
     assert 0 < report["settled_usd"] < 0.2
 
 
-@pytest.mark.parametrize("service", ["worker", "kernel-verify", "kernel-agent"])
+@pytest.mark.parametrize("service", ["worker", "worker-judge", "kernel-verify", "kernel-agent"])  # INV-AGENT-1
 def test_no_provider_token_outside_agent_proxy(service: str) -> None:
     env = _exec(service, "sh", "-c", "env | cut -d= -f1")
     names = set(env.stdout.split())

@@ -6,7 +6,8 @@ of the same name and source before it posts, so a retry or a lost response never
 from __future__ import annotations
 
 import logging
-from collections.abc import Mapping
+import re
+from collections.abc import Mapping, Sequence
 from typing import Any, Final
 
 import httpx
@@ -14,6 +15,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from reader.jobs.model import JobKind
 from reader.obs.analytics import ASSESSMENTS
+from reader.obs.attributes import ATTRIBUTES
 from reader.obs.ids import derive_trace_id
 
 log = logging.getLogger("reader.obs")
@@ -48,7 +50,7 @@ class FeedbackArgs(BaseModel):
 def checked(name: str, value: object, metadata: Mapping[str, object]) -> tuple[bool | float, dict[str, str]]:
     """The value after its rule and the metadata as decimal strings, or CatalogError."""
     entry = ASSESSMENTS.get(name)
-    if entry is None:
+    if entry is None or entry["source_type"] != "CODE":  # LLM_JUDGE entries: eval_body only (INV-OBS-8)
         raise CatalogError("name")
     rule = entry["value"]
     if rule == "bool":
@@ -84,6 +86,50 @@ def body(name: str, value: object, metadata: Mapping[str, object], trace_id: str
     }}
 
 
+_UUID: Final = re.compile(ATTRIBUTES["reader.eval_id"]["pattern"])
+_TRACE: Final = re.compile(r"tr-[0-9a-f]{32}")
+
+
+def eval_body(name: str, value: object, score_id: str, source_id: str, trace_id: str) -> dict[str, Any]:
+    """FR-OBS-14 as amended (ADR-0039): the CreateAssessment body of an LLM_JUDGE entry, posted only by
+    obs.judge_score. A float in [0, 1], `source_id` the judge string `<slot>@<version>` of this entry's slot,
+    metadata {score_id} only, no rationale; anything else (a CODE entry included) raises CatalogError."""
+    entry = ASSESSMENTS.get(name)
+    if entry is None or entry["source_type"] != "LLM_JUDGE":
+        raise CatalogError("name")
+    _, low, high = entry["value"]
+    if isinstance(value, bool) or not isinstance(value, (int, float)) or not low <= float(value) <= high:
+        raise CatalogError("value")
+    if not isinstance(score_id, str) or not _UUID.fullmatch(score_id):
+        raise CatalogError("metadata")
+    pattern_ok = isinstance(source_id, str) and re.fullmatch(entry["source_id_pattern"], source_id)
+    if not pattern_ok or source_id.partition("@")[0] != f"judge.{name}":
+        raise CatalogError("source")
+    if not isinstance(trace_id, str) or not _TRACE.fullmatch(trace_id):
+        raise CatalogError("trace")
+    return {"assessment": {
+        "assessment_name": name,
+        "trace_id": trace_id,
+        "source": {"source_type": "LLM_JUDGE", "source_id": source_id},
+        "feedback": {"value": float(value)},
+        "metadata": {"score_id": score_id},
+    }}
+
+
+def already(existing: Sequence[Mapping[str, Any]], payload: Mapping[str, Any]) -> bool:
+    """True when one of the trace's assessments has the payload's name and source_id and, when the payload
+    carries a score_id (LLM_JUDGE), the same score_id: a retry never posts twice, and a new judge version
+    posts beside the old one."""
+    mine = payload["assessment"]
+    score = mine["metadata"].get("score_id")
+    for there in existing:
+        same = (there.get("assessment_name") == mine["assessment_name"]
+                and (there.get("source") or {}).get("source_id") == mine["source"]["source_id"])
+        if same and (score is None or (there.get("metadata") or {}).get("score_id") == score):
+            return True
+    return False
+
+
 def trace_ref(job_id: int, key: str) -> str:
     return f"tr-{derive_trace_id(job_id, key):032x}"
 
@@ -108,17 +154,14 @@ async def post(args: FeedbackArgs, client: httpx.AsyncClient, last: bool) -> boo
     """True when an assessment was created; False when one existed or the trace never arrived (last try)."""
     trace_id = trace_ref(args.job_id, args.key)
     payload = body(args.name, args.value, args.metadata, trace_id)
-    source_id = payload["assessment"]["source"]["source_id"]
     got = await client.get(f"{MLFLOW}/ajax-api/3.0/mlflow/traces/get", params={"trace_id": trace_id},
                            timeout=HTTP_TIMEOUT_S)
     if got.status_code == 404:
         return _missing(args.name, last, after_post=False)
     _raise_for(got)
     info = ((got.json() or {}).get("trace") or {}).get("trace_info") or {}
-    for existing in info.get("assessments") or []:
-        same_source = (existing.get("source") or {}).get("source_id") == source_id
-        if existing.get("assessment_name") == args.name and same_source:
-            return False
+    if already(info.get("assessments") or [], payload):
+        return False
     sent = await client.post(f"{MLFLOW}/ajax-api/3.0/mlflow/traces/{trace_id}/assessments", json=payload,
                              timeout=HTTP_TIMEOUT_S)
     if sent.status_code == 404:

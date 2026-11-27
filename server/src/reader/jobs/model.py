@@ -17,6 +17,11 @@ from reader.config import Secret
 
 NAME_PATTERN: Final = r"^[a-z][a-z0-9_.]{2,63}$"
 SWEEP_TASK: Final = "jobs.sweep"
+# The judge lane's collectors (FR-EVENTS-34); periodic tasks like the sweep, never `JobKind`s.
+JUDGE_REAP_TASK: Final = "jobs.judge_reap"
+JUDGE_GC_TASK: Final = "jobs.judge_gc"
+TICK_SUFFIX: Final = ".tick"  # `<kind>.tick`: a kind's periodic entry (FR-EVENTS-32)
+RESERVED_TASKS: Final = frozenset({SWEEP_TASK, JUDGE_REAP_TASK, JUDGE_GC_TASK})
 LOCK_NAMESPACE: Final = b"reader.jobs\0"
 
 
@@ -65,6 +70,8 @@ class JobKind:
     # (engine, payload, outcome) (SRV-PIPELINE FR-PIPELINE-18, SRV-INGEST FR-INGEST-26). A failure is logged,
     # never judged: the outcome is already recorded.
     after_end: Callable[[Any, Mapping[str, Any], str], Awaitable[None]] | None = None
+    # FR-EVENTS-11 (amended): finished `job_keys` rows of this kind older than this are collected.
+    key_retention_s: int | None = None
 
 
 @dataclass(frozen=True)

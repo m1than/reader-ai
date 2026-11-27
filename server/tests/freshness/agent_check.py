@@ -41,7 +41,7 @@ import uvicorn
 from reader.agent import ledger
 from reader.agent.errors import AgentError
 from reader.agent.provider import AgentProvider, CliRequest, HttpProxyClient, StageCall, sdk_cli, sdk_options
-from reader.agent.proxy import ProxySettings, create_app
+from reader.agent.proxy import CLIENTS, ProxySettings, create_app
 from reader.config import load_config, secret_file_name
 from reader.freshness import jobs, links, prompts, queries, sample, scan
 from reader.freshness.gate import Gate
@@ -170,8 +170,13 @@ async def main(config_path: Path) -> dict[str, Any]:
     ledger.settle = settle  # type: ignore[assignment]
 
     recording = Recording()
+    # SRV-AGENT FR-AGENT-3: this loopback harness maps its own address to the client `worker`.
+    worker = next(c for c in CLIENTS.values() if c.name == "worker")
     settings = ProxySettings(
-        config_path=config_path, secrets_root=WORK / "secrets", upstream="http://127.0.0.1:8080"
+        config_path=config_path,
+        secrets_root=WORK / "secrets",
+        upstream="http://127.0.0.1:8080",
+        clients={"127.0.0.1": worker},
     )
     app = create_app(settings, upstream_transport=recording)
     server = uvicorn.Server(

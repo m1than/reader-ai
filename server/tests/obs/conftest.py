@@ -65,6 +65,10 @@ def catalogs(**overrides: Any) -> Any:
                 "freshness.scan",
                 "freshness.web",
                 "test.effect",
+                # ADR-0039 (V.kl-obs-spans): kinds whose roots carry the new job keys
+                "judge.find",
+                "obs.eval",
+                "obs.judge_score",
             }
         ),
         "pipeline_stages": frozenset({"draft", "fact_check", "adversarial_review", "revise", "verify"}),

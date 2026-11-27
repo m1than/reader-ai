@@ -1,4 +1,5 @@
 # @trace FR-DEPLOY-3, FR-DEPLOY-4, INV-DEPLOY-4, INV-DEPLOY-5, VEC-DEPLOY-2, VEC-DEPLOY-3, FR-DEPLOY-13
+# @trace FR-DEPLOY-16
 """OPS-DEPLOY [config]: networks, the api bind address, kernel isolation and the reachability matrix."""
 
 from .conftest import (
@@ -27,7 +28,9 @@ def test_network_membership() -> None:
     assert members["edge"] == {"caddy"}
     assert members["front"] == {"caddy", "api", "mcp"}
     assert members["core"] == {"api", "worker", "mcp", "postgres"}
-    assert members["agentnet"] == {"worker", "agent-proxy"}
+    assert members["agentnet"] == {"worker", "worker-judge", "agent-proxy"}  # FR-DEPLOY-16 (with `agents`)
+    assert members["judge-db"] == {"postgres", "worker-judge"}  # FR-DEPLOY-16 (c)
+    assert networks_of(model["services"]["worker-judge"]) == {"agentnet", "judge-db", "otel"}
     assert members["egress"] == {"agent-proxy"}
     assert members["sb-verify"] == {"worker", "kernel-verify"}
     assert members["sb-agent"] == {"worker", "kernel-agent"}
@@ -38,7 +41,7 @@ def test_network_membership() -> None:
     assert networks_of(model["services"]["embed"]) == {"embed"}
     assert model["networks"]["embed"].get("internal") is True
     # Paired SRV-OBS change (FR-DEPLOY-13, ADR-0032): otel, obs and obs-ui.
-    assert members["otel"] == {"api", "worker", "rotel"}
+    assert members["otel"] == {"api", "worker", "worker-judge", "rotel"}  # FR-DEPLOY-16 amends FR-DEPLOY-13
     assert members["obs"] == {"rotel", "mlflow", "worker"}
     assert members["obs-ui"] == {"caddy", "mlflow"}
     front = model["networks"]["front"]
@@ -59,6 +62,7 @@ def test_api_binds_front_address_and_worker_listens_nowhere() -> None:
     bind = api_cmd[api_cmd.index("--bind") + 1]
     assert bind == f"{services['api']['networks']['front']['ipv4_address']}:8000"
     assert "--bind" not in services["worker"]["command"]
+    assert "--bind" not in services["worker-judge"]["command"]  # FR-DEPLOY-16 (a): the lane listens nowhere
 
 
 def test_kernel_resolves_only_its_declared_caller() -> None:

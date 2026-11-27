@@ -13,6 +13,8 @@ from collections.abc import Mapping
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Any, Final
 
+from reader.obs.attributes import DOC_CAP
+
 SPAN_TYPES: Final[Mapping[str, str]] = {
     "job *": "CHAIN",
     "job.session": "CHAIN",
@@ -25,6 +27,15 @@ SPAN_TYPES: Final[Mapping[str, str]] = {
     "ingest.parse": "PARSER",
     "ingest.chunk": "PARSER",
     "embed.batch": "EMBEDDING",
+    # ADR-0039 (FR-OBS-36, -37)
+    "find": "TOOL",
+    "find.route": "ROUTER",
+    "find.retrieve": "RETRIEVER",
+    "find.preselect": "RERANKER",
+    "find.judge_wait": "CHAIN",
+    "find.select": "RERANKER",
+    "pack.build": "CHAIN",
+    "link.run": "CHAIN",
 }
 
 TRACE_TAGS: Final = (
@@ -32,6 +43,7 @@ TRACE_TAGS: Final = (
     "reader.stage", "reader.step", "reader.run_id", "reader.lesson.id", "reader.course.id",
     "reader.question_id",
     "reader.material_sha256", "reader.version_key",  # phase 2: FR-OBS-20 (d), FR-OBS-21 (a)
+    "reader.policy_version", "reader.eval_id",  # ADR-0039: FR-OBS-21, -39
 )
 
 _RUN_INPUTS: Final = (
@@ -53,6 +65,13 @@ FORBIDDEN_PREVIEW_KEYS: Final = frozenset(
     {"model", "messages", "prompt", "input", "output", "content", "text"}
 )
 
+# FR-OBS-36, FR-OBS-12 (f) as amended: the documents list on a span carrying reader.doc.* keys.
+RETRIEVER_DOCUMENTS: Final[Mapping[str, Any]] = {
+    "family": "reader.doc.<i>",
+    "key": "mlflow.spanOutputs",
+    "document": {"id": "uri", "page_content": "", "metadata": {"doc_uri": "uri", "content_sha256": "sha256"}},
+}
+
 JOB_ROOT_KEYS: Final[Mapping[str, tuple[str, ...]]] = {
     "pipeline.stage": ("reader.lesson.id", "reader.course.id", "reader.prompt.version"),
     "pipeline.verify": ("reader.lesson.id", "reader.course.id"),
@@ -66,26 +85,46 @@ LINKED_PROMPTS: Final[Mapping[str, str]] = {
     "pipeline.stage": "reader.<reader.stage>",
 }
 
-# FR-OBS-14: the assessment catalogue; `value` is "bool" or ("float", low, high).
+# FR-OBS-14 (as amended by ADR-0039), INV-OBS-8: the assessment catalogue; `value` is "bool" or ("float", low,
+# high). A CODE entry has a fixed `source_id` and int-range metadata and is written only by obs.feedback; an
+# LLM_JUDGE entry has a `source_id_pattern` (SRV-AGENT's `<slot>@<version>`, slot = "judge." + name) and
+# metadata {score_id: uuid}, and is written only by obs.judge_score.
+_CODE: Final = {"source_type": "CODE", "writer": "obs.feedback"}
+_JUDGE: Final = {
+    "source_type": "LLM_JUDGE", "writer": "obs.judge_score", "value": ("float", 0, 1),
+    "source_id_pattern": r"^judge\.eval\.[a-z_]{1,40}@[0-9a-f]{12}$", "metadata": {"score_id": "uuid"},
+}
 ASSESSMENTS: Final[Mapping[str, Mapping[str, Any]]] = {
-    "fact_check.passed": {"value": "bool", "source_id": "reader.pipeline.fact_check",
+    "fact_check.passed": {**_CODE, "value": "bool", "source_id": "reader.pipeline.fact_check",
                           "metadata": {"claims": (0, 10000), "supported": (0, 10000)}},
-    "verify.passed": {"value": "bool", "source_id": "reader.pipeline.verify", "metadata": {}},
-    "verify.lab_passed": {"value": "bool", "source_id": "reader.pipeline.verify",
+    "verify.passed": {**_CODE, "value": "bool", "source_id": "reader.pipeline.verify", "metadata": {}},
+    "verify.lab_passed": {**_CODE, "value": "bool", "source_id": "reader.pipeline.verify",
                           "metadata": {"cells": (0, 10000), "cells_ok": (0, 10000)}},
-    "tutor.citations_valid": {"value": "bool", "source_id": "reader.tutor.citations",
+    "tutor.citations_valid": {**_CODE, "value": "bool", "source_id": "reader.tutor.citations",
                               "metadata": {"total": (0, 1000), "valid": (0, 1000)}},
-    "tutor.citation_share": {"value": ("float", 0, 1), "source_id": "reader.tutor.citations", "metadata": {}},
+    "tutor.citation_share": {**_CODE, "value": ("float", 0, 1), "source_id": "reader.tutor.citations",
+                             "metadata": {}},
+    **{f"eval.{slot}": _JUDGE for slot in (
+        "relevance", "sufficiency", "groundedness", "self_contained", "citation_supports_claim")},
 }
 
-# FR-OBS-15: the static prompt templates, by name and repository path.
+# FR-OBS-15 (as edited by ADR-0039): the static prompt templates, by name and repository path. SRV-AGENT's
+# judge_find.md joins when its paired change lands on this branch.
+_JUDGE_PROMPTS: Final = "server/src/reader/obs/judge_prompts/"
 PROMPTS: Final[Mapping[str, str]] = {
     "reader.draft": "server/src/reader/pipeline/prompts/draft.v1.md",
     "reader.fact_check": "server/src/reader/pipeline/prompts/fact_check.v1.md",
     "reader.adversarial_review": "server/src/reader/pipeline/prompts/adversarial_review.v1.md",
     "reader.revise": "server/src/reader/pipeline/prompts/revise.v1.md",
     "reader.tutor": "server/src/reader/tutor/prompts/answer-v1.md",
+    **{f"reader.judge.{slot}": f"{_JUDGE_PROMPTS}judge_{slot.replace('.', '_')}.md" for slot in (
+        "eval.relevance", "eval.sufficiency", "eval.groundedness", "eval.self_contained",
+        "eval.citation_supports_claim", "align")},
 }
+
+# VEC-OBS-4 `job_kinds`: the worker's MLflow-writing and evaluation kinds this module's tables cover.
+JOB_KINDS: Final = ("obs.feedback", "obs.prompts", "obs.eval", "obs.eval_run", "obs.eval_sample",
+                    "obs.judge_score", "obs.align")
 
 _MICRO: Final = Decimal("0.000001")
 
@@ -134,6 +173,21 @@ def linked_prompt(attributes: Mapping[str, object]) -> str | None:
     return _dump([{"name": name, "version": str(version)}])
 
 
+_DOC: Final = RETRIEVER_DOCUMENTS["family"].replace("<i>", "")  # "reader.doc."
+
+
+def documents(attributes: Mapping[str, object]) -> str | None:
+    """FR-OBS-36: the validated documents in index order, ids and hashes only, `page_content` always empty."""
+    if not any(key.startswith(_DOC) for key in attributes):
+        return None
+    shown = []
+    for i in range(DOC_CAP):
+        uri, sha = attributes.get(f"{_DOC}{i}.uri"), attributes.get(f"{_DOC}{i}.sha256")
+        if isinstance(uri, str) and isinstance(sha, str):
+            shown.append({"id": uri, "page_content": "", "metadata": {"doc_uri": uri, "content_sha256": sha}})
+    return _dump(shown) if shown else None
+
+
 def derive(span_class: str, name: str, attributes: Mapping[str, object], root: bool) -> dict[str, str]:
     """The MLflow keys for one validated span (FR-OBS-12 a, c, d, e, f and FR-OBS-18)."""
     out: dict[str, str] = {}
@@ -160,4 +214,6 @@ def derive(span_class: str, name: str, attributes: Mapping[str, object], root: b
             if isinstance(value, str):
                 out["session.id"] = value
                 break
+    if (docs := documents(attributes)) is not None:
+        out[RETRIEVER_DOCUMENTS["key"]] = docs
     return out

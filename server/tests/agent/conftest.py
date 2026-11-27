@@ -231,6 +231,17 @@ def message_body(**extra: Any) -> bytes:
 _DROP = object()
 DROP: Any = _DROP
 
+# FR-AGENT-3: agent-proxy names its client by the connection's source address (OPS-DEPLOY FR-DEPLOY-16's agentnet).
+WORKER_ADDR = "10.230.7.10"
+LANE_ADDR = "10.230.7.11"
+
+
+def asgi(app: Any, address: str = WORKER_ADDR) -> httpx.AsyncClient:
+    """An in-process client whose requests arrive from `address` (the ASGI scope's `client`)."""
+    return httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app, client=(address, 50000)), base_url="http://agent-proxy:8080"
+    )
+
 
 @dataclass
 class Proxy:
@@ -239,10 +250,8 @@ class Proxy:
     secrets_root: Path
     clock: list[float]
 
-    def client(self) -> httpx.AsyncClient:
-        return httpx.AsyncClient(
-            transport=httpx.ASGITransport(app=self.app), base_url="http://agent-proxy:8080"
-        )
+    def client(self, address: str = WORKER_ADDR) -> httpx.AsyncClient:
+        return asgi(self.app, address)
 
 
 TOKENS = {"ivan": "sk-ant-oat01-IVAN-" + "i" * 40, "anna": "sk-ant-oat01-ANNA-" + "a" * 40}
