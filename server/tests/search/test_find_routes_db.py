@@ -135,10 +135,20 @@ async def test_each_error_code(w: World, path: str, body: Any, status: int, code
     assert (r.status_code, r.json()) == (status, {"error": code})
 
 
+@pytest.mark.parametrize("raw", [b'{"q": "wallet \\u0000 keys"}', b'{"q": "wallet \\ud800 keys"}'])
+async def test_a_nul_or_lone_surrogate_query_is_invalid(w: World, raw: bytes) -> None:
+    await material(w)
+    async with client(w) as c:
+        r = await c.post("/api/find", content=raw, headers={"Content-Type": "application/json"})
+    assert (r.status_code, r.json()) == (400, {"error": "query_invalid"})
+
+
 async def test_learners_get_404(w: World) -> None:
     await material(w)
-    async with client(w, "anna") as c:
-        for path, body in (("/api/find", {"q": "wallet"}), ("/api/open", {"id": f"src:{MAT_EN}"})):
+    await material(w, "anna", MAT_RU, [(1, "Wallet keys of the learner, her own copy here." + FILL)])
+    async with client(w, "anna") as c:  # her own material too: the role check, not the manifest, refuses her
+        for path, body in (("/api/find", {"q": "wallet"}), ("/api/open", {"id": f"src:{MAT_EN}"}),
+                           ("/api/open", {"id": f"src:{MAT_RU}"})):
             r = await c.post(path, json=body)
             assert (r.status_code, r.json()) == (404, {"error": "not_found"})
 

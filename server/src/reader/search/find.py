@@ -28,6 +28,7 @@ from reader.search.cards import Card
 from reader.search.policy import CHANNELS, Policy, canonical, estimate
 
 QUERY_MAX: Final = 1000
+QUERY_REFUSED: Final = re.compile("[\x00\ud800-\udfff]")  # NUL or a lone surrogate: query_invalid
 UNBUILT: Final = frozenset({"L3", "L5"})  # FR-SEARCH-23: layers whose specs have not landed
 DEGRADING: Final = frozenset({"timeout", "error", "budget", "saturated", "quota_refused", "no_provider"})
 SKIPS: Final = DEGRADING | {"gate", "slice_empty"}  # FR-SEARCH-29's closed set
@@ -169,7 +170,7 @@ def validate(
     if question_type is not None and (channel != "pipeline" or question_type != "fact_check"):
         raise FindError("channel_invalid")
     text = normalise_query(query) if isinstance(query, str) else ""
-    if not 1 <= len(text) <= QUERY_MAX:
+    if not 1 <= len(text) <= QUERY_MAX or QUERY_REFUSED.search(text):
         raise FindError("query_invalid")
     found = dict(filters or {})
     if not _filters_ok(policy, found):

@@ -226,26 +226,47 @@ def policy_version(loaded: Policy | None = None, **kw: Any) -> str:
     return version_of(declared(loaded, **kw))
 
 
-_BOUND: list[tuple[Policy, str] | None] = [None]
+@dataclass(frozen=True)
+class Bound:
+    policy: Policy
+    version: str
+    slots: Mapping[str, str]
+    config_path: Path | None
+
+
+_BOUND: list[Bound | None] = [None]
+
+
+def _slots(config_path: Path | None) -> dict[str, str]:
+    return effective_slots() if config_path is None else effective_slots(config_path)
 
 
 def bind(config_path: Path | None = None) -> tuple[Policy, str]:
-    """At api and worker start: load the policy, compute its version once (slots from `config_path`, else the
+    """At api and worker start: load the policy, compute its version (slots from `config_path`, else the
     lane's config) and bind SRV-OBS's `POLICY` to its declared inputs. A `PolicyError` stops the start."""
     from reader.obs import versions
 
     loaded = policy()
-    found = declared(loaded, slots=effective_slots() if config_path is None else effective_slots(config_path))
-    bound = (loaded, versions.policy_version(found))
+    slots = _slots(config_path)
+    found = declared(loaded, slots=slots)
+    bound = Bound(loaded, versions.policy_version(found), slots, config_path)
     versions.POLICY = lambda: found
     _BOUND[0] = bound
-    return bound
+    return bound.policy, bound.version
 
 
 def current() -> tuple[Policy, str]:
-    """The process's bound policy and version; computed per call where nothing bound them (tests, CLIs)."""
+    """The process's bound policy and version, re-bound when the judge slots in the same config changed (so
+    policy_version follows a slot change within a process); an unreadable config keeps the bound pair.
+    Computed per call where nothing bound them (tests, CLIs)."""
     bound = _BOUND[0]
-    if bound is not None:
-        return bound
-    loaded = policy()
-    return loaded, policy_version(loaded)
+    if bound is None:
+        loaded = policy()
+        return loaded, policy_version(loaded)
+    try:
+        slots = _slots(bound.config_path)
+    except PolicyError:  # the waiter degrades `error` on the same unreadable config
+        return bound.policy, bound.version
+    if slots == dict(bound.slots):
+        return bound.policy, bound.version
+    return bind(bound.config_path)

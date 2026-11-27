@@ -1921,7 +1921,12 @@ tasks:
         selection, the earlier order once as the reference; cheapest variant not significantly worse, at most a net 2
         of 30 worse on any type, find p95 < 2.5 s, else block for the owner with both measurements. Sets the timeout
         (initial 2.2 s), the judge-input cap (initial 3,000 tokens) and the lane concurrency (initial 4), per channel where they differ. Spends credit:
-        budget.ledger, the owner asked first" }
+        budget.ledger, the owner asked first",
+      gate_promotion: "Ship gate (V.kl-search-find code review round 4, SRV-SEARCH kl_open_points 5): whatever this
+        spike measures, a policy gate.mode other than never_judge may not ship (no task promotes it) until (a) the
+        owner channel has a daily judge budget passed by the routes to Waiter(daily_budget_usd=...) — the amount is
+        the owner's decision, ask before setting it — and (b) policy_version follows judge-slot changes within a
+        process: done in V.kl-search-find (FR-SEARCH-34 current() re-binds when the effective slots differ)" }
   - { id: V.kl-agent-judges, stage: V, kind: module, track: ai, status: done, needs: [V.owner.adr-0039],
       branch: V/kl-agent-judges,
       review: "spec: deep-reviewer (Fable) round 1 changes (10 blockers fixed), round 2 approve (2026-11-26). Code:
@@ -2187,8 +2192,24 @@ tasks:
         left alone, no embed call on refusals. Non-blocking applied (e267c0d): has-children set, embed_facts
         skips collected overlays, legacy params marked, owner notes (tutor span context, NFR-SEARCH-3 open
         measurement); not applied: moving the no_lane lines, corpus exclusion/full-text pins, license-only
-        corpus read. Remaining: the coordinator's code review of unit 5 and the merge; NFR-SEARCH-1, -2,
-        -4..-7 (paid bench)",
+        corpus read. Remaining: the coordinator's merge into V/slice-integration; NFR-SEARCH-1, -2, -4..-7
+        (paid bench)",
+      code_review: "deep-reviewer (Fable) code rounds 1-3 on units 1-2 (f573e0c), 3-4a (fb7b926) and 4b (0eddd7d),
+        each fixed with tests; final round 4 of 4 on 39f8676 (2026-11-28): VERDICT approve-with-fixes, applied
+        without another round (SRV-SEARCH kl_revision.code_review_unit_5_round_4). Must fix: test_learners_get_404
+        gives anna her own material, /api/find and /api/open on her own src: answer 404 (kills r_open_any_role).
+        Recorded: the gate-mode ship condition (kl_open_points 5; V.spike.judge-gate gate_promotion): an owner
+        daily judge budget (the owner's amount) and policy_version following slot changes, the latter implemented
+        (current() re-binds when effective slots differ; an unreadable config keeps the bound pair). Non-blocking,
+        all applied with tests: a LISTEN loss mid-wait resolves waiters with error and leaves none, timeout and
+        cancellation leave none (Listener.pending(); kills w_lost_silent, w_no_discard); a bad policy stops
+        serve.main._settings and _run_worker (kills p_no_bind_at_start); reader.find.entitled pinned false and true
+        (kills o_entitled_true); the api lifespan calls judge_wait.stop(engine) (test kills its removal); FR-SEARCH-33
+        aligned with FR-OBS-36 (b) facet enums; NUL or lone surrogate in q -> query_invalid (route and unit).
+        Mutants on the fixes: 11 of 11 killed (the 5 reviewer survivors above plus current() never/always re-binds,
+        unreadable config raises, lane config instead of the bound path, no lifespan stop, no NUL/surrogate check).
+        Survivors left, equivalent in output: o_no_doc_cap, o_no_doc_cap_sel (reader.obs.find caps at DOC_CAP
+        again)",
       needs: [V.kl-ingest-packs, V.spike.judge-gate, V.kl-agent-judges, V.kl-obs-spans],
       what: "SRV-SEARCH revision (~800–1,200 lines): the B6 cascade (routes, facets file, greedy selection under a token
         budget with stated bounds, 1-hop expansion, one judge.find job last on the worker-judge lane), policy_version,

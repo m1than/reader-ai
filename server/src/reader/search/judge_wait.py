@@ -96,6 +96,10 @@ class Listener:
     def discard(self, request_id: str) -> None:
         self._waiting.pop(request_id, None)
 
+    def pending(self) -> int:
+        """Requests registered and not yet discarded (each leaves on every exit of its wait)."""
+        return len(self._waiting)
+
     def _notified(self, _conn: Any, _pid: int, _channel: str, payload: str) -> None:
         request_id, code = parse(payload)
         future = self._waiting.get(request_id)

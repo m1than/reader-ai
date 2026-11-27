@@ -125,6 +125,31 @@ def test_the_judged_find_subtree() -> None:
     _no_canary(spans)
 
 
+@dataclass
+class MixedCorpus:
+    """One shareable card of a pack the caller is not entitled to among entitled ones."""
+
+    async def candidates(self, caller: Any, channel: str, route: Any, query: str, filters: Any,
+                         identifiers: Sequence[str]) -> Any:
+        from dataclasses import replace
+
+        find = need("reader.search.find")
+        foreign = replace(CARDS[0], entitled=False, source=replace(CARDS[0].source, license="shareable"))
+        return find.Candidates(cards=[foreign, *CARDS[1:3]], degraded=False, brain_version=BRAIN,
+                               lexemes=frozenset(), layers=frozenset({"L1"}))
+
+    async def neighbours(self, caller: Any, channel: str, cards: Sequence[Any]) -> Mapping[str, list[Any]]:
+        return {}
+
+
+def test_the_find_span_records_entitled_both_ways() -> None:
+    _, spans = _traced(Corpus(), _policy("never_judge"), None)
+    assert dict(_by_name(spans)["find"].attributes or {})["reader.find.entitled"] is True
+    out, spans = _traced(MixedCorpus(), _policy("never_judge"), None)
+    assert CARDS[0].id in {c["id"] for c in out["cards"]}  # the non-entitled shareable card is served
+    assert dict(_by_name(spans)["find"].attributes or {})["reader.find.entitled"] is False
+
+
 def test_the_degraded_find_subtree() -> None:
     out, spans = _traced(Corpus(degraded=True), _policy("always_judge"), None)
     root = dict(_by_name(spans)["find"].attributes or {})

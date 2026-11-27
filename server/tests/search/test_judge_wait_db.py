@@ -342,6 +342,69 @@ async def test_the_listener_restarts_after_a_lost_connection(w: World) -> None:
     assert (await run(w, waiter(w, lane), cards3(), query="another"))["judge_source"] == "live"
 
 
+KILL_LISTEN = ("SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = current_database()"
+               " AND query ILIKE 'LISTEN%' AND pid <> pg_backend_pid()")
+
+
+async def test_a_connection_lost_mid_wait_resolves_the_waiters_with_error(w: World) -> None:
+    found = need("reader.search.judge_wait").listener(w.engine)
+    silent = Lane(w.engine, code=None)
+    judge = waiter(w, silent, _policy(timeout_s=6.0))
+    tasks = [asyncio.create_task(run(w, judge, cards3(), query=f"q {i}")) for i in range(3)]
+    for _ in range(100):  # until all three are registered and waiting
+        if found.pending() == 3 and len(silent.calls) == 3:
+            break
+        await asyncio.sleep(0.05)
+    assert found.pending() == 3
+    start = time.monotonic()
+    async with w.engine.begin() as conn:
+        await conn.execute(text(KILL_LISTEN))
+    outs = await asyncio.gather(*tasks)
+    assert time.monotonic() - start < 3.0  # resolved by the loss, not at the 6 s timeout
+    assert all((o["judge_skip"], o["degraded"]) == ("error", True) for o in outs)
+    assert found.pending() == 0
+    assert (await run(w, waiter(w, Lane(w.engine)), cards3(), query="next"))["judge_source"] == "live"
+    assert found.pending() == 0
+
+
+async def test_every_exit_leaves_no_registered_waiter(w: World) -> None:
+    found = need("reader.search.judge_wait").listener(w.engine)
+    assert (await run(w, waiter(w, Lane(w.engine)), cards3()))["judge_source"] == "live"
+    assert found.pending() == 0  # applied
+    out = await run(w, waiter(w, Lane(w.engine, code=None), _policy(timeout_s=0.3)), cards3(), query="t")
+    assert out["judge_skip"] == "timeout" and found.pending() == 0  # timed out
+    silent = Lane(w.engine, code=None)
+    task = asyncio.create_task(run(w, waiter(w, silent, _policy(timeout_s=6.0)), cards3(), query="c"))
+    for _ in range(100):
+        if found.pending() == 1 and silent.calls:
+            break
+        await asyncio.sleep(0.05)
+    assert found.pending() == 1
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert found.pending() == 0  # cancelled
+
+
+async def test_the_api_shutdown_closes_the_listen_connection(w: World) -> None:
+    from reader.api.app import create_app
+
+    judge_wait = need("reader.search.judge_wait")
+    listening = ("SELECT count(*) FROM pg_stat_activity"
+                 " WHERE datname = current_database() AND query ILIKE 'LISTEN%'")
+    app = create_app(w.settings, w.engine, run_cleanup_task=False)
+    async with app.router.lifespan_context(app):
+        assert (await run(w, waiter(w, Lane(w.engine)), cards3()))["judge_source"] == "live"
+        assert await count(w, listening) == 1
+        before = judge_wait.listener(w.engine)
+    assert judge_wait.listener(w.engine) is not before  # stop(engine) dropped the process's listener
+    for _ in range(40):
+        if await count(w, listening) == 0:
+            break
+        await asyncio.sleep(0.05)
+    assert await count(w, listening) == 0
+
+
 async def test_one_listen_connection_under_twenty_concurrent_finds(w: World) -> None:
     lane = Lane(w.engine)
     judge = waiter(w, lane)

@@ -110,6 +110,9 @@ def _estimate(value: Any) -> int:
     [
         ({"query": "   "}, "query_invalid"),
         ({"query": "x" * 1001}, "query_invalid"),
+        ({"query": "a\x00b"}, "query_invalid"),
+        ({"query": "a\ud800b"}, "query_invalid"),
+        ({"query": "a\udfff"}, "query_invalid"),
         ({"k": 0}, "k_invalid"),
         ({"k": 51}, "k_invalid"),
         ({"budget": 399}, "budget_invalid"),

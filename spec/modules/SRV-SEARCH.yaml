@@ -412,6 +412,9 @@ requirements:
       effective config), so cards come from their own manifest and entitlement only (INV-SEARCH-1); the judge is the
       FR-SEARCH-28 waiter on the api's `Jobs` (none: `error` when the gate does not separate). Logs carry lengths,
       counts and codes only. [db] test_find_routes_db.py; test_search_db.py keeps /api/search.
+      **Code review of unit 5, round 4:** a learner gets 404 `not_found` on /api/find and /api/open also over her
+      own material (`src:` of her own active pack), so the role check, not the manifest, refuses her; a `q` with a
+      NUL or a lone surrogate answers 400 `query_invalid` (FR-SEARCH-22). test_find_routes_db.py.
   - id: FR-SEARCH-9
     text: >-
       **Status and ensure.** `search_status(owner_id, material_sha256)` returns `none | queued | running | ready | dead`
@@ -528,6 +531,13 @@ requirements:
       settings too and so checks the policy as well): a `PolicyError` stops the start with
       `reader-server: policy_invalid` (or `config_unavailable` when the judge slots cannot be read). [unit]
       test_policy_unit.py.
+      **Code review of unit 5, round 4:** `policy_version` follows a judge-slot change within a process:
+      `bind()` keeps the slots it bound (and the config path it read them from), and `current()` reads
+      `effective_slots()` from the same config on each call; equal slots return the bound pair without recomputing,
+      different slots re-bind (a new version, and SRV-OBS `POLICY` moves with it), and a config that cannot be read
+      keeps the bound pair (the waiter then degrades `error`, its slot unreadable, so no judge output is attributed
+      to a stale version). Pinned: `reader.serve.main._settings` (every api and worker start) stops with
+      `policy_invalid` on a bad policy file. [unit] test_policy_unit.py.
   - id: FR-SEARCH-25   # ADR-0039 revision, promoted in phase 2 (unit 2)
     text: >-
       **The coverage objective (B5).** Query elements E = the lexemes of `to_tsvector(cfg, query)` for each fts_config
@@ -575,7 +585,8 @@ requirements:
     text: >-
       **`find` entry, budget and response (B8).** `find(caller, channel, query, filters=None, k=None, budget=None,
       judge_ctx=None, question_type=None)`; `caller` = (user id, course roles, provider presence). `query` is NFC,
-      trimmed, 1–1000 characters (`query_invalid`); `filters` keys come from the facets file (`filter_invalid`); `k`
+      trimmed, 1–1000 characters, with no NUL and no lone surrogate (U+D800–U+DFFF; code review of unit 5, round 4)
+      (`query_invalid`); `filters` keys come from the facets file (`filter_invalid`); `k`
       1..k_max (`k_invalid`), unset = no count cap; `budget` an integer, below `budget_min` → `budget_invalid`, unset
       = the channel's default, above the channel's maximum clamped to it (not an error); `question_type` only from
       internal callers (the pipeline's fact-check route); `judge_ctx` from the caller (tutor, pipeline, `obs.eval`)
@@ -794,6 +805,11 @@ requirements:
       each owner request stays capped by `owner_judge_run_cap_usd`, and the owner channel is reachable only by the
       owner (FR-SEARCH-8); kl_open_points 5. Caller.provider comes from the effective config (the user has a
       provider entry). test_judge_wait_db.py.
+      **Code review of unit 5, round 4:** `Listener.pending()` counts the registered requests; a request leaves it
+      on every exit (applied, timeout, cancellation, a lost connection). A LISTEN connection lost mid-wait resolves
+      every waiting request at once with `error` (not at its timeout), leaves none registered, and the next request
+      restarts the listener. The api's lifespan calls `stop(engine)` at shutdown, closing the LISTEN connection
+      (paired SRV-AUTH `reader.api.app`). test_judge_wait_db.py.
   - id: FR-SEARCH-33   # ADR-0039 revision, promoted in phase 2 (unit 5)
     text: >-
       **Tracing and readers for SRV-OBS.** `find` opens FR-OBS-36's subtree through `reader.obs.find` helpers with
@@ -801,7 +817,9 @@ requirements:
       `judge_ran`, `judge_source`, `judge_skip`, the gate outcome, card uris and sha256s); `find.judge_wait` is
       current while the waiter enqueues. `reader.search.cards.read(conn, caller, ids)` returns the cards' text as that
       caller may read it on the owner channel (B8: the MCP row for packs the caller is not entitled to), in memory, for
-      SRV-OBS FR-OBS-39/40. Nothing in reader.search logs or traces a query, filter value or card text. [unit, db]
+      SRV-OBS FR-OBS-39/40. Nothing in reader.search logs or traces a query or card text; a filter value is traced
+      only as FR-OBS-36 (b)'s `find.route` facet attributes (`reader.find.filter.role` / `.form`, enums from the
+      facets file, so never free text; aligned in code review of unit 5, round 4), and never logged. [unit, db]
       **Phase 2 (unit 5), recorded:** the `find` span's `brain_version` is set once the candidates return it (the
       span opens before routing); `entitled` is true iff every served card's pack is the caller's own or an own copy;
       a document's sha256 is the sha256 of the card's canonical JSON and its tokens the card's estimate; each span
@@ -810,6 +828,8 @@ requirements:
       called. `cards.read` returns `{id: text}` for the ids that resolve in the caller's active packs (unknown or
       ineligible ids are left out). Paired SRV-OBS change: `slice_empty` joins `reader.judge_skip`'s enum and
       `reader.obs.find.JudgeSkip` (kl_paired_changes). test_find_obs_db.py.
+      **Code review of unit 5, round 4:** `reader.find.entitled` is pinned both ways (true when every served card is
+      entitled, false when one is not). test_find_obs_db.py.
 
 invariants:
   - id: INV-SEARCH-1
@@ -1119,6 +1139,7 @@ kl_revision:
     NFR-SEARCH-7, VEC-SEARCH-6, VEC-SEARCH-7, VEC-SEARCH-8, VEC-SEARCH-9, VEC-SEARCH-10]
   retired_draft_ids: "FR-SEARCH-32 (response cache) dropped in round 1; the id is not reused. The draft's FR-SEARCH-21 (policy) collided with the approved FR-SEARCH-21 (forget_legacy, V.kl-ingest-packs) and is promoted as FR-SEARCH-34 (phase 2)"
   code_review_units_1_2: "Code review of f573e0c (2026-11-27), 4 blocking, fixed with tests: (1) VEC-SEARCH-6 gains the cases that pin the Δ/cost rule against gain order, gain × cost and cheapest-first, the k switch (k costliest fit → gain order) and k set with the k costliest not fitting (ratio order), and INV-SEARCH-10 a structured strategy (one or two costly high-value cards against many cheap ones, relevance 0, budget near the costly card) so the bound can bind; (2) find sanitises the judge outcome: kept ids deduplicated in order and restricted to the slice, a skip outside FR-SEARCH-29's closed set or a source outside {live, recorded} → `error` (test_find_props.py); (3) step 7's pass 2 runs on the marginal objective inside find and the preselection has no k (VEC-SEARCH-10 cases through find); (4) a personal-use L1 card on mcp, or for a non-entitled caller, is absent from the response and from the judge input, also as an expansion target, and an L1 text over 1,200 characters is cut on owner (`more` only when shareable) and uncut on pipeline (test_find_unit.py). Also: a zero-gain fill-order case and the judge input's L1 cut on the pipeline; the reviewer's mutants re-run on the fix, 31 killed and 4 survivors, among them slice_limit_cap_only, first recorded here as equivalent in practice; that was wrong (code review of fb7b926, blocking 2): the rendered judge input includes the query, so with a 999-character query and one 1,199-character personal-use L1 card on owner at budget 740 the rendered input passes 1.5 x B while the card's cost fits the preselection; test_find_unit.py now pins that case (no judge call, judge_skip slice_empty). Non-blocking applied: find keeps at most candidates_max candidates; cut_chars cuts hard when the only whitespace is at position 0. Deferred to unit 5 (recorded): policy_version and facets cached per process with PolicyError mapped to a FindError, the pivot-seed test at find level, math.fsum, re._parser, the startup check, kl_revision.new_ids cleanup."
+  code_review_unit_5_round_4: "deep-reviewer (Fable), final round 4 of 4 on 39f8676 (2026-11-28): VERDICT approve-with-fixes, applied without another round. Must fix: (1) test_learners_get_404 gives anna her own material and asserts /api/find and /api/open (her own src:) answer 404 not_found, killing r_open_any_role (FR-SEARCH-8). Recorded: (2) the gate-mode ship condition in kl_open_points 5 (owner daily budget, the owner's amount) and policy_version following judge-slot changes, implemented: current() re-binds on a slot change (FR-SEARCH-34). Non-blocking, all applied: a LISTEN connection lost mid-wait resolves waiters with error and leaves none, cancellation and timeout leave none (Listener.pending(), kills w_lost_silent and w_no_discard; FR-SEARCH-28); a bad policy stops serve.main._settings (kills p_no_bind_at_start; FR-SEARCH-34); reader.find.entitled pinned false and true (kills o_entitled_true; FR-SEARCH-33); the api lifespan calls judge_wait.stop(engine) (FR-SEARCH-28); FR-SEARCH-33's filter-value sentence aligned with FR-OBS-36 (b); a NUL or lone surrogate in q → query_invalid (FR-SEARCH-22, -8). Survivors left: o_no_doc_cap and o_no_doc_cap_sel (reader.obs.find caps the documents at DOC_CAP again, so find's own slice only saves hashing: equivalent in output)."
   phase_2_deviations: "Recorded at promotion, each in its item's text: FR-SEARCH-34 renumbered and declared() over FR-OBS-21's closed key set; FR-SEARCH-30 card ids, node ranges and children, L1 cards without a quote, a license-less profile as personal-use, and the additive `views.PackSpan.locator` field (paired, SRV-INGEST); FR-SEARCH-31's response shape and in-order budget fill; INV-SEARCH-12's judge-request part with the waiter (unit 5)."
   revised_ids: [FR-SEARCH-3, FR-SEARCH-4, FR-SEARCH-5, FR-SEARCH-6, FR-SEARCH-7, FR-SEARCH-8, FR-SEARCH-9,
     FR-SEARCH-10, FR-SEARCH-20, INV-SEARCH-1, INV-SEARCH-2, INV-SEARCH-3, INV-SEARCH-4, INV-SEARCH-7, NFR-SEARCH-1,
@@ -1440,7 +1461,7 @@ kl_open_points:
   - "2. Until SRV-AGENT sends `<request_id>:<code>`, budget, saturated and quota_refused degrade as error (interim parse rule, FR-SEARCH-28)."
   - "3. When k binds together with the budget, no approximation bound is claimed (FR-SEARCH-27); B8 keeps k optional."
   - "4. Unmeasured values are marked initial in policy (expand_decay, objective weights, thresholds, quotes_per_card_max, walk_quote_fraction_max, owner_judge_run_cap_usd); the evaluation reports their effect, none gates a merge; judge-gate and the paid ablation arms replace the ones they measure."
-  - "5. The owner channel's judge context has no daily budget (`daily_budget_usd` null) until a per-user daily judge budget for the `mcp` line exists (SRV-MCP, stage 7); each owner request is capped by owner_judge_run_cap_usd and the shipped gate (never_judge) makes no judge call until judge-gate (FR-SEARCH-28, unit 5)."
+  - "5. The owner channel's judge context has no daily budget (`daily_budget_usd` null) until a per-user daily judge budget for the `mcp` line exists (SRV-MCP, stage 7); each owner request is capped by owner_judge_run_cap_usd and the shipped gate (never_judge) makes no judge call until judge-gate (FR-SEARCH-28, unit 5). Ship gate (code review of unit 5, round 4): a `gate.mode` other than `never_judge` may not ship until (a) the owner channel has a daily judge budget passed to `Waiter(daily_budget_usd=…)` by the routes — the amount is the owner's decision, not the agent's — and (b) policy_version tracks judge-slot changes within a process (done: FR-SEARCH-34 `current()` re-binds when the effective slots differ from the bound ones)."
 
 proposed_owner_notes:
   - "Spans vs chunks (spikes/retrieval-ablation): at 10 cards, spans hit 71 of 90 against today's chunks' 76; the difference is not significant (thematic 17 vs 20, exact 25 vs 27, fact-check equal), and spans carry 3.8× less text. With the same amount of text spans hit 83. find selects under a token budget, not 10 cards, so the thematic route should not lose in practice; NFR-SEARCH-2's floor is 68 (the spike's 71 minus a margin of 3)."

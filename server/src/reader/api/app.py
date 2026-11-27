@@ -153,6 +153,10 @@ def create_app(
                 task.cancel()
                 with contextlib.suppress(asyncio.CancelledError):
                     await task
+            # SRV-SEARCH FR-SEARCH-28: close the process's LISTEN judge_done connection.
+            from reader.search import judge_wait
+
+            await judge_wait.stop(engine)
 
     app = FastAPI(lifespan=lifespan, docs_url=None, redoc_url=None, openapi_url=None)
     app.state.jobs = jobs  # SRV-PIPELINE and SRV-TUTOR routes enqueue through it (paired changes)

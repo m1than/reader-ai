@@ -15,7 +15,7 @@ from typing import Any
 
 import pytest
 
-from .conftest import need
+from .conftest import CONFIG, MAT_EN, MAT_RU, need
 
 CHANNELS = ("mcp", "owner", "tutor", "pipeline")
 TYPES = ("exact", "thematic", "current_state", "fact_check")
@@ -275,8 +275,90 @@ def test_bind_caches_the_version_and_binds_obs(monkeypatch: pytest.MonkeyPatch) 
     loaded, version = policy.bind()
     assert version == policy.policy_version(loaded, slots=SLOTS)
     assert versions.current_policy_version() == version
-    monkeypatch.setattr(policy, "effective_slots", lambda: {"judge.find": "another"})
-    assert policy.current() == (loaded, version)  # cached per process, not recomputed
+    computed = versions.policy_version
+    calls: list[int] = []
+
+    def counted(found: Any) -> str:
+        calls.append(1)
+        result: str = computed(found)
+        return result
+
+    monkeypatch.setattr(versions, "policy_version", counted)
+    assert policy.current() == (loaded, version) and calls == []  # same slots: the bound pair, not recomputed
+
+
+def test_current_follows_a_judge_slot_change(monkeypatch: pytest.MonkeyPatch) -> None:
+    policy = _policy()
+    from reader.obs import versions
+
+    monkeypatch.setattr(policy, "_BOUND", [None])
+    monkeypatch.setattr(versions, "POLICY", versions.POLICY)
+    monkeypatch.setattr(policy, "effective_slots", lambda: dict(SLOTS))
+    loaded, version = policy.bind()
+    other = {"judge.find": "another"}
+    monkeypatch.setattr(policy, "effective_slots", lambda: dict(other))
+    moved = policy.current()
+    assert moved == (loaded, policy.policy_version(loaded, slots=other)) and moved[1] != version
+    assert versions.current_policy_version() == moved[1]  # SRV-OBS's POLICY moves with it
+    assert policy.current() == moved
+
+    def unreadable() -> dict[str, str]:
+        raise policy.PolicyError("config_unavailable")
+
+    monkeypatch.setattr(policy, "effective_slots", unreadable)
+    assert policy.current() == moved  # an unreadable config keeps the bound pair
+
+
+def test_current_reads_the_slots_from_the_bound_config(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    policy = _policy()
+    from reader.obs import versions
+
+    monkeypatch.setattr(policy, "_BOUND", [None])
+    monkeypatch.setattr(versions, "POLICY", versions.POLICY)
+    seen: list[Path | None] = []
+
+    def slots(config_path: Path | None = None) -> dict[str, str]:
+        seen.append(config_path)
+        return dict(SLOTS)
+
+    monkeypatch.setattr(policy, "effective_slots", slots)
+    config = tmp_path / "reader.yaml"
+    policy.bind(config)
+    policy.current()
+    assert seen == [config, config]
+
+
+def _settings_env(tmp_path: Path) -> Any:
+    from reader.serve import main
+
+    config = tmp_path / "reader.yaml"
+    config.write_text(CONFIG % (MAT_RU, MAT_EN), encoding="utf-8")
+    return main.Env.read({"READER_CONFIG": str(config), "READER_SECRETS_ROOT": str(tmp_path / "none")})
+
+
+@pytest.mark.parametrize("start", ["_settings", "_run_worker"])
+def test_a_bad_policy_stops_the_settings_load(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, start: str
+) -> None:
+    """Through serve.main's own settings load (every api and worker start), not only bind_policy."""
+    policy = _policy()
+    from reader.serve import main
+
+    data = _shipped()
+    data["k_max"] = 0
+    bad = tmp_path / "policy.json"
+    bad.write_text(json.dumps(data), encoding="utf-8")
+    monkeypatch.setattr(policy, "POLICY_FILE", bad)
+    monkeypatch.setattr(policy, "_BOUND", [None])
+    policy.policy.cache_clear()
+    try:
+        with pytest.raises(main.Failure) as caught:
+            getattr(main, start)(_settings_env(tmp_path))
+        assert caught.value.code == "policy_invalid"
+    finally:
+        policy.policy.cache_clear()
 
 
 def test_a_bad_policy_stops_the_api_and_worker_start(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
