@@ -1,8 +1,8 @@
-{"bbox":[72.0,60.0,300.0,80.0],"decoded":null,"kind":"heading","level":1,"page":1,"seq":0,"text":"Глава 1"}
-{"bbox":[72.0,90.0,520.0,130.0],"decoded":null,"kind":"text","level":null,"page":1,"seq":1,"text":"Абзац с текстом.\tTab ok"}
-{"bbox":[72.0,140.0,520.0,155.0],"decoded":null,"kind":"list_item","level":null,"page":1,"seq":2,"text":"1. Шаг"}
-{"bbox":[90.0,160.0,400.0,190.0],"decoded":null,"kind":"code","level":null,"page":1,"seq":3,"text":"$ run --x\nline­two"}
-{"bbox":[200.0,100.0,300.0,120.0],"decoded":true,"kind":"formula","level":null,"page":2,"seq":4,"text":"E = mc^2"}
-{"bbox":[200.0,130.0,300.0,150.0],"decoded":false,"kind":"formula","level":null,"page":2,"seq":5,"text":""}
-{"bbox":[72.0,200.0,400.0,260.0],"decoded":null,"kind":"table","level":null,"page":2,"seq":6,"text":"| a | b |\n|---|---|\n| 1 | 2 |"}
-{"bbox":[72.0,300.0,400.0,500.0],"decoded":null,"kind":"figure","level":null,"page":2,"seq":7,"text":""}
+{"bbox":[72.0,60.0,300.0,80.0],"decoded":null,"kind":"heading","level":1,"locator":"spn:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:p1:0-7","page":1,"quote_sha256":"9fcc83242077ad95cc73bfed81f5308b0a725d99e53e5b7d59fbefb48d834a9d","seq":0,"text":"Глава 1"}
+{"bbox":[72.0,90.0,520.0,130.0],"decoded":null,"kind":"text","level":null,"locator":"spn:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:p1:8-31","page":1,"quote_sha256":"9921822da0ae87ea8dbb3be4f24956b4338ac991b73a612cc151f1e2e55685d9","seq":1,"text":"Абзац с текстом.\tTab ok"}
+{"bbox":[72.0,140.0,520.0,155.0],"decoded":null,"kind":"list_item","level":null,"locator":"spn:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:p1:32-38","page":1,"quote_sha256":"bd7cfdfc8205463b94cc9ba6b04c96ddc4f851a84057aef161e87a91a29be2e1","seq":2,"text":"1. Шаг"}
+{"bbox":[90.0,160.0,400.0,190.0],"decoded":null,"kind":"code","level":null,"locator":"spn:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:p1:39-57","page":1,"quote_sha256":"680cfa02531c22248791f95bc3fe6ab4e34e4f6bf847c58b880c8772f760da85","seq":3,"text":"$ run --x\nline­two"}
+{"bbox":[200.0,100.0,300.0,120.0],"decoded":true,"kind":"formula","level":null,"locator":"spn:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:p2:0-8","page":2,"quote_sha256":"2820951a377c18ce3e89093ca7c31c204b1196a7e571781c6080f8207524a8dc","seq":4,"text":"E = mc^2"}
+{"bbox":[200.0,130.0,300.0,150.0],"decoded":false,"kind":"formula","level":null,"locator":"spn:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:p2:9-9#0","page":2,"quote_sha256":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855","seq":5,"text":""}
+{"bbox":[72.0,200.0,400.0,260.0],"decoded":null,"kind":"table","level":null,"locator":"spn:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:p2:9-38","page":2,"quote_sha256":"397252c92102f8ca94774efe6b597d1d67be4e44bb3426d0d49aacd9bb15f370","seq":6,"text":"| a | b |\n|---|---|\n| 1 | 2 |"}
+{"bbox":[72.0,300.0,400.0,500.0],"decoded":null,"kind":"figure","level":null,"locator":"spn:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa:p2:38-38#0","page":2,"quote_sha256":"e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855","seq":7,"text":""}

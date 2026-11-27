@@ -1,6 +1,6 @@
-"""Artifact format, normalisation and validation (SRV-INGEST FR-INGEST-6, -7, -10, -17; INV-INGEST-1).
+"""Artifact format, normalisation and validation (SRV-INGEST FR-INGEST-6, -7, -10, -11, -17; INV-INGEST-1).
 
-@trace FR-INGEST-6 FR-INGEST-7 FR-INGEST-10 FR-INGEST-17 INV-INGEST-1 VEC-INGEST-1
+@trace FR-INGEST-6 FR-INGEST-7 FR-INGEST-10 FR-INGEST-11 FR-INGEST-17 INV-INGEST-1 VEC-INGEST-1
 """
 
 from __future__ import annotations
@@ -15,6 +15,7 @@ import pytest
 from hypothesis import HealthCheck, example, given, settings
 from hypothesis import strategies as st
 
+from . import make_artifact_fixture as fixture_gen
 from .conftest import ARTIFACT_OK_ID, artifact_files, build_artifact, canonical, need, write_dir
 
 
@@ -45,7 +46,7 @@ def test_fixture_artifact_is_valid_and_its_id_is_the_manifest_hash(tmp_path: Pat
 
 def test_converter_version_constant() -> None:
     ingest = need("reader.ingest")
-    assert ingest.CONVERTER_VERSION == "docling-2.151.1+r2"
+    assert ingest.CONVERTER_VERSION == "docling-2.151.1+r3"
     assert str(ingest.BLOBS_DIR) == "/var/lib/reader/blobs"
 
 
@@ -137,9 +138,9 @@ def test_normalise_is_idempotent(text: str, code: bool) -> None:
     assert artifact._normalised(once, code=code)
 
 
-def test_span_id() -> None:
+def test_legacy_span_id_is_retired() -> None:
     artifact = need("reader.ingest.artifact")
-    assert artifact.span_id("a" * 64, 7) == "a" * 64 + ":7"
+    assert not hasattr(artifact, "span_id")  # FR-INGEST-17 retired: the `<sha>:<seq>` form is never issued
 
 
 # ---- INV-INGEST-1: each rule broken one at a time ----
@@ -249,3 +250,71 @@ def test_valid_generated_artifacts_pass(tmp_path: Path, rows: list[tuple[str, st
         outline=[],
     )
     assert artifact.validate_dir(out)["span_count"] == len(spans)
+    written = [json.loads(x) for x in (out / "spans.jsonl").read_bytes().splitlines()]
+    assert written == fixture_gen.with_locators(spans, "a" * 64)  # INV-INGEST-1 rev: valid locators
+
+
+# ---- Revision 3 (FR-INGEST-10, -11, INV-INGEST-1 revised): format 2, locators, pack id ----
+
+
+def _fixture_spans() -> list[dict[str, Any]]:
+    return [json.loads(x) for x in artifact_files()["spans.jsonl"].splitlines()]
+
+
+def test_format_two_manifest_and_span_fields() -> None:
+    meta = json.loads(artifact_files()["manifest.json"])
+    assert meta["format"] == "reader-ingest/2"
+    assert meta["parse_config"] == fixture_gen.PARSE_CONFIGS["docling-2.151.1+r3"]
+    assert meta["pack_id"] == fixture_gen.pack_fields("a" * 64, "docling-2.151.1+r3")["pack_id"]
+    assert all({"locator", "quote_sha256"} <= set(s) for s in _fixture_spans())
+
+
+def _mutated(index: int, **change: Any) -> list[dict[str, Any]]:
+    spans = _fixture_spans()
+    spans[index] = {**spans[index], **change}
+    return spans
+
+
+LOCATOR_BREAKS: list[tuple[str, int, dict[str, Any]]] = [
+    ("wrong offsets", 1, {"locator": "spn:" + "a" * 64 + ":p1:8-30"}),
+    ("another page", 1, {"locator": "spn:" + "a" * 64 + ":p2:8-31"}),
+    ("another material", 0, {"locator": "spn:" + "b" * 64 + ":p1:0-7"}),
+    ("missing ordinal", 5, {"locator": "spn:" + "a" * 64 + ":p2:9-9#1"}),
+    ("not a locator", 0, {"locator": "a" * 64 + ":0"}),
+    ("wrong quote", 2, {"quote_sha256": "0" * 64}),
+    ("quote of other text", 2, {"quote_sha256": hashlib.sha256(b"Glava").hexdigest()}),
+]
+
+
+@pytest.mark.parametrize(("label", "index", "change"), LOCATOR_BREAKS, ids=[c[0] for c in LOCATOR_BREAKS])
+def test_each_locator_rule_broken_alone_is_locator_mismatch(
+    tmp_path: Path, label: str, index: int, change: dict[str, Any]
+) -> None:
+    files = build_artifact(spans=_mutated(index, **change), keep_locators=True)
+    assert code_of(tmp_path, files) == "locator_mismatch", label
+
+
+def test_missing_locator_key_is_schema(tmp_path: Path) -> None:
+    spans = _fixture_spans()
+    del spans[0]["locator"]
+    assert code_of(tmp_path, build_artifact(spans=spans, keep_locators=True)) == "schema"
+
+
+def test_format_one_is_refused(tmp_path: Path) -> None:
+    assert code_of(tmp_path, build_artifact(format="reader-ingest/1")) == "schema"
+
+
+def test_wrong_pack_id_or_unpinned_parse_config_is_pack_mismatch(tmp_path: Path) -> None:
+    assert code_of(tmp_path / "a", build_artifact(pack_id="0" * 64)) == "pack_mismatch"
+    config = {**fixture_gen.PARSE_CONFIGS["docling-2.151.1+r3"], "batch_pages": 10}
+    pid = hashlib.sha256(canonical({"material_sha256": "a" * 64, "parse_config": config})).hexdigest()
+    assert code_of(tmp_path / "b", build_artifact(parse_config=config, pack_id=pid)) == "pack_mismatch"
+
+
+def test_unknown_converter_version_is_version_mismatch(tmp_path: Path) -> None:
+    assert code_of(tmp_path, build_artifact(converter_version="docling-9+r9")) == "version_mismatch"
+
+
+def test_r2_artifact_in_format_two_validates_with_its_own_pack(tmp_path: Path) -> None:
+    meta = validate(tmp_path, build_artifact(converter_version="docling-2.151.1+r2"))
+    assert meta["pack_id"] == fixture_gen.pack_fields("a" * 64, "docling-2.151.1+r2")["pack_id"]

@@ -1,6 +1,7 @@
 """The host command `reader-ingest` with fake subprocesses (SRV-INGEST FR-INGEST-1..4, -16; INV-INGEST-2, -5).
 
 @trace FR-INGEST-1 FR-INGEST-2 FR-INGEST-3 FR-INGEST-4 FR-INGEST-16 INV-INGEST-2 INV-INGEST-5 FR-INGEST-41
+@trace FR-INGEST-12
 """
 
 from __future__ import annotations
@@ -340,13 +341,18 @@ def test_run_record_is_written_before_the_work_directory(tmp_path: Path) -> None
 # ---- FR-INGEST-2, INV-INGEST-2 ----
 
 
-@pytest.mark.parametrize(("status", "code"), [("succeeded", 0), ("queued", 0), ("running", 0), ("dead", 4)])
+@pytest.mark.parametrize(
+    ("status", "code"),
+    [("succeeded", 0), ("queued", 0), ("running", 0), ("dead", 4), ("collected", 2), ("purged", 2)],
+)
 def test_import_status_skips_conversion(tmp_path: Path, status: str, code: int) -> None:
     spawn = FakeSpawn()
     got, _, err = run(tmp_path, FakeRunner(import_status=status), spawn)
     assert got == code and spawn.started == []
     if status == "dead":
         assert "import_dead" in err and "--requeue" in err
+    if status in ("collected", "purged"):  # FR-INGEST-12 revised: returns only with the next converter revision
+        assert status in err
 
 
 def test_unhealthy_stack_stops_before_conversion(tmp_path: Path) -> None:
