@@ -107,10 +107,11 @@ check "POST without Origin is refused (403)" test "$("${CURL[@]}" -o /dev/null -
 section "Hardening and secrets (ADR-0026)"
 check "postgres runs as 999 with a read-only root" \
   test "$(docker inspect -f '{{.Config.User}} {{.HostConfig.ReadonlyRootfs}}' "$(dc ps -q postgres)")" = "999:999 true"
-servers_hardened() { local s; for s in api worker worker-judge; do
+servers_hardened() { local s; for s in "$@"; do
   [[ "$(docker inspect -f '{{.Config.User}} {{.HostConfig.ReadonlyRootfs}} {{.HostConfig.CapDrop}}' "$(dc ps -q "$s")")" == "10001:10001 true [ALL]" ]] || return 1
   done; }
-check "api, worker and worker-judge run as 10001, read-only, cap-drop ALL" servers_hardened
+check "api and worker run as 10001, read-only, cap-drop ALL" servers_hardened api worker
+check "worker-judge runs as 10001, read-only, cap-drop ALL" servers_hardened worker-judge
 
 # --- Judge lane (ADR-0039 B7b, OPS-DEPLOY FR-DEPLOY-16, INV-DEPLOY-11) ---------------------------------------------
 lane_healthy() { [[ "$(health_of worker-judge)" == healthy ]]; }
