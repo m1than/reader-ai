@@ -521,13 +521,23 @@ review: "draft 2026-11-22. deep-reviewer round 1 (bfb7047): changes — B1 think
 # FR-TUTOR-2's GETs omit cleared rows (the single GET answers 404); the question text CHECK allows '' only when
 # `cleared_at` is set.
 
-# ---- ADR-0039 revision (V.kl-tutor-find), DRAFT, not approved. Pattern as SRV-SEARCH and SRV-INGEST: the texts below
+# ---- ADR-0039 revision (V.kl-tutor-find), approved by agent 2026-11-28 (deep-reviewer round 3, M1). Pattern as SRV-SEARCH and SRV-INGEST: the texts below
 # replace the approved texts of the revised ids only when promoted together with their Red tests (T5); until then
 # the approved texts above stay in force. Plan: docs/plans/adr-0039-execution.md, V.kl-tutor-find.
 kl_revision:
   task: V.kl-tutor-find
   adr: [ADR-0039, ADR-0008, ADR-0005, ADR-0010]
-  status: draft
+  round_1: "deep-reviewer (Fable) on 3e225f3: changes, 6 blocking (P1 threshold g >= 39.4; M1 variants (a)-(d); M1 gates promotion, P1 gates done; judge ship condition (c), no judge_ctx; SRV-INGEST active_span_rows; NFC length and traceability; no quote_sha256 beside a legacy id), applied in 3b564b8"
+  round_2: "deep-reviewer (Fable) on 3b564b8/f0d2fa5: changes, 1 blocking, applied in 19bb784"
+  round_3: "deep-reviewer (Fable) on 19bb784: VERDICT approve; its two nits applied in 1ca4321 (progress note; INV-TUTOR-2's Hypothesis case at the check-function level)"
+  m1: "spikes/tutor-find-m1 (2026-11-28, 0 model calls): gold page in the sent sources (a) 21, (b) 28, (c) 28, (d) 28 of 40; mean L1 card cost 400.6 estimator tokens (about 25 cards in 10,500); the drop rule never bound for (c). Build threshold met (28 >= 21, >= 26); P1 threshold not met (28, not 40): P1 waits for the owner's explicit go"
+  status: approved
+  approved_by: agent
+  approved_at: 2026-11-28
+  promotion: >-
+    Approved as text after round 3 and M1's build threshold. Items move from proposed_* into requirements /
+    invariants / nfr / vectors (replacing the revised ids' approved text) only together with their Red tests (T5),
+    as SRV-SEARCH's revision did; proposed_owner_notes and proposed_defers join owner_notes and defers then.
   revised_ids: [FR-TUTOR-1, FR-TUTOR-3, FR-TUTOR-5, FR-TUTOR-8, INV-TUTOR-2, INV-TUTOR-4, NFR-TUTOR-1, NFR-TUTOR-2,
     NFR-TUTOR-3, VEC-TUTOR-1, VEC-TUTOR-7, VEC-TUTOR-8]
   new_ids: [FR-TUTOR-22, VEC-TUTOR-9]
@@ -555,7 +565,7 @@ kl_revision:
       conditional rates, 21/26 · g + 4/14 · (40 − g) ≥ 32 needs g ≥ 39.4 (g = 38 → 0.78, 39 → 0.795, 40 →
       0.808), so P1 runs only if variant (c) reaches **40 of 40**, or on the owner's explicit go; otherwise the
       task blocks for the owner with M1's table (a larger budget, variant (d), the judge, or the gate) once the
-      build is done. That block is the likely path: chunks reached 26 of 40. spikes/tutor-find/RESULT.md holds ids, counts and bytes only, never
+      build is done. That block is the likely path: chunks reached 26 of 40. spikes/tutor-find-m1/RESULT.md holds ids, counts and bytes only, never
       span text; its statistic is re-run against the Green function before P1. (M2, free) the [db] and [unit] Red
       tests below.
     paid: >-
