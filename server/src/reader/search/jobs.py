@@ -309,7 +309,8 @@ async def ensure_material(
         except JobError:
             log.info("search enqueue_skipped no_worker")
             return
-    if queue.catalog.get(KIND) is None:
+    catalog = getattr(queue, "catalog", None)  # a queue without this kind (or a test double) is skipped
+    if catalog is None or catalog.get(KIND) is None:
         return
     args = await current_args(conn, owner_id, material_sha256)
     if args is not None:

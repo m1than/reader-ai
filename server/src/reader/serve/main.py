@@ -80,9 +80,11 @@ def _settings(env: Env) -> Settings:
     except ConfigError as error:
         raise Failure(error.problems[0].code if error.problems else "config_invalid") from None
     try:
-        return settings_from_config(config)
+        settings = settings_from_config(config)
     except StartupError as error:
         raise Failure(error.code) from None
+    bind_policy(env.config)  # every role that reads its settings checks the retrieval policy too
+    return settings
 
 
 def bind_policy(config: Path | None = None) -> None:
@@ -171,7 +173,6 @@ def _serve_api(bind: str, env: Env) -> None:
 
     host, port = _bind(bind)
     settings = _settings(env)
-    bind_policy(env.config)
     target = _target(env)
 
     async def run() -> None:
@@ -222,7 +223,6 @@ def _serve_api(bind: str, env: Env) -> None:
 
 def _run_worker(env: Env, lane: str = "main") -> None:
     _settings(env)
-    bind_policy(env.config)
     target = _target(env)
     last_report = [-WORKER_ERROR_EVERY_S]
 

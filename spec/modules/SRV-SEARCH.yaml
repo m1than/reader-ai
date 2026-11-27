@@ -524,7 +524,8 @@ requirements:
       pattern — deviation from "checked at load twice" above. `policy.bind()` loads the policy, computes
       `policy_version` once and binds SRV-OBS `reader.obs.versions.POLICY` to `declared()`; `current()` returns the
       bound (policy, version), else computes them. The api and every worker lane call `bind()` at start before
-      serving (paired SRV-AUTH change in `reader.serve.main`): a `PolicyError` stops the start with
+      serving, inside `reader.serve.main`'s settings load (paired SRV-AUTH change; `bootstrap-link` loads the
+      settings too and so checks the policy as well): a `PolicyError` stops the start with
       `reader-server: policy_invalid` (or `config_unavailable` when the judge slots cannot be read). [unit]
       test_policy_unit.py.
   - id: FR-SEARCH-25   # ADR-0039 revision, promoted in phase 2 (unit 2)
