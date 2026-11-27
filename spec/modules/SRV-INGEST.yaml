@@ -1830,9 +1830,13 @@ requirements:
       kinds are declared in `reader.ingest.jobs.PACK_KINDS` (served once SRV-EVENTS' paired KIND_MODULES change
       takes them, with `ingest.gc`'s daily periodic entry). The seams to other modules are one declared record,
       `reader.ingest.gc.Seams` (`SEAMS[0]` is the production binding; tests pass doubles): `forget_pack` and
-      `forget_overlay` are SRV-AGENT's `reader.agent.judges` functions; SRV-SEARCH's `forget_overlay` and
-      `forget_legacy` are no-ops until SRV-SEARCH's revision binds them (its legacy `search_chunks` rows carry no
-      foreign key, so the ingest's rows stay until then); **`cited` fails closed**: until SRV-LESSON's
+      `forget_overlay` are SRV-AGENT's `reader.agent.judges` functions; `search_forget_legacy` is SRV-SEARCH's
+      `reader.search.store.forget_legacy` (FR-SEARCH-21, paired; code review of unit B, blocking 1), so a collected
+      or purged pack's legacy chunk text goes in the same transaction; SRV-SEARCH's `forget_overlay` is not bound yet
+      and **fails closed**: a delete that reaches a `vectors` overlay through an unbound text-holding seam raises
+      `seam_unbound` and rolls back, so no pack or overlay is marked collected or purged while its text stays (no
+      vector overlay exists before SRV-SEARCH's embed revision, which binds the seam); **`cited` fails closed**:
+      until SRV-LESSON's
       `revision_packs` and SRV-KB's findings bind it, every pack counts as cited, so the GC collects lone overlays
       but no pack (a collected pack can never be rebuilt under its id, FR-INGEST-35). The deleter takes the bounds as
       parameters (`keep_entries` ≥ 1, `age_floor_days`, `now`), the job passes the initial values and the clock.
@@ -1879,6 +1883,13 @@ requirements:
       **Green, stated:** the route answers 202 `{pack_id, enqueued}` (`enqueued` false when the key already exists),
       503 `unavailable` when the api holds no job runtime, 400 `bad_request` for a body other than `{confirm}`; a
       deleted material's packs are listed and purgeable.
+      **Code review of unit B (2026-11-27), stated:** (1) purge removes the pack's search text: the production
+      `search_forget_legacy` seam is SRV-SEARCH's `forget_legacy` (FR-SEARCH-21), and a purge that would reach an
+      unbound text-holding seam (SRV-SEARCH's `forget_overlay` for a `vectors` overlay) raises `seam_unbound`, rolls
+      back and leaves `purged_at` null (the job ends dead; a second request requeues it once the seam is bound).
+      [db] test_purge_db.py (production seams): purge of an r2 pack with legacy search rows leaves 0 `search_chunks`
+      and 0 `search_embeds` rows of its ingest and another pack's rows unchanged; with a `vectors` overlay on the
+      pack, purge raises `seam_unbound` and spans, search rows and `purged_at` are unchanged.
       [db] test_purge_db.py (Seams doubles): purge of an active pack → one entry without it; spans, outline,
       overlays and their rows gone, forget_pack, judge_inputs and judge_requests seams called with the pack id;
       purge of a migrated r2 pack calls search forget_legacy once with its ingest id; ingests and base_packs rows

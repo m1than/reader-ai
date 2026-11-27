@@ -9,11 +9,12 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from sqlalchemy import text
 
 from .conftest import MATERIAL_SHA, Pg, World, client, need, world
 from .test_gc_db import Calls, pack, plan_and_report, rows_of
 from .test_manage_db import add_owner
-from .test_overlays_db import activate
+from .test_overlays_db import activate, vectors
 from .test_seqmap_db import R2, R3, sha_of
 from .test_spanref_db import loc, q, states
 
@@ -77,6 +78,56 @@ async def test_purge_ignores_citations_and_deletes_the_pending_row(pg: Pg, tmp_p
         assert await w.scalar("SELECT count(*) FROM pending_activations WHERE pack_id = :p", p=r3) == 0
         assert (await rows_of(w, r3))["spans"] == 0
         assert await head_packs(w) == head  # not active: no entry appended
+
+
+async def search_rows(w: World, pid: str, chunks: int = 2) -> Any:
+    """Legacy search rows (SRV-SEARCH's tables) of the pack's ingest; returns the ingest id."""
+    ingest = await w.scalar("SELECT ingest_id FROM base_packs WHERE pack_id = :p", p=pid)
+    sha = await w.scalar("SELECT material_sha256 FROM base_packs WHERE pack_id = :p", p=pid)
+    async with w.engine.begin() as conn:
+        for chunk_no in range(chunks):
+            await conn.execute(text(
+                "INSERT INTO search_chunks (owner_id, ingest_id, material_sha256, model, params_sha256,"
+                " fts_config, page, chunk_no, char_start, char_stop, span_seqs, primary_seq, text, embedding)"
+                " VALUES (:o, :i, :s, 'm', :p, 'russian', 1, :n, 0, 1, '{0}', 0, 'canary text',"
+                " array_fill(0.0::real, ARRAY[1024])::vector)"),
+                {"o": w.users["ivan"], "i": ingest, "s": sha, "p": "e" * 64, "n": chunk_no})
+        await conn.execute(text(
+            "INSERT INTO search_embeds (owner_id, ingest_id, model, params_sha256, chunk_count)"
+            " VALUES (:o, :i, 'm', :p, :n)"), {"o": w.users["ivan"], "i": ingest, "p": "e" * 64, "n": chunks})
+    return ingest
+
+
+async def search_count(w: World, ingest: Any) -> tuple[int, int]:
+    return (await w.scalar("SELECT count(*) FROM search_chunks WHERE ingest_id = :i", i=ingest),
+            await w.scalar("SELECT count(*) FROM search_embeds WHERE ingest_id = :i", i=ingest))
+
+
+async def test_production_seams_purge_an_r2_packs_search_text(pg: Pg, tmp_path: Path) -> None:
+    gc = need("reader.ingest.gc")
+    async with world(pg, tmp_path) as w:
+        purged = await pack(w, sha_of("legacy with chunks"), R2)
+        kept = await pack(w, sha_of("another book"), R2)
+        ingest, other = await search_rows(w, purged), await search_rows(w, kept)
+        async with w.engine.begin() as conn:
+            assert await gc.purge(conn, w.users["ivan"], purged, gc.SEAMS[0]) is True
+        assert await search_count(w, ingest) == (0, 0)
+        assert await search_count(w, other) == (2, 1)
+        assert await w.scalar("SELECT purged_at IS NOT NULL FROM base_packs WHERE pack_id = :p", p=purged)
+
+
+async def test_purge_refuses_while_a_text_seam_is_unbound(pg: Pg, tmp_path: Path) -> None:
+    gc = need("reader.ingest.gc")
+    async with world(pg, tmp_path) as w:
+        pid = await pack(w, sha_of("with vectors"), R2)
+        ingest = await search_rows(w, pid)
+        async with w.engine.begin() as conn:
+            await vectors(conn, w.users["ivan"], pid)  # SRV-SEARCH's forget_overlay is not bound yet
+        with pytest.raises(gc.SeamUnbound):
+            async with w.engine.begin() as conn:
+                await gc.purge(conn, w.users["ivan"], pid, gc.SEAMS[0])
+        assert await w.scalar("SELECT purged_at FROM base_packs WHERE pack_id = :p", p=pid) is None
+        assert (await rows_of(w, pid))["spans"] == 3 and await search_count(w, ingest) == (2, 1)
 
 
 async def test_the_routes(pg: Pg, tmp_path: Path) -> None:

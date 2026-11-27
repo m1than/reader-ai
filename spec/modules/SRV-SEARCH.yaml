@@ -348,6 +348,16 @@ requirements:
       hit is in material A: after A is deleted the hit is gone and B's results are unchanged; the material filter
       on A → 404; after restore the first result set returns exactly; no row of search_chunks or search_embeds
       changed across the cycle.
+  - id: FR-SEARCH-21   # paired change for SRV-INGEST FR-INGEST-44, -45 (V.kl-ingest-packs, ADR-0039 P6)
+    text: >-
+      **Forgetting a legacy ingest.** `reader.search.store.forget_legacy(conn, owner_id, ingest_id)` deletes the
+      owner's `search_chunks` and `search_embeds` rows of that ingest on the caller's connection and returns the
+      number of rows deleted; it never commits. SRV-INGEST's GC and owner purge call it in the transaction that
+      collects or purges the ingest's pack (under the pack's lock), so a purged pack leaves no chunk text behind. It
+      lives in `store.py`, not in the package `__init__`, because the embed image carries that file and it must
+      import nothing (ADR-0028). Another owner's rows and other ingests' rows stay. [db] test_search_forget_db.py:
+      the call deletes exactly the owner's chunk and embed rows of that ingest and returns their count; a second
+      ingest of the same owner and a row of another owner stay; a second call deletes nothing.
 
 invariants:
   - id: INV-SEARCH-1
