@@ -1,6 +1,6 @@
 """The host command `reader-ingest` with fake subprocesses (SRV-INGEST FR-INGEST-1..4, -16; INV-INGEST-2, -5).
 
-@trace FR-INGEST-1 FR-INGEST-2 FR-INGEST-3 FR-INGEST-4 FR-INGEST-16 INV-INGEST-2 INV-INGEST-5
+@trace FR-INGEST-1 FR-INGEST-2 FR-INGEST-3 FR-INGEST-4 FR-INGEST-16 INV-INGEST-2 INV-INGEST-5 FR-INGEST-41
 """
 
 from __future__ import annotations
@@ -54,6 +54,8 @@ class FakeRunner:
     receive_out: bytes = b'{"result":"queued","artifact_id":"x"}'
     receive_exit: int = 0
     containers: str = CONTAINER
+    migrate_exit: int = 0
+    migrate_out: bytes = b'{"result":"migrated","rows":{}}'
     calls: list[tuple[list[str], dict[str, str], bytes | None]] = field(default_factory=list)
 
     def run(
@@ -81,6 +83,8 @@ class FakeRunner:
             return self.receive_exit, self.receive_out
         if "reader.ingest.requeue" in joined:
             return 0, b'{"result":"queued"}'
+        if "reader.ingest.migrate_citations" in joined:
+            return self.migrate_exit, self.migrate_out
         raise AssertionError(f"unexpected command {argv}")
 
 
@@ -385,6 +389,26 @@ def test_requeue_runs_without_conversion(tmp_path: Path) -> None:
     assert got == 0, err
     assert spawn.started == []
     assert any("reader.ingest.requeue" in " ".join(c[0]) for c in runner.calls)
+
+
+def test_migrate_citations_runs_the_health_check_then_the_command(tmp_path: Path) -> None:
+    """FR-INGEST-41: the health check, then exactly the in-container command; exit 4 maps to `unmapped`."""
+    cli = need("reader.ingest.host.cli")
+    argv = ["--migrate-citations", "--config", str(config(tmp_path))]
+    for exit_code, body, want, code_text in ((0, b'{"result":"migrated","rows":{"t":2}}', 0, ""),
+                                             (4, b'{"result":"unmapped","unmapped":{}}', 4, "unmapped")):
+        runner, spawn = FakeRunner(migrate_exit=exit_code, migrate_out=body), FakeSpawn()
+        err = io.StringIO()
+        assert cli.ingest(argv, deps(runner, spawn, None), io.StringIO(), err) == want
+        assert code_text in err.getvalue()
+        assert spawn.started == []
+        assert runner.calls[0][0][-2:] == ["status", "--json"]
+        execs = [c[0] for c in runner.calls if c[0][:2] == ["docker", "exec"]]
+        assert execs == [["docker", "exec", "-i", CONTAINER, "python", "-I", "-m",
+                          "reader.ingest.migrate_citations"]]
+    runner = FakeRunner(status_exit=1)
+    assert cli.ingest(argv, deps(runner, FakeSpawn(), None), io.StringIO(), io.StringIO()) == 3
+    assert not any("migrate_citations" in " ".join(c[0]) for c in runner.calls)
 
 
 # ---- INV-INGEST-5 (unit): nothing from the child reaches the terminal ----

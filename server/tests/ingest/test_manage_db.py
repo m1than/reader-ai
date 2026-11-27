@@ -578,6 +578,22 @@ async def test_a_delete_restore_cycle_removes_no_row_and_no_file(pg: Pg, tmp_pat
         assert blob_listing(w.blobs) == files_before
 
 
+async def test_a_delete_restore_cycle_appends_two_manifest_entries(pg: Pg, tmp_path: Path) -> None:
+    """FR-INGEST-31 revision 3: delete appends one entry, restore one, back to the same brain_version."""
+    from .test_overlays_db import activate
+    from .test_packs_db import imported as imported_pack
+
+    async with world(pg, tmp_path) as w:
+        await course_columns(w)
+        await activate(w, await imported_pack(w))
+        async with client(w) as c:
+            assert (await delete(c, SYN, {"confirm": SYN})).status_code == 200
+            assert (await c.post(f"/api/materials/{SYN}/restore", json={})).status_code == 200
+        rows = await w.rows("SELECT seq, brain_version, entry FROM manifest_entries ORDER BY seq")
+        assert [r[0] for r in rows] == [1, 2, 3]
+        assert rows[1][2]["packs"] == [] and rows[2][1] == rows[0][1]
+
+
 async def test_owner_only_matrix_over_the_four_routes(pg: Pg, tmp_path: Path) -> None:
     async with world(pg, tmp_path) as w:
         await course_columns(w)

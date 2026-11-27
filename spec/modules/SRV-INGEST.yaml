@@ -1189,6 +1189,14 @@ requirements:
       `"a"*39 + " t"`; reader.yaml materials with ids that are not slugs (`Bashir`, `bashir_4th`) renamed and
       deleted, each with its audit row. [unit] the lock walk: a set that grows between rounds is walked again in
       global order, and one that keeps changing is refused.
+      **Revision 3 (phase 2 unit 3):** a delete appends, in its transaction after the cascade's locks, one manifest
+      entry when the head names the material and none otherwise; a restore appends, in its transaction, one entry
+      for each pending activation of the material whose preconditions hold (FR-INGEST-39): one in the ordinary case
+      (the source comes back, P4); one more when a newer pack was waiting while the material was deleted (its newer
+      pack then replaces it); none when every pack of the material is gone or none was ever activated and none
+      waits. Deleted materials leave search because they leave the head entry. [db] test_manage_db.py: the
+      delete–restore cycle of an activated material leaves exactly two more manifest entries, the restored one with
+      the brain_version of the entry before the delete.
   - id: FR-INGEST-32
     text: >-
       **Tombstones only, and no live course on a deleted material.** No route of this amendment deletes a row of
@@ -1505,6 +1513,130 @@ requirements:
       without the material, and a delete of a material the head does not name appends none. The restore, rollback,
       anchors_missing and run-through cases need re-anchoring and the seq map and are tested with them (unit 4:
       test_manifest_db.py, test_gc_db.py, test_manage_db.py per FR-INGEST-31 revised).
+  # Phase 2 unit 3 (seq map, re-anchoring, resolver, citation rewrite, restore and rollback): FR-INGEST-40..43.
+  - id: FR-INGEST-40
+    text: >-
+      **Migration order, steps 1–3** (P2 migration order, owner decision 20).
+      (1) **Converter revision** `docling-2.151.1+r3`: artifact format `reader-ingest/2`, each span line adds
+      `locator` and `quote_sha256`, computed by FR-INGEST-33/-34 in the converter; receive and the import recompute
+      both from the page's spans and refuse a difference (`locator_mismatch`). FR-INGEST-5..9's output is otherwise
+      unchanged. (2) **Re-conversion** of the pilot (935 pages; 702 s and 4.36 GB peak measured on the host by
+      deep-reviewer round 1's run, 2026-11-26; 665 s in spikes/tutor-chunks) by `reader-ingest`, which converts again
+      when the material has no import under `CONVERTER_VERSION` (FR-INGEST-12 revised); not before the paired readers
+      of the header have landed (sequencing note). (3) **Seq-to-locator map:** the job `ingest.seqmap`
+      {owner_id, material_sha256, from_ingest_id, to_pack_id}, key [owner_id, from_ingest_id, to_pack_id], runs after
+      the new pack is sealed, only while the material has a legacy ingest (one imported before this revision) and no
+      `accepted` `seq_maps` row from it exists (one accepted map serves every later pack, FR-INGEST-39). It pairs spans
+      by `seq` and accepts the map only if both have the same span count and every pair has
+      the same page, the same kind and an unchanged `quote_sha256`. Accepted: one `seq_maps` row `accepted` and one
+      `span_seq_map` row per seq (seq → the new pack's locator and quote hash), in one transaction. Otherwise one
+      `seq_maps` row `refused` with the first mismatch (`count`, `page`, `kind` or `text` and the seq, never text),
+      no map rows, nothing activated, and the owner is notified (the task blocks, P2 (3)). An accept calls
+      `try_activate` for the new pack in the same transaction (FR-INGEST-39).
+      **The legacy ingest as a pack.** Migration `ingest_0004_packs` registers each existing `ingests` row as a sealed
+      base pack of its converter version (`docling-2.151.1+r2` parse config), backfilling `locator` and
+      `quote_sha256` from its stored rows (FR-INGEST-33 over stored data, so no re-conversion is needed for it), with
+      a profile overlay and one first manifest entry per owner naming that pack with its profile overlay only, so the
+      spans, outline and plan readers keep their material. Its locators are not the map: the map is proven against
+      the re-converted r3 pack only. The legacy chunk rows are **not** registered as a vector overlay (cross-spec
+      decision from the SRV-SEARCH review, 2026-11-26: SRV-SEARCH keeps a single read path, through vector overlays
+      only). Instead (option (a), coordinator 2026-11-26) **the legacy pack gets its own span-level vector overlay**
+      over its backfilled locators: SRV-SEARCH's `ensure` at worker start enqueues the embed for every pack in the
+      head entry without a vectors overlay, and its seal activates it through `try_activate` with no seq-map
+      precondition (the legacy pack is the map's source, FR-INGEST-39). So **every material, an r2 browser upload
+      included, is dark in search for one embed** after `ingest_0004_packs`: 26.8 min measured for the pilot
+      (spikes/retrieval-ablation RESULT.md, merged before promotion). The r3 pack later replaces it in one entry,
+      once its own vectors, its seq map and its anchors exist, with no second dark window. Declared to the owner in
+      `proposed_owner_notes` (note 8). Alembic revision `ingest_0004_packs` writes the packs, profile overlays and
+      first entries and depends on no `search` revision.
+      **Green (unit 3), stated:** the map's refusal reason is stored as `<reason>:<seq>` (for `count`, the seq is the
+      shorter list's length, the first seq without a pair); the owner's notification is the log line
+      `ingest seqmap_refused <reason>:<seq>` plus the blocked task (P2 (3)), since no notification channel exists in
+      the worker. The import enqueues `ingest.seqmap` (and `ingest.reanchor` when another pack of the material is in
+      the head) **after its commit** (`reader.ingest.jobs.enqueue_followups`, from the import's `after_end`), so the
+      job never reads an uncommitted pack; the r3-format part (step 1) is built with unit 4 (converter r3).
+      [db] test_seqmap_db.py: VEC-INGEST-10's cases — identical re-conversion → accepted with one row per seq; one
+      span dropped (count), one span moved to the next page (page), a kind change (kind), one changed text (text) →
+      refused with that reason and seq, no map rows, no activation; a second run → `exists`; the kinds' keys, and the
+      follow-up enqueue of `ingest.seqmap` only while no map is accepted. The step-1 and migration tests come with
+      unit 4 (test_ingest_artifact.py, test_packs_db.py).
+  - id: FR-INGEST-41
+    text: >-
+      **Migration step 4: mutable citations** (P2 (4)). `python -I -m reader.ingest.migrate_citations` (run by
+      `reader-ingest --migrate-citations` after FR-INGEST-2's health check, as `--requeue` is) rewrites, in **one
+      transaction**, every legacy id `<sha>:<seq>` in the targets declared as data by their owning specs (today
+      SRV-TUTOR's `tutor_questions.answer` citations; no findings table exists yet, so findings get locator ids when
+      SRV-KB creates them) to the accepted map's locator, adding its `quote_sha256`. If any id has no accepted map
+      (no map for its material, or a seq outside it), the transaction rolls back, nothing changes, and it exits 4
+      `unmapped` with the count per material (never an id's text). Rows already in locator form are skipped, so a
+      second run changes nothing; one `citation_migrations` row per target records the run. Published lesson
+      revisions and freshness rows are not targets (steps 5 and 6).
+      **Deviation from P2 (4)'s wording, accepted by the owner** in the in-place amendment note on ADR-0039 P2 (4)
+      (2026-11-26): a one-shot command, not an Alembic migration, because migrations run at api start before the
+      worker can re-convert the material and build the map. Until the command has run, every reader accepts both id
+      forms through FR-INGEST-42, so the stack and search work with the command never run.
+      **Green (unit 3), stated:** a target is `reader.ingest.migrate_citations.Target(name, select_sql, update_sql)`:
+      the select returns (key, owner_id, document) rows locked FOR UPDATE, the document's `citations` list holds
+      `{span, …}` objects, and the update writes the document back by key. The declared targets are read from
+      SRV-TUTOR's `reader.tutor.citations.REWRITERS` (paired; an empty list until SRV-TUTOR declares it). The
+      `citation_migrations` row carries the instance owner. The never-run test through SRV-TUTOR's span load (the
+      planned `spans_by_ids` through `resolve` case) comes with that paired SRV-TUTOR change.
+      [db] test_migrate_citations_db.py (a declared test-double target): legacy ids with an accepted map → rewritten
+      with locator and quote_sha256 in one transaction; one unmapped material among the rows → exit 4 `unmapped`
+      with its count, no row changed; a second run → 0 rows; a canary span text never appears in the output or the
+      logs. [unit, fake runner] test_ingest_host.py: `--migrate-citations` runs the health check, then exactly the
+      in-container command, maps exit 4 to `unmapped`, and execs nothing when the stack is unhealthy.
+  - id: FR-INGEST-42
+    text: >-
+      **Migration step 5: read-time resolver** (P2 (5), P8). `reader.ingest.spanref.resolve(conn, owner_id, refs)`
+      maps each citation reference — a legacy id, or a locator with its `quote_sha256` — to `{locator, quote_sha256,
+      page, text | null, state}` and **never writes** (INV-LESSON-6: published revisions stay as they are; the next
+      compile writes locator ids). The function is **total**: every reference gets exactly one state, decided in this
+      order, and text is returned only from a span whose `quote_sha256` equals the reference's:
+      1. a malformed reference → `invalid`; a legacy id with no accepted `span_seq_map` row → `unmapped`; otherwise
+         the legacy id becomes that row's (locator, quote_sha256) and continues;
+      2. the material's active pack holds a span at that locator with that hash → `active`;
+      3. else follow `anchor_maps` hops from any pack of the owner where the locator had that hash: each hop's
+         `from_locator` and `quote_sha256` must equal the current (locator, hash), the next hop starts at its
+         `to_locator` with the target span's hash re-read and checked equal; a hop that is `orphaned`, a hash that
+         differs, or a cycle ends that chain; at most one hop per pack of the material per chain. All chains from all
+         starting packs are walked, and **any chain that reaches the active pack wins** → `reanchored` (text from the
+         active pack); different chains reaching different active spans cannot happen (one active pack, one span per
+         locator), and if they reach different locators the lowest locator in parse order is returned;
+      4. else a sealed pack of the owner, not collected or purged, that holds a span at that locator with that hash
+         (lowest pack id when several, a deterministic choice) → `inactive`, text from that pack;
+      5. else, when the material has at least one collected or purged pack of this owner → `removed` (text null;
+         locator and page stay displayable, P6): the cited span may have lived in it, and its rows are gone;
+      6. else → `orphaned`.
+      A reference to another owner's material is `unmapped` or `orphaned`, never served. Text is returned only to an
+      entitled caller (ADR-0039 B8) and only to the calling module, never logged.
+      [db] test_spanref_db.py: one ref per state (invalid, unmapped, active, reanchored over one and over two hops,
+      inactive, removed, orphaned) — `removed` only when the material has a collected or purged pack of this owner,
+      `orphaned` for the same ref before; a hop whose target hash differs stops that chain while a chain from
+      another starting pack still reaches the active pack; an anchor cycle terminates; a legacy id resolves through the map; the
+      resolver's transaction is assigned no transaction id (it writes nothing, so no lesson_revisions row or blob
+      changes); another owner's refs are never served.
+  - id: FR-INGEST-43
+    text: >-
+      **Re-anchoring** (P2 quote hash and re-anchoring, P8). The job `ingest.reanchor` {owner_id, from_pack_id,
+      to_pack_id}, key [owner_id, from_pack_id, to_pack_id], runs when a sealed pack is about to replace another pack
+      of the same material: activation of a new pack, a restore onto another pack, and a **rollback** to an earlier
+      manifest entry whose pack for the material differs from the head's (FR-INGEST-39); an existing `anchor_runs`
+      row for the pair is reused. For every span of the old pack it writes one `anchor_maps` row: the new
+      span on the **same page** with the **same quote_sha256** and the **same equal-hash ordinal** (FR-INGEST-34) →
+      `mapped`; if the number of spans with that hash on that page differs between the two packs, or there is none →
+      `orphaned` (never guessed). One transaction, ending with the pair's `anchor_runs` row and, as a job, a call to
+      `try_activate(conn, owner_id, to_pack_id)` in the same transaction; restore and rollback run the same function
+      inline in their own transaction instead (FR-INGEST-39). Rows belong to the target pack and are collected with it.
+      Counts (mapped, orphaned) are recorded in the job's result and trace, never texts. Mutable rows are not
+      rewritten by re-anchoring: every reader resolves through FR-INGEST-42, one rule for published and mutable
+      citations. Green (unit 3): the job takes `lock_packs` on both packs and the material's head pack in one call
+      before it reads (FR-INGEST-46), so its `try_activate` adds no smaller key.
+      [db] test_reanchor_db.py: VEC-INGEST-11's cases — unchanged pack → all mapped to equal locators; a span
+      inserted earlier on the page → mapped to shifted offsets; a repeated heading (two equal hashes) → mapped by
+      ordinal; three empty figures in the old pack and two in the new → all three orphaned; a span moved to another
+      page → orphaned; a second run reuses the anchor_runs row; the job ends with try_activate appending the waiting
+      pack. The rollback's reverse pair is tested in test_manifest_db.py.
   - id: FR-INGEST-46
     text: >-
       **Per-pack advisory locks** (ADR-0039 B7b; the lock contract of SRV-AGENT FR-AGENT-21 step 9).
@@ -1716,6 +1848,12 @@ invariants:
       values of an owner form 1..n with parent_seq = seq − 1; concurrent appenders never fork the chain. [db]
       test_manifest_db.py: 8 concurrent appenders with one parent → exactly one wins the round and the chain stays
       1..n; material_twice refused.
+  - id: INV-INGEST-15
+    text: >-
+      **The migration never guesses**: a map is accepted only when FR-INGEST-40's 1:1 rule holds; FR-INGEST-41
+      either rewrites every legacy id of every target or none; the resolver and re-anchoring write no citation-bearing
+      row of another module; re-anchoring orphans whenever equal-hash counts differ. [db] test_seqmap_db.py,
+      test_migrate_citations_db.py, test_spanref_db.py, test_reanchor_db.py.
 
 nfr:
   - id: NFR-INGEST-1
@@ -1836,6 +1974,12 @@ vectors:
   - id: VEC-INGEST-8
     source: "Locator cases written for this spec (synthetic text, no book text): pages, spans and expected locators per FR-INGEST-33, malformed ids with their refusal, non-PDF paths with their encodings, and outlines (with a skipped level, a leading level-2 entry and two roots) with their expected `sec:` paths; read by test_locator_unit.py."
     file: spec/fixtures/SRV-INGEST/locators.yaml
+  - id: VEC-INGEST-10
+    source: "Seq-map cases: an old and a new span list ([page, kind, text] with synthetic tokens, no book text; a span's quote_sha256 is its token's sha256) with the expected accept or the refusal reason and seq; read by test_seqmap_db.py."
+    file: spec/fixtures/SRV-INGEST/seqmap-cases.yaml
+  - id: VEC-INGEST-11
+    source: "Re-anchoring cases: old and new pages (synthetic tokens in reading order; locators per FR-INGEST-33, quote hashes their sha256) with the expected mapped target or orphaned per old span, including ties by ordinal and unequal counts; read by test_reanchor_db.py."
+    file: spec/fixtures/SRV-INGEST/reanchor-cases.yaml
 
 defers:
   - "Upload formats other than PDF, and a browser preview of the uploaded file (ADR-0029 keeps every parser out of the stack and the browser)."
@@ -2058,7 +2202,12 @@ proposed_requirements:
       - "add to test_facets_unit.py [unit]: every consumer resolves — a requirement id is declared in spec/modules/*.yaml or a view name is in manifest.VIEWS; every enabled facet's consumer resolves; `form` is disabled in the committed file"
       - "add to test_packs_db.py [db]: an import with the committed facets file writes no span_tags row"
       - "add to test_overlays_db.py [db]: a tag write with an unknown facet or value → tag_value_unknown, nothing written"
-  # FR-INGEST-39's planned tests not yet written (restore, rollback, run-through; with unit 4):
+  # FR-INGEST-39's planned tests. Written in unit 3 (server/tests/ingest/test_restore_db.py, a new file instead of
+  # growing test_manifest_db.py; test_manage_db.py for FR-INGEST-31): the run-through, delete while waiting then
+  # restore (with the one-call lock set), one seq map suffices with r3 mapped but never activated and restore skipping
+  # an older row, rollback dropping deleted materials, rollback re-anchoring inline with the reverse pair reused,
+  # restore of a collected last pack calling ensure, and restore of a never-activated material. Still planned: the
+  # restore-vs-GC and rollback-vs-gc_overlay races (unit 5, test_gc_db.py) and prefix_mismatch (conditional).
   - id: FR-INGEST-39-tests
     tests_planned:
       - "add to test_manifest_db.py [db]: import (request_activation {profile}) → embed seal (request_activation {vectors}, try_activate) → one entry naming the pack with exactly that profile id and that vectors id; a tags reconcile switches only tags and keeps the head's vectors id; two sealed vector overlays where the older is named → the older is activated (no sealed_at choice); try_activate twice → one entry, the second no_change; a replacing pack with no sealed vectors → vectors_missing, nothing appended, the head unchanged; delete → one entry without it; restore → one entry with the same pack and overlays and the same brain_version as before the delete; restore with a pending row that already desires a newer vectors id keeps that id (merge under); restore of a never-activated material with no pending row appends nothing"
@@ -2070,112 +2219,13 @@ proposed_requirements:
       - "add to test_manifest_db.py [db]: try_activate whose append loses the CAS on every retry (a concurrent appender held at the unique key) stores manifest_conflict and keeps the row; the worker-start sweep then appends it; rollback and restore onto another pack with no anchor_runs row re-anchor inline and append in one transaction, the rollback's lock set taken in its first call"
       - "add to test_gc_db.py [db]: restore racing GC of the same pack (two connections, the GC holding the pack lock first) → GC collects and the restore appends nothing for it, its pending row waiting with pack_collected, or the restore commits first and GC keeps the pack; never an entry naming a collected pack; and a rollback racing `ingest.gc_overlay` of an overlay the rolled-back entry names (pack unchanged, overlay id differs from the head's) → the same two outcomes, never an entry naming a collected overlay"
       - "change server/tests/ingest/test_manage_db.py [db] (FR-INGEST-31 revised): the delete–restore cycle also asserts exactly two manifest entries and the restored brain_version"
-  - id: FR-INGEST-40
-    text: >-
-      **Migration order, steps 1–3** (P2 migration order, owner decision 20).
-      (1) **Converter revision** `docling-2.151.1+r3`: artifact format `reader-ingest/2`, each span line adds
-      `locator` and `quote_sha256`, computed by FR-INGEST-33/-34 in the converter; receive and the import recompute
-      both from the page's spans and refuse a difference (`locator_mismatch`). FR-INGEST-5..9's output is otherwise
-      unchanged. (2) **Re-conversion** of the pilot (935 pages; 702 s and 4.36 GB peak measured on the host by
-      deep-reviewer round 1's run, 2026-11-26; 665 s in spikes/tutor-chunks) by `reader-ingest`, which converts again
-      when the material has no import under `CONVERTER_VERSION` (FR-INGEST-12 revised); not before the paired readers
-      of the header have landed (sequencing note). (3) **Seq-to-locator map:** the job `ingest.seqmap`
-      {owner_id, material_sha256, from_ingest_id, to_pack_id}, key [owner_id, from_ingest_id, to_pack_id], runs after
-      the new pack is sealed, only while the material has a legacy ingest (one imported before this revision) and no
-      `accepted` `seq_maps` row from it exists (one accepted map serves every later pack, FR-INGEST-39). It pairs spans
-      by `seq` and accepts the map only if both have the same span count and every pair has
-      the same page, the same kind and an unchanged `quote_sha256`. Accepted: one `seq_maps` row `accepted` and one
-      `span_seq_map` row per seq (seq → the new pack's locator and quote hash), in one transaction. Otherwise one
-      `seq_maps` row `refused` with the first mismatch (`count`, `page`, `kind` or `text` and the seq, never text),
-      no map rows, nothing activated, and the owner is notified (the task blocks, P2 (3)). An accept calls
-      `try_activate` for the new pack in the same transaction (FR-INGEST-39).
-      **The legacy ingest as a pack.** Migration `ingest_0004_packs` registers each existing `ingests` row as a sealed
-      base pack of its converter version (`docling-2.151.1+r2` parse config), backfilling `locator` and
-      `quote_sha256` from its stored rows (FR-INGEST-33 over stored data, so no re-conversion is needed for it), with
-      a profile overlay and one first manifest entry per owner naming that pack with its profile overlay only, so the
-      spans, outline and plan readers keep their material. Its locators are not the map: the map is proven against
-      the re-converted r3 pack only. The legacy chunk rows are **not** registered as a vector overlay (cross-spec
-      decision from the SRV-SEARCH review, 2026-11-26: SRV-SEARCH keeps a single read path, through vector overlays
-      only). Instead (option (a), coordinator 2026-11-26) **the legacy pack gets its own span-level vector overlay**
-      over its backfilled locators: SRV-SEARCH's `ensure` at worker start enqueues the embed for every pack in the
-      head entry without a vectors overlay, and its seal activates it through `try_activate` with no seq-map
-      precondition (the legacy pack is the map's source, FR-INGEST-39). So **every material, an r2 browser upload
-      included, is dark in search for one embed** after `ingest_0004_packs`: 26.8 min measured for the pilot
-      (spikes/retrieval-ablation RESULT.md, merged before promotion). The r3 pack later replaces it in one entry,
-      once its own vectors, its seq map and its anchors exist, with no second dark window. Declared to the owner in
-      `proposed_owner_notes` (note 8). Alembic revision `ingest_0004_packs` writes the packs, profile overlays and
-      first entries and depends on no `search` revision.
+  # FR-INGEST-40..43 are promoted into `requirements` (phase 2, unit 3). Still planned there for unit 4: FR-INGEST-40
+  # step 1's artifact tests and the migration tests below.
+  - id: FR-INGEST-40-unit4-tests
     tests_planned:
       - "change server/tests/ingest/test_ingest_artifact.py [unit] (FR-INGEST-10, INV-INGEST-1 revised): format reader-ingest/2; a span with a wrong locator, a wrong quote_sha256, or a locator of another page → locator_mismatch; r2 artifacts refused as `version_mismatch` by an r3 receive"
-      - "add server/tests/ingest/test_seqmap_db.py [db]: VEC-INGEST-10's cases — identical re-conversion → accepted with one row per seq; one span dropped (count), one span moved to the next page (page), a kind change (kind), one changed text (text) → refused with that reason and seq, no map rows, no activation"
-      - "add to test_packs_db.py [db]: migration ingest_0004 on a database holding an r2 ingest → one sealed pack with locators equal to FR-INGEST-33 over its rows, one manifest entry naming the pack with its profile overlay only and no vectors overlay; downgrade drops only the new tables and columns"
       - "add to test_packs_db.py [db]: an r2 material imported by browser upload (an uploads row in `received`, its ingest under r2) → after ingest_0004 a sealed legacy pack in the first entry; the (fake) embed of its span-level overlay seals and try_activate appends one entry naming that vectors overlay with no seq map; search over it is empty before and returns its spans after"
-  - id: FR-INGEST-41
-    text: >-
-      **Migration step 4: mutable citations** (P2 (4)). `python -I -m reader.ingest.migrate_citations` (run by
-      `reader-ingest --migrate-citations` after FR-INGEST-2's health check, as `--requeue` is) rewrites, in **one
-      transaction**, every legacy id `<sha>:<seq>` in the targets declared as data by their owning specs (today
-      SRV-TUTOR's `tutor_questions.answer` citations; no findings table exists yet, so findings get locator ids when
-      SRV-KB creates them) to the accepted map's locator, adding its `quote_sha256`. If any id has no accepted map
-      (no map for its material, or a seq outside it), the transaction rolls back, nothing changes, and it exits 4
-      `unmapped` with the count per material (never an id's text). Rows already in locator form are skipped, so a
-      second run changes nothing; one `citation_migrations` row per target records the run. Published lesson
-      revisions and freshness rows are not targets (steps 5 and 6).
-      **Deviation from P2 (4)'s wording, for the owner:** P2 says "one Alembic migration". Migrations run at api
-      start before the worker serves jobs (`reader.db.migrate`, `wait_for_heads`), and the map exists only after the
-      re-conversion, which needs a running worker; an Alembic revision that refuses when the map is missing would
-      therefore stop the stack before the map could ever be built. The command keeps the rule (one transaction,
-      refuses to finish on any unmapped id) and runs when the map exists. **This item is not promoted until the owner
-      has added an in-place amendment note to ADR-0039 P2 (4)** (ADR-0039 A2's exception) or chosen otherwise.
-      Until the command has run, every reader accepts both id forms through FR-INGEST-42, so the stack and search
-      work with the command never run.
-    tests_planned:
-      - "add to test_spanref_db.py [db]: with tutor rows still holding legacy ids and the command never run, the tutor's span load (spans_by_ids through resolve) and search return the same spans and results as after the command"
-      - "add server/tests/ingest/test_migrate_citations_db.py [db]: tutor rows with legacy ids and an accepted map → rewritten with locator and quote_sha256 in one transaction; one unmapped id among many → exit 4 unmapped, no row changed; second run → 0 rows; the canary text of a span never appears in its output or logs"
-      - "add to test_ingest_host.py [unit, fake runner]: `--migrate-citations` runs the health check, then exactly the in-container command, and maps exit 4 to `unmapped`"
-  - id: FR-INGEST-42
-    text: >-
-      **Migration step 5: read-time resolver** (P2 (5), P8). `reader.ingest.spanref.resolve(conn, owner_id, refs)`
-      maps each citation reference — a legacy id, or a locator with its `quote_sha256` — to `{locator, quote_sha256,
-      page, text | null, state}` and **never writes** (INV-LESSON-6: published revisions stay as they are; the next
-      compile writes locator ids). The function is **total**: every reference gets exactly one state, decided in this
-      order, and text is returned only from a span whose `quote_sha256` equals the reference's:
-      1. a malformed reference → `invalid`; a legacy id with no accepted `span_seq_map` row → `unmapped`; otherwise
-         the legacy id becomes that row's (locator, quote_sha256) and continues;
-      2. the material's active pack holds a span at that locator with that hash → `active`;
-      3. else follow `anchor_maps` hops from any pack of the owner where the locator had that hash: each hop's
-         `from_locator` and `quote_sha256` must equal the current (locator, hash), the next hop starts at its
-         `to_locator` with the target span's hash re-read and checked equal; a hop that is `orphaned`, a hash that
-         differs, or a cycle ends that chain; at most one hop per pack of the material per chain. All chains from all
-         starting packs are walked, and **any chain that reaches the active pack wins** → `reanchored` (text from the
-         active pack); different chains reaching different active spans cannot happen (one active pack, one span per
-         locator), and if they reach different locators the lowest locator in parse order is returned;
-      4. else a sealed pack of the owner, not collected or purged, that holds a span at that locator with that hash
-         (lowest pack id when several, a deterministic choice) → `inactive`, text from that pack;
-      5. else, when the material has at least one collected or purged pack of this owner → `removed` (text null;
-         locator and page stay displayable, P6): the cited span may have lived in it, and its rows are gone;
-      6. else → `orphaned`.
-      A reference to another owner's material is `unmapped` or `orphaned`, never served. Text is returned only to an
-      entitled caller (ADR-0039 B8) and only to the calling module, never logged.
-    tests_planned:
-      - "add server/tests/ingest/test_spanref_db.py [db]: one ref per state (invalid, unmapped, active, reanchored over one and over two hops, inactive, removed, orphaned) — `removed` only when the material has a collected or purged pack of this owner and no active, anchored or inactive span matches, `orphaned` for the same ref when no pack of the material is collected or purged; a hop whose target hash differs stops that chain while another chain from a second starting pack still reaches the active pack (reanchored); an anchor cycle terminates; a legacy id resolves through the map and no lesson_revisions row or blob changes (row count and blob listing before and after); another owner's ref is never served"
-  - id: FR-INGEST-43
-    text: >-
-      **Re-anchoring** (P2 quote hash and re-anchoring, P8). The job `ingest.reanchor` {owner_id, from_pack_id,
-      to_pack_id}, key [owner_id, from_pack_id, to_pack_id], runs when a sealed pack is about to replace another pack
-      of the same material: activation of a new pack, a restore onto another pack, and a **rollback** to an earlier
-      manifest entry whose pack for the material differs from the head's (FR-INGEST-39); an existing `anchor_runs`
-      row for the pair is reused. For every span of the old pack it writes one `anchor_maps` row: the new
-      span on the **same page** with the **same quote_sha256** and the **same equal-hash ordinal** (FR-INGEST-34) →
-      `mapped`; if the number of spans with that hash on that page differs between the two packs, or there is none →
-      `orphaned` (never guessed). One transaction, ending with the pair's `anchor_runs` row and, as a job, a call to
-      `try_activate(conn, owner_id, to_pack_id)` in the same transaction; restore and rollback run the same function
-      inline in their own transaction instead (FR-INGEST-39). Rows belong to the target pack and are collected with it.
-      Counts
-      (mapped, orphaned) are recorded in the job's result and trace, never texts. Mutable rows are not rewritten by
-      re-anchoring: every reader resolves through FR-INGEST-42, one rule for published and mutable citations.
-    tests_planned:
-      - "add server/tests/ingest/test_reanchor_db.py [db]: VEC-INGEST-11's cases — unchanged pack → all mapped to equal locators; a span inserted earlier on the page → mapped to shifted offsets; a repeated heading (two equal hashes) → mapped by ordinal; three empty figures in the old pack and two in the new → all three orphaned; a span moved to another page → orphaned; a rollback onto the old pack runs the reverse pair once and a second rollback reuses its anchor_runs row"
+      - "add to test_spanref_db.py [db] (with the paired SRV-TUTOR change): with tutor rows still holding legacy ids and the command never run, the tutor's span load (spans_by_ids through resolve) and search return the same spans and results as after the command"
   - id: FR-INGEST-44
     text: >-
       **Garbage collection** (P6), background only, never by a route. The scanner job `ingest.gc` {slot}, key
@@ -2349,16 +2399,7 @@ proposed_revisions:
       form is never issued and is resolved only by FR-INGEST-42; there is no frozen converter version.
     tests_planned:
       - "change test_ingest_db.py [db]: no route returns a legacy id; the frozen-version cases are replaced by FR-INGEST-35's two-pack case"
-  - id: FR-INGEST-31
-    text: >-
-      As approved, plus: a delete appends, in its transaction after the cascade's locks, one manifest entry when the
-      head names the material and none otherwise; a restore appends, in its transaction, one entry for each pending
-      activation of the material whose preconditions hold (FR-INGEST-39): one in the ordinary case (the source
-      comes back, P4); one more when a newer pack was waiting while the material was deleted (its newer pack then
-      replaces it); none when every pack of the material is gone or none was ever activated and none waits. Deleted
-      materials leave search because they leave the head entry.
-    tests_planned:
-      - "change test_manage_db.py [db]: see FR-INGEST-39"
+  # FR-INGEST-31's revision is applied in `requirements` (phase 2, unit 3).
   - id: FR-INGEST-32
     text: >-
       **No live course on a deleted material** (unchanged), and **routes delete nothing**: no route deletes a row of
@@ -2457,13 +2498,7 @@ proposed_invariants:
       DELETE of pack data runs in a transaction that holds the pack's lock and set `reader.pack_delete`. [unit, db]
     tests_planned:
       - "add to test_gc_db.py: the import-graph and source-scan test; a DELETE without the setting refused"
-  - id: INV-INGEST-15
-    text: >-
-      **The migration never guesses**: a map is accepted only when FR-INGEST-40's 1:1 rule holds; FR-INGEST-41
-      either rewrites every legacy id of every target or none; the resolver and re-anchoring write no citation-bearing
-      row of another module; re-anchoring orphans whenever equal-hash counts differ. [db]
-    tests_planned:
-      - "test_seqmap_db.py, test_migrate_citations_db.py, test_spanref_db.py, test_reanchor_db.py"
+  # INV-INGEST-15 is promoted into `invariants` (phase 2, unit 3).
   - id: INV-INGEST-16
     text: >-
       **Every read goes through the active view** (P5). No module of `reader.*` outside `reader.ingest` names the
@@ -2482,16 +2517,7 @@ proposed_vectors:
     file: spec/fixtures/SRV-INGEST/facets-cases.yaml
     tests_planned:
       - "test_facets_unit.py reads it"
-  - id: VEC-INGEST-10
-    source: "Seq-map cases: an old and a new span list (page, kind, quote_sha256 only) with the expected accept or the refusal reason and seq."
-    file: spec/fixtures/SRV-INGEST/seqmap-cases.yaml
-    tests_planned:
-      - "test_seqmap_db.py reads it"
-  - id: VEC-INGEST-11
-    source: "Re-anchoring cases: old and new pages (locator, quote_sha256, order) with the expected mapped or orphaned row per old span, including ties by ordinal and unequal counts."
-    file: spec/fixtures/SRV-INGEST/reanchor-cases.yaml
-    tests_planned:
-      - "test_reanchor_db.py reads it"
+  # VEC-INGEST-10 and -11 are promoted into `vectors` (phase 2, unit 3).
 
 proposed_defers:
   remove:

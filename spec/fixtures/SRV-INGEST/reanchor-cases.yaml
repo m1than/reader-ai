@@ -1,0 +1,25 @@
+# VEC-INGEST-11 (SRV-INGEST FR-INGEST-43): re-anchoring cases. Synthetic tokens only (no book text). `old` and
+# `new` list each page's span texts in reading order (an empty string is an empty figure span); a span's
+# quote_sha256 is the sha256 of its token and its locator follows FR-INGEST-33. `expect` gives, per old span in
+# reading order, the index of the new span it maps to (reading order over all new pages), or null for orphaned.
+cases:
+  - name: unchanged pack
+    old: {1: ["A", "B"], 2: ["C"]}
+    new: {1: ["A", "B"], 2: ["C"]}
+    expect: [0, 1, 2]
+  - name: a span inserted earlier on the page
+    old: {1: ["A", "B"]}
+    new: {1: ["X", "A", "B"]}
+    expect: [1, 2]
+  - name: a repeated heading, mapped by ordinal
+    old: {1: ["H", "t", "H"]}
+    new: {1: ["H", "u", "H"]}
+    expect: [0, null, 2]
+  - name: three empty figures in the old pack and two in the new
+    old: {1: ["", "", "", "z"]}
+    new: {1: ["", "", "z"]}
+    expect: [null, null, null, 2]
+  - name: a span moved to another page
+    old: {1: ["A"], 2: ["B"]}
+    new: {1: ["A", "B"], 2: ["C"]}
+    expect: [0, null]

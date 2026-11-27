@@ -1,0 +1,50 @@
+# VEC-INGEST-10 (SRV-INGEST FR-INGEST-40): seq-map cases. Synthetic tokens only (no book text): each span is
+# [page, kind, text]; its quote_sha256 is the sha256 of the token. `old` is the legacy ingest in seq order, `new`
+# the re-converted pack. `expect` is `accepted`, or the first mismatch's reason and seq (for `count`: the first seq
+# without a pair, i.e. the shorter list's length).
+base: &base
+  - [1, heading, "H1"]
+  - [1, text, "alpha"]
+  - [1, text, "beta"]
+  - [2, figure, ""]
+  - [2, text, "gamma"]
+cases:
+  - name: identical re-conversion
+    old: *base
+    new: *base
+    expect: accepted
+  - name: one span dropped
+    old: *base
+    new:
+      - [1, heading, "H1"]
+      - [1, text, "alpha"]
+      - [1, text, "beta"]
+      - [2, figure, ""]
+    expect: {reason: count, seq: 4}
+  - name: one span moved to the next page
+    old: *base
+    new:
+      - [1, heading, "H1"]
+      - [1, text, "alpha"]
+      - [2, text, "beta"]
+      - [2, figure, ""]
+      - [2, text, "gamma"]
+    expect: {reason: page, seq: 2}
+  - name: a kind change
+    old: *base
+    new:
+      - [1, heading, "H1"]
+      - [1, list_item, "alpha"]
+      - [1, text, "beta"]
+      - [2, figure, ""]
+      - [2, text, "gamma"]
+    expect: {reason: kind, seq: 1}
+  - name: one changed text
+    old: *base
+    new:
+      - [1, heading, "H1"]
+      - [1, text, "alpha"]
+      - [1, text, "beta"]
+      - [2, figure, ""]
+      - [2, text, "gamma two"]
+    expect: {reason: text, seq: 4}
