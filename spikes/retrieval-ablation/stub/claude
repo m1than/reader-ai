@@ -38,8 +38,12 @@ if not system.is_file():
 size = len(system.read_bytes()) // 3
 state = Path("/tmp/stubcache") / hashlib.sha256(str(system).encode()).hexdigest()
 state.parent.mkdir(exist_ok=True)
-hit = state.exists() and os.environ.get("STUB_NOCACHE") != "1"
+hit = (state.exists() or os.environ.get("STUB_PREWARM") == "1") and os.environ.get("STUB_NOCACHE") != "1"
+first = not state.exists()   # the first call with this system file in the run
 state.touch()
+# STUB_CONTINUE_FIRST=k: the CLI continued that first call to k requests; usage is summed, so a cold first call
+# writes the context once and reads it k-1 times, a warm one (STUB_PREWARM=1, still cached) reads it k times
+k = int(os.environ.get("STUB_CONTINUE_FIRST") or 1) if first else 1
 
 
 def send(obj: dict) -> None:
@@ -55,6 +59,17 @@ for line in sys.stdin:
     elif msg.get("type") == "user":
         content = msg["message"]["content"]
         prompt = content if isinstance(content, str) else json.dumps(content, ensure_ascii=False)
+        span = prompt.split("<chunk>\n", 1)[-1].split("\n</chunk>", 1)[0] if "<chunk>" in prompt else None
+        # STUB_FAIL_SHA: comma-separated sha256 prefixes (16 hex) of the span texts whose calls always fail
+        fail_set = set(filter(None, os.environ.get("STUB_FAIL_SHA", "").split(",")))
+        fail = span is not None and hashlib.sha256(span.encode()).hexdigest()[:16] in fail_set
+        if fail:  # like run 1's 54 failures: a billed call that ends in an error result without an answer
+            send({"type": "result", "subtype": "error_max_turns", "duration_ms": 1, "duration_api_ms": 1,
+                  "is_error": True, "num_turns": 1, "session_id": "stub",
+                  "total_cost_usd": float(os.environ.get("STUB_USD", "0.0004")),
+                  "usage": {"input_tokens": 2, "output_tokens": 1200, "cache_creation_input_tokens": 0,
+                            "cache_read_input_tokens": 4 * size}, "result": ""})
+            break
         if os.environ.get("STUB_EMPTY") == "1":
             text = ""
         elif "expected_facts" in prompt:
@@ -64,10 +79,9 @@ for line in sys.stdin:
         usage = {"input_tokens": len(prompt.encode()) // 3, "output_tokens": 20,
                  "cache_creation_input_tokens": 0 if hit else size, "cache_read_input_tokens": size if hit else 0,
                  "cache_creation": {"ephemeral_1h_input_tokens": 0 if hit else size, "ephemeral_5m_input_tokens": 0}}
-        if os.environ.get("STUB_CONTINUE_FIRST") == "1" and not hit:
-            # a first call the CLI continued with a second request: usage summed, the context written then read
-            usage["cache_read_input_tokens"] = size
-            usage["output_tokens"] = 374
+        if k > 1:
+            usage["cache_read_input_tokens"] = (k if hit else k - 1) * size
+            usage["output_tokens"] = 300 * (k - 1) + 74
         send({"type": "assistant", "message": {"role": "assistant", "model": "stub",
                                                 "content": [{"type": "text", "text": text}]},
               "parent_tool_use_id": None, "session_id": "stub"})

@@ -30,6 +30,7 @@ import re
 import shutil
 import sys
 import time
+from collections import Counter
 from decimal import ROUND_HALF_UP, Decimal
 from pathlib import Path
 
@@ -38,7 +39,10 @@ from claude_agent_sdk import AssistantMessage, ClaudeAgentOptions, ResultMessage
 HAIKU, STRONG = "claude-haiku-5-5", "claude-sonnet-5-5"
 NUM, TXT, WORK, SYS = Path("/out/numbers"), Path("/out/text"), Path("/work"), Path("/tmp/system")
 CACHE_RULE = 0.80
-STOP_AFTER = 3       # consecutive errors, or rows without a reported cost, before the stage stops
+STOP_AFTER = 3       # consecutive rows without a reported cost (and cache misses) before the stage stops
+# consecutive failed calls before the stage stops: a systemic failure costs at most ~10 x $0.003; 3 was too few
+# once failing spans finish fast and cluster (dry_run.sh, run 1's 54 failing spans)
+STOP_AFTER_ERRORS = 10
 PILOT2 = (6, 13)     # analyze.py: the two chapters with the most evaluation questions (results/projection.json)
 CLAIMS = ("holds", "fails", "undecided")
 FLOOR = {"stage1": Decimal("0.0005"), "prefixes": Decimal("0.0005"), "summaries": Decimal("0.002"),
@@ -111,15 +115,15 @@ PRICES = json.loads(Path("/in/prices.json").read_text()) if Path("/in/prices.jso
 def recompute(row: dict) -> Decimal | None:
     """Cross-check of the CLI's total_cost_usd from the token counts and pricing.yaml (micro, ROUND_HALF_UP).
 
-    The usage is summed over every API request of the call (the CLI continues past the output cap with more
-    requests), so the >100k tier is judged on the largest single prompt, max(write, read) + input, not on the sum
-    (pricing.cost(summed=True) does the same; the first prefixes run applied it to the sum and overstated 67 rows 5x)."""
+    The usage is a sum over every API request of the call (the CLI continues a call past its output cap with up to
+    3 more requests), and a sum carries no per-request prompt size, so it is priced at the base tier, as
+    server/src/reader/agent/pricing.py cost(summed=True) does with rates(model, 0). Every prompt of this spike is
+    under 100,000 tokens by construction (the largest context is 45,691, and paid.py stops a stage whose context
+    estimate passes 100,000). The first prefixes run tiered the sum and overstated 67 rows (3- and 4-request
+    calls of group 0) 5x."""
     rates = PRICES.get(row["model"])
     if not rates:
         return None
-    prompt = row["input"] + max(row["cache_write"], row["cache_read"])
-    if prompt > 100_000 and "above_100k" in rates:
-        rates = rates["above_100k"]
     w1h = row.get("cache_write_1h", row["cache_write"])
     w5m = row["cache_write"] - w1h
     total = sum((Decimal(n) * Decimal(str(rates[k])) for n, k in (
@@ -174,17 +178,22 @@ class Ledger:
         self.reserved += est
         return est
 
-    def add(self, row: dict, reservation: Decimal) -> None:
+    def add(self, row: dict, reservation: Decimal, count_errors: bool = True) -> None:
+        """count_errors False: a last try of an earlier failure; its failure is recorded but does not stop the
+        stage (a call without a reported cost still does)."""
         self.reserved -= reservation
         if row.get("usd") is not None:
             row["usd_recomputed"] = None if (r := recompute(row)) is None else float(r)
         self.rows.append(row)
         with self.file.open("a") as f:
             f.write(json.dumps(row) + "\n")
-        self.errors_in_row = self.errors_in_row + 1 if row.get("error") or row.get("subtype") != "success" else 0
+        failed = bool(row.get("error") or row.get("subtype") != "success")
+        if count_errors:
+            self.errors_in_row = self.errors_in_row + 1 if failed else 0
         self.nocost_in_row = self.nocost_in_row + 1 if row.get("usd") is None else 0
-        if self.errors_in_row >= STOP_AFTER:
-            self.stopped = f"{STOP_AFTER} consecutive failed calls (last: {row.get('error') or row.get('subtype')})"
+        if self.errors_in_row >= STOP_AFTER_ERRORS:
+            self.stopped = (f"{STOP_AFTER_ERRORS} consecutive failed calls "
+                            f"(last: {row.get('error') or row.get('subtype')})")
         elif self.nocost_in_row >= STOP_AFTER:
             self.stopped = f"{STOP_AFTER} consecutive calls without a reported cost"
 
@@ -233,8 +242,14 @@ def append_text(path: Path, row: dict) -> None:
 
 
 # ---------------------------------------------------------------- context prefixes (V1)
+def prefix_texts() -> dict[int, str | None]:
+    """The last row per id wins (prefixes.jsonl is append-only); None means `prefix: none`, titles-only context
+    (ADR-0039 B7 caps rule), after a span's retry failed too. embed_v12.py and cards_for_variants read it the same way."""
+    return {r["id"]: r["prefix"] for r in read_jsonl(TXT / "prefixes.jsonl")}
+
+
 def prefixed_ids() -> set[int]:
-    return {r["id"] for r in read_jsonl(TXT / "prefixes.jsonl")}
+    return set(prefix_texts())
 
 
 def cache_stats(rows: list[dict]) -> dict:
@@ -248,67 +263,120 @@ def cache_stats(rows: list[dict]) -> dict:
             "cache_rule_pass": ratio is not None and ratio >= CACHE_RULE}
 
 
+COLD_SHARE = 0.5     # a first call that wrote at least half the chapter's estimated tokens wrote the context
+TOK_PER_CHAR = 0.38  # lower end of the measured 0.382-0.4005 tokens per character of a chapter (stage 1, run 1)
+PROBE = 3            # later calls whose modal cache read sets the context after a warm first call
+
+
+def modal(values: list[int]) -> int:
+    counts = Counter(values)
+    top = max(counts.values())
+    return max(v for v, c in counts.items() if c == top)
+
+
 async def prefixes(led: Ledger, chapters: list[int], conc: int) -> dict:
     _, _, groups = book()
     out = TXT / "prefixes.jsonl"
 
+    def failed_before() -> set[int]:
+        return {r["id"] for r in led.rows if r.get("error")}
+
     def done() -> set[int]:
-        """Prefixed spans, minus those whose latest call in this stage failed: a failed call's text is redone."""
+        """Spans with a prefix or an explicit `prefix: none`; a span whose latest call failed is not done."""
         latest = {r["id"]: r for r in led.rows}
-        return {i for i in prefixed_ids() if not (i in latest and latest[i].get("error"))}
+        return {i for i, p in prefix_texts().items() if p is None or not (i in latest and latest[i].get("error"))}
 
     have = done()
+    retry = failed_before() - have        # spans whose call failed in an earlier run: they run last
+    failed_now: set[int] = set()          # spans whose first call fails in this run: retried last, once
     sem = asyncio.Semaphore(conc)
     empty = 0
-    misses: list[int] = []
+    none = 0
 
-    async def one(n: int, system: str, s: dict, ctx: int) -> None:
-        nonlocal empty
-        # a chapter-first call writes the chapter to the cache: reserve that write on top of the estimate
+    def known_ctx(n: int) -> int | None:
+        """The chapter context of one request from this stage's earlier successful rows: the modal cache read of
+        later calls. Usage is summed over the CLI's continuation requests, so a continued call reads it k times;
+        the mode is the single-request value (group 0: 41,839-42,231; chapter 11: 19,669)."""
+        reads = [r["cache_read"] for r in led.rows
+                 if r.get("chapter") == n and not r.get("error") and r.get("ctx_expected") and r["cache_read"] > 0]
+        return modal(reads) if reads else None
+
+    async def one(n: int, system: str, s: dict, ctx: int, misses: list[int], last_try: bool) -> dict | None:
+        nonlocal empty, none
+        # a chapter-first call (ctx 0) may write the whole chapter to the cache: reserve that write as well
         res = led.reserve(Decimal(0) if ctx else write_cost(HAIKU, system))
         if res is None:
-            return
+            return None
         row: dict = {"id": s["seq"], "chapter": n, "error": "NotRecorded", "usd": None, "subtype": None}
         try:
-            # output cap 1,024: at 300 the CLI continued long answers with up to 3 more requests (4 x 300 tokens)
-            # and then failed the call (ResultError), 54 times in group 0 in the first prefixes run
-            text, got = await call(HAIKU, system, PREFIX_USER.format(span=s["text"]), 0.05, 1024)
-            row = got | {"id": s["seq"], "chapter": n, "ctx_expected": ctx, "empty": not text}
+            # output cap 300, as in run 1: the prompt asks for at most 80 words; the 54 failures of run 1 spent
+            # >= 1,200 output tokens each without a stored answer, for an unmeasured cause (RESULT.md), so a higher
+            # cap would have no basis
+            text, got = await call(HAIKU, system, PREFIX_USER.format(span=s["text"]), 0.05, 300)
+            row = got | {"id": s["seq"], "chapter": n, "ctx_expected": ctx, "empty": not text, "retry": last_try}
             if text and not row["error"]:
                 append_text(out, {"id": s["seq"], "prefix": text})
-            elif not text:
-                empty += 1
+            elif last_try:  # failed twice: titles-only context, recorded, never retried again
+                append_text(out, {"id": s["seq"], "prefix": None})
+                none += 1
+            else:           # first failure: retried once at the end of this run, after every other span
+                failed_now.add(s["seq"])
+                if not text:
+                    empty += 1
         finally:
-            led.add(row, res)
-        # one request's prompt: usage is summed over the CLI's requests, so the largest single part counts
-        if not ctx and row.get("input", 0) + max(row.get("cache_write", 0), row.get("cache_read", 0)) > 100_000:
-            led.stopped = f"chapter {n}'s first call passed 100,000 prompt tokens (Haiku's above_100k pricing)"
+            led.add(row, res, count_errors=not last_try)
         if ctx and not row.get("error"):  # a later call of the chapter: its context should come from cache
             misses.append(1 if row["cache_read"] < CACHE_RULE * ctx else 0)
             if sum(misses[-STOP_AFTER:]) == STOP_AFTER and not led.stopped:
                 led.stopped = (f"cache rule: {STOP_AFTER} consecutive calls in chapter {n} read < 80% of the "
                                "chapter context from cache")
+        return row
 
-    for n in chapters:
-        todo = [s for s in groups[n] if s["seq"] not in have]
+    async def chapter(n: int, todo: list[dict], last_try: bool) -> None:
         if not todo or led.stopped:
-            continue
-        system = PREFIX_SYSTEM.format(chapter=chapter_text(groups[n]))
-        async with sem:
-            await one(n, system, todo[0], 0)    # this run's first call of the chapter writes (or reads) the cache
-        first = led.rows[-1] if led.rows and led.rows[-1]["id"] == todo[0]["seq"] else None
-        # the chapter context of one request: max, not sum, of write and read, because a first call that the CLI
-        # continued writes the context in its first request and reads it in the next (chapter 11 in the first
-        # prefixes run: 20,425 written + 20,060 read, so the sum doubled the context and later calls, reading
-        # 19,669, looked like cache misses)
-        ctx = max(first["cache_write"], first["cache_read"]) if first else 0
-        if first and ctx == 0 and not led.stopped:
-            led.stopped = f"cache rule: chapter {n}'s first call neither wrote nor read a cache"
+            return
+        text = chapter_text(groups[n])
+        system = PREFIX_SYSTEM.format(chapter=text)
+        misses: list[int] = []
+        async with sem:   # this run's first call of the chapter writes (or reads) the cache
+            first = await one(n, system, todo[0], 0, misses, last_try)
+        rest = todo[1:]
+        ctx = known_ctx(n)
+        if ctx is None and first and not first.get("error"):
+            if first["cache_write"] >= COLD_SHARE * TOK_PER_CHAR * len(text):
+                ctx = first["cache_write"]   # cold: only the first request writes, whatever the continuations
+            else:                            # warm (or unclear): probe a few later calls, unchecked
+                probes = []
+                for s in rest[:PROBE]:
+                    async with sem:
+                        r = await one(n, system, s, 0, misses, last_try)
+                    if r and not r.get("error") and r["cache_read"] > 0:
+                        probes.append(r["cache_read"])
+                rest = rest[PROBE:]
+                ctx = modal(probes) if probes else 0
+        if led.stopped:
+            return
+        if ctx is None and not last_try:
+            led.stopped = f"chapter {n}: no context estimate (its first call failed)"
+            return
+        if ctx is None:   # last try of earlier failures: run them unchecked rather than leave them undone
+            ctx = 0
+        elif ctx == 0:
+            led.stopped = f"cache rule: chapter {n}'s calls neither wrote nor read a cache"
+            return
+        if ctx > 100_000:
+            led.stopped = f"chapter {n}'s context {ctx} passes 100,000 tokens (Haiku's above_100k pricing)"
+            return
 
         async def guarded(s: dict) -> None:
             async with sem:
-                await one(n, system, s, ctx)
-        await asyncio.gather(*(guarded(s) for s in todo[1:]))
+                await one(n, system, s, ctx, misses, last_try)
+        await asyncio.gather(*(guarded(s) for s in rest))
+
+    for n in chapters:     # first every span never tried, then the earlier failures, so they cannot block others
+        await chapter(n, [s for s in groups[n] if s["seq"] not in have and s["seq"] not in retry], False)
+    for n in chapters:
+        await chapter(n, [s for s in groups[n] if s["seq"] in retry | failed_now], True)
     have = done()
     stage_spans = [s["seq"] for n in chapters for s in groups[n]]
     indexed = [s["seq"] for g in groups.values() for s in g]
@@ -316,7 +384,9 @@ async def prefixes(led: Ledger, chapters: list[int], conc: int) -> dict:
         "concurrency": conc, "empty_returns_this_run": empty,
         "stage_spans": len(stage_spans), "stage_spans_with_prefix": sum(x in have for x in stage_spans),
         "book_indexed_spans": len(indexed), "book_spans_with_prefix": sum(x in have for x in indexed),
-        "coverage_complete": all(x in have for x in stage_spans)}
+        "coverage_complete": all(x in have for x in stage_spans), "retried_this_run": len(retry),
+        "prefix_none_this_run": none,
+        "book_spans_prefix_none": sum(1 for p in prefix_texts().values() if p is None)}
 
 
 # ---------------------------------------------------------------- L2 summaries (V2)
@@ -440,7 +510,7 @@ def cards_for_variants() -> list[tuple[str, dict, list[str]]]:
     by_seq = {s["seq"]: s for s in spans}
     chunking = load_chunking()
     chunks = chunking.chunk_spans([chunking.Span(s["seq"], s["page"], s["text"]) for s in spans], 1200, 200, 80)
-    pre = {r["id"]: r["prefix"] for r in read_jsonl(TXT / "prefixes.jsonl")}
+    pre = prefix_texts()  # last row per id; None = titles-only context, the card is the span alone
     summ = {str(r["id"]): r["summary"] for r in read_jsonl(TXT / "summaries.jsonl")}
     topk = json.loads((WORK / "topk.json").read_text())  # variant -> qid -> card ids ("c<i>", "s<seq>", "n<seq>")
     eval_q = {q["id"]: q for q in json.loads(Path("/in/eval.json").read_text())}
@@ -453,7 +523,8 @@ def cards_for_variants() -> list[tuple[str, dict, list[str]]]:
         if kind == "n":
             return summ[ident]
         s = by_seq[int(ident)]["text"]
-        return f"{pre[int(ident)]}\n{s}" if with_prefix else s
+        p = pre.get(int(ident)) if with_prefix else None
+        return f"{p}\n{s}" if p else s
 
     items, seen = [], set()
     for variant, per_q in topk.items():
@@ -524,7 +595,9 @@ async def main() -> None:
             res = await prefixes(led, list(PILOT2), conc)
         elif stage == "prefixes":
             _, _, groups = book()
-            res = await prefixes(led, [n for n in sorted(groups) if n not in PILOT2], conc)
+            # the chapters first, group 0 (front and back matter, where run 1's 54 failures were) last
+            order = [n for n in sorted(groups) if n not in PILOT2 and n != 0] + ([0] if 0 in groups else [])
+            res = await prefixes(led, order, conc)
         elif stage == "summaries":
             res = await summaries(led, conc)
         elif stage == "judge":

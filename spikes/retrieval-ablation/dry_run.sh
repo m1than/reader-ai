@@ -84,9 +84,29 @@ done
 rc=$(run nocache stage1 12.00 -e STUB_USD=0.0004 -e STUB_NOCACHE=1)
 n=$(sum .calls nocache stage1)
 check "no cache: stage1 stops (exit 3, $n calls)" '[[ $rc == 3 && $n -ge 4 && $n -le 7 && $(sum .stopped nocache stage1) == cache\ rule* ]]'
-# a chapter-first call the CLI continued (usage summed: context written and read): no false cache-rule stop
-rc=$(run continued stage1 12.00 -e STUB_USD=0.0004 -e STUB_CONTINUE_FIRST=1)
-check "continued first call: stage1 passes (no doubled context)" '[[ $rc == 0 && $(sum .cache_rule_pass continued stage1) == true ]]'
+# chapter-first calls the CLI continued to k requests (usage summed): cold k = 2, 3, 4 and warm k = 3; no false
+# cache-rule stop, context estimated from one request
+for k in 2 3 4; do
+  rc=$(run "continued-$k" stage1 12.00 -e STUB_USD=0.0004 -e STUB_CONTINUE_FIRST=$k)
+  check "cold first call continued to $k requests: stage1 passes" '[[ $rc == 0 && $(sum .cache_rule_pass continued-$k stage1) == true ]]'
+done
+rc=$(run warm-3 stage1 12.00 -e STUB_USD=0.0004 -e STUB_CONTINUE_FIRST=3 -e STUB_PREWARM=1)
+check "warm first call continued to 3 requests: stage1 passes" '[[ $rc == 0 && $(sum .cache_rule_pass warm-3 stage1) == true ]]'
+
+# failures run last and cannot block the others: the spans whose calls failed in the owner's prefixes run 1 fail
+# every time here (the stub gets their sha256 prefixes, never their text); in one run each is retried once after
+# every other span, its second failure records `prefix: none`, and the stage completes
+FAIL_SHA=$(docker run --rm --network none -v "$ART/spans.jsonl:/in/spans.jsonl:ro" \
+  -v "$HERE/results/paid/prefixes/calls.jsonl:/in/calls.jsonl:ro" --entrypoint python reader-embed:local -c '
+import hashlib, json
+failed = {r["id"] for r in map(json.loads, open("/in/calls.jsonl")) if r.get("error")}
+spans = {s["seq"]: s["text"] for s in map(json.loads, open("/in/spans.jsonl", encoding="utf-8"))}
+print(",".join(sorted({hashlib.sha256(spans[i].encode()).hexdigest()[:16] for i in failed})))')
+rc=$(run retry prefixes 12.00 -e STUB_USD=0.0004 -e STUB_FAIL_SHA="$FAIL_SHA")
+check "retry: prefixes completes in one run despite spans that always fail" \
+  '[[ $rc == 0 && $(sum .coverage_complete retry prefixes) == true && $(sum .book_spans_prefix_none retry prefixes) -ge 50 ]]'
+check "retry: in the final run every last try comes after every first try" \
+  'jq -s "(to_entries | map(select(.value.retry == true)) | map(.key) | min) as \$a | (to_entries | map(select(.value.retry == false)) | map(.key) | max) as \$b | (\$a == null or \$b == null or \$a > \$b)" <(tail -n $(sum .calls_this_run retry prefixes) "$S/retry/num/prefixes/calls.jsonl") | grep -q true'
 # empty answers: counted, coverage incomplete, exit 3
 rc=$(run empty summaries 12.00 -e STUB_USD=0.0004 -e STUB_EMPTY=1)
 check "empty answers fail coverage" '[[ $rc == 3 && $(sum .coverage_complete empty summaries) == false ]]'

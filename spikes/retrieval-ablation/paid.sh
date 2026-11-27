@@ -12,9 +12,11 @@
 #     (then, free and local: bash spikes/retrieval-ablation/v12.sh — V1/V2 embedding, recall, topk.json)
 #     judge      judge.eval sufficiency, Sonnet 5.5, deduped card sets of 6 variants (≈ 477 calls), cap $4.73
 #     factcheck  the whole-chapter fact-check baseline, 30 Sonnet 5.5 calls, cap $2.42
-# Stage 1's $0.4493 spent + the other caps sum to $12.51 ≤ $12.51; the runner also refuses to start when the recorded spend of all stages leaves less
-# than this stage needs, and paid.py starts a call only if its reserved estimate (for a chapter-first prefix call,
-# plus the chapter's cache write) fits both caps. One run at a time (a lock directory).
+# Stage 1's $0.4493 spent + the other caps sum to exactly $12.51, the owner's total, with no slack: a call is
+# admitted on its estimated cost, so a call that costs more than estimated (a continued call, up to 4 requests)
+# can overshoot a cap by a few cents. The runner also refuses to start when the recorded spend of all stages
+# leaves less than this stage needs, and paid.py starts a call only if its reserved estimate (for a chapter-first
+# prefix call, plus the chapter's cache write) fits both caps. One run at a time (a lock directory).
 #
 # Token: like spikes/tutor-call and spikes/compile-cost, this runner reads the Keychain item
 # reader-ai/claude-oauth-token and pipes it to the container on stdin; it is never printed, written or passed as an

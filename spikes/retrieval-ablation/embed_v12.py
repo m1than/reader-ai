@@ -36,7 +36,9 @@ def main() -> None:
     work = Path(a.work)
     spans = [json.loads(line) for line in open(a.spans, encoding="utf-8")]
     indexed = [s for s in spans if s["text"].strip()]
-    pre = {r["id"]: r["prefix"] for r in map(json.loads, Path(a.text, "prefixes.jsonl").read_text().splitlines())}
+    # last row per id wins (append-only file); a None prefix ("prefix: none") leaves the span's own text
+    rows = map(json.loads, Path(a.text, "prefixes.jsonl").read_text().splitlines())
+    pre = {i: p for i, p in {r["id"]: r["prefix"] for r in rows}.items() if p}
     summ = {str(r["id"]): r["summary"] for r in map(json.loads, Path(a.text, "summaries.jsonl").read_text().splitlines())}
     outline = json.loads(Path(a.outline).read_text(encoding="utf-8"))
     nodes = sorted((o for o in outline if o["level"] <= 4 and o["page"]), key=lambda o: (o["page"], o["seq"]))

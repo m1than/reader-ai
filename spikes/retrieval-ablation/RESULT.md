@@ -209,30 +209,42 @@ of each span at 2× the input price. Stage 1's $0.4493 + the caps of the four re
 Exit 3 after 3,992 of 8,282 calls (chapters 0–10 done, 7 calls of chapter 11), 1,929.6 s at concurrency 4 (0.483 s
 per call), p50 1.59 s, p95 3.83 s per call.
 
-1. **Cost: $2.1445 is the billed figure.** Recomputing every row from its tokens at pricing.yaml's base Haiku
-   rates gives $2.144487, equal to the SDK's 2.14448713. The runner's $2.8368 was a bug in its cross-check: the
-   CLI's usage is summed over all API requests of one call, and 67 group-0 rows (167,356 cache-read tokens = 4
-   requests × ≈ 42,000) crossed 100,000 only as a sum, so the check applied the above_100k tier (5×) to them, $0.69
-   too much. Each request stayed under 100,000. Fixed: the tier is judged on the largest single part,
-   input + max(write, read), as `pricing.cost(summed=True)` does.
-2. **54 failed calls**, all `ResultError`, all in group 0 (front and back matter, rows 42–681 of the run, spread
-   over the group, not clustered in time), each with 1,200 output tokens: the answer ran past the 300-token output
-   cap and the CLI continued it 3 times before failing the call. All 54 were billed ($0.145 together, tokens
-   present). The old code kept their text as prefixes; now a span whose latest call failed is redone on resume,
-   only error-free answers are written, and the prefix output cap is 1,024 so an answer finishes in one request.
+1. **Cost: $2.1445 is the billed figure** (the SDK's sum 2.14448713, rounded half-up to 4 decimals as the ledger
+   rows are; at micro-dollars, ROUND_HALF_UP, 2.144487). Recomputing every row from its tokens at pricing.yaml's
+   base Haiku rates gives the same 2.144487. The runner's $2.8368 was a bug in its cross-check: the CLI's usage is
+   a sum over all API requests of one call, and 67 group-0 rows, 59 continued to 4 requests (≈ 167,000 cache-read
+   tokens = 4 × ≈ 42,000) and 8 to 3 requests (≈ 126,000), passed 100,000 only as sums; the check applied the
+   above_100k tier (5×) to them, $0.69 too much. Each request stayed under 100,000. Fixed: a summed usage is priced
+   at the base tier, as `pricing.cost(summed=True)` does with `rates(model, 0)`; paid.py separately stops a stage
+   whose per-request context estimate passes 100,000.
+2. **54 failed calls**, all `ResultError`, all in group 0 (front and back matter; rows 42–681 of the run, spread
+   over the group rather than clustered in time), each continued to 4 requests with 1,200 output tokens, and all
+   billed ($0.145 together; tokens present). They were not long answers: 50 of the 54 stored no answer of the
+   model but the same 155-character text, the other 4 short texts; their spans are 1 to 112 characters (one
+   12,847), 34 text and 20 heading spans. Where the ≥ 1,200 output tokens went is **not measured** (no answer text
+   was kept and the CLI reports no per-request detail). The old code stored those texts as prefixes. Now a span
+   whose latest call failed is not done; on resume such spans run **last**, after every span never tried, so they
+   cannot hold up chapters 11–23; a second failure records `prefix: none` (the span keeps its titles-only context,
+   the ADR-0039 B7 caps rule) and does not count towards the stop after 3 consecutive errors. The output cap stays
+   300, as in run 1: a higher cap has no measured basis.
 3. **Chapter 11's "cache misses" were false.** Its first call was continued once (374 output tokens): request 1
    wrote the context (20,425), request 2 read it (20,060), and the summed usage made the expected context 40,485.
    The next six calls read 19,669 each, which is the whole context, but under 80% of the doubled number. Not a TTL
-   expiry, eviction, concurrency or a changed context. Fixed: the context is max(write, read) of the first call,
-   and a read counts at most once per call in the stage ratio (whose 1.0655 was inflated the same way). Resuming
-   with the fix does not repeat it; `dry_run.sh` gained a stub case for a continued first call.
-4. **Remaining work at the measured cost** (chapters 11–23 except 13, plus the 54 redone: 4,344 calls; per call
-   the chapter read at 0.4005 tokens per character measured in this run, plus $0.000145 of span write and output):
-   **≈ $2.21, ≈ 35 min** at concurrency 4. The stage cap leaves $4.72 − $2.1445 = $2.58, so it fits with ≈ 17%
-   margin; spent so far $2.5938, and with the other caps the total stays at $12.51. Checked without spend: the
-   fixed `paid.py` resumed a copy of this run's real `calls.jsonl` and prefixes against the stub CLI (`--network
-   none`): 4,344 calls, every one of the 9,104 indexed spans prefixed, cache ratio 0.9953, no stop, exit 0;
-   `dry_run.sh` 33 of 33.
+   expiry, eviction, concurrency or a changed context. Fixed: the context is never a sum. A chapter with earlier
+   successful rows reuses their modal cache read (group 0: 41,839–42,231; chapter 11: 19,669); otherwise a cold
+   first call (one that wrote at least half the chapter's estimated tokens) gives its write, whatever its number of
+   requests, and a warm first call gives the modal cache read of the next 3 calls. The 100,000 stop applies to that
+   value. A read counts at most once per call in the stage ratio (whose 1.0655 was inflated the same way).
+   `dry_run.sh` covers cold first calls continued to 2, 3 and 4 requests and a warm one continued to 3.
+4. **Remaining work at the measured cost:** 4,290 spans of chapters 11, 12 and 14–23 (12 chapter-first cache
+   writes included; per call the chapter read at the measured 0.4005 tokens per character plus $0.000145 of span
+   write and output) ≈ **$2.18**, then the 54 retries with group 0's cache write: ≈ $0.04 if they succeed,
+   ≈ $0.15 if each is continued to 4 requests again (run 1's premium, $0.0027 per call). **≈ $2.22–2.33, ≈ 35 min**
+   at concurrency 4. The stage cap leaves $4.72 − $2.1445 = $2.58, a margin of ≥ 10%; spent so far $2.5938, and
+   with the other caps the total stays at $12.51. Checked without spend: the fixed `paid.py` resumed a copy of this
+   run's real `calls.jsonl` and prefixes against the stub CLI (`--network none`): 4,344 calls, all 9,104 indexed
+   spans done, cache ratio 0.9953, no stop, exit 0; `dry_run.sh` also checks that spans failing twice end as
+   `prefix: none` after every first try and the stage completes.
 
 ## Paid runner (approved by the owner 2026-11-26, $12.00 staged; raised to $12.51 on 2026-11-27; the owner runs it)
 
