@@ -219,6 +219,22 @@ operations:
       observability: { items: [FR-INGEST-12] }
       recovery: { items: [FR-EVENTS-8, INV-INGEST-2] }
 
+  - id: ingest.migrate_citations
+    title: Rewrite mutable legacy citations to locators (reader-ingest --migrate-citations)
+    surface: [cli]
+    specs: [SRV-INGEST]
+    commands: ["reader-ingest --migrate-citations"]
+    gate: tracked
+    criteria:
+      functional: { items: [FR-INGEST-41] }
+      security: { items: [FR-INGEST-41] }
+      privacy: { items: [FR-INGEST-41] }
+      a11y: { na: no web surface }
+      latency: { missing: "no sourced budget" }
+      cost: { na: no provider call }
+      observability: { items: [FR-INGEST-41] }
+      recovery: { items: [INV-INGEST-15] }
+
   # Added 2026-11-23 (V/onboarding) from the items of SRV-INGEST revision 2 and WEB-IMPORT (ADR-0029, accepted by
   # the owner); cells filled on V/upload-impl when the items were promoted with their tests. Routes and commands are
   # named here in the Green commit that adds them to the registry.
