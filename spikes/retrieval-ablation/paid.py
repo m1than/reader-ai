@@ -9,12 +9,12 @@ Inputs (read-only): /in/spans.jsonl, /in/outline.json, /in/eval.json, /in/prices
                                     (committed; no free model text, no book text)
   /out/numbers/<stage>/summary.json totals, cache rule, coverage, caps, cost cross-check, ledger row (committed)
   /out/text/                        model outputs (prefixes, summaries): derived from the book; gitignored
-Env: STAGE_CAP_USD, TOTAL_LEFT_USD (left of the owner's $12.00 before this run), CONCURRENCY; tests only:
+Env: STAGE_CAP_USD, TOTAL_LEFT_USD (left of the owner's total, $12.51 since 2026-11-27, before this run), CONCURRENCY; tests only:
 CLI_PATH (a stub CLI).
 
 Caps: every call reserves its estimated cost inside the concurrency slot, before it starts; a call starts only if
 the stage's recorded spend + the reservations in flight + its own estimate stay within the stage cap and within what
-is left of $12.00. The system prompt (for prefixes: the whole chapter) is written to the tmpfs and passed as
+is left of the owner's total. The system prompt (for prefixes: the whole chapter) is written to the tmpfs and passed as
 --system-prompt-file, never in argv (Linux caps one argument at 131,072 bytes).
 """
 
@@ -164,7 +164,7 @@ class Ledger:
         if self.spent() + self.reserved + est > self.cap:
             self.stopped = f"stage cap {self.cap} USD reached (spent {self.spent()}, in flight {self.reserved})"
         elif self.spent() - self.start_spent + self.reserved + est > self.total_left:
-            self.stopped = f"the owner's 12.00 USD would be passed (left {self.total_left} at the start of this run)"
+            self.stopped = f"the owner's total would be passed (left {self.total_left} USD at the start of this run)"
         if self.stopped:
             return None
         self.reserved += est

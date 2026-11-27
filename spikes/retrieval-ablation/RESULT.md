@@ -157,7 +157,8 @@ Cheapest order that still answers B10, each stage with a stop rule:
    of a chapter read under 80% of that chapter's context from cache (the stage stops at once), if the stage's cache
    reads over all its calls are under 80% of expected, if a chapter's first call neither writes nor reads a cache, or
    if the stage would pass its cap of projection + 20% ($0.47).
-2. **Prefixes for the rest of the book** (8,282 calls, ≈ $3.63 with group 0's real context, cap $4.01 =
+2. **Prefixes for the rest of the book** (superseded by "Stage 1 measured" below: $4.29, cap $4.72) (8,282 calls,
+   ≈ $3.63 with group 0's real context, cap $4.01 =
    projection + 10.5%, ≈ 4.2–4.8 h sequential), re-embed (≈ 27 min or
    more, local, free), recall@10 for V1. Needed because the 90 questions cover all 23 chapters.
 3. **L2 summaries** (495 calls, ≈ $0.16), recall@10 for V2.
@@ -195,24 +196,27 @@ average 111 output tokens, above B1's 50–100. The cache itself works: 99% of t
 **`prefixes` re-projected from stage 1** (per chapter: one write of the chapter at the measured 0.387 tokens per
 character, later calls read it at the cache rate, plus the measured $0.000150 per call of span write and output;
 group 0 with its own 228,699-byte context): **$4.29 for 8,282 calls, ≈ 62 min at concurrency 4 (≈ 4.05 h
-sequential at the measured 1.76 s mean)**. That is above the stage's $4.01 cap, so as coded the stage would stop at
-about 93% coverage and fail its gate. The whole-book prefix cost becomes $0.45 + $4.29 = **$4.74 per pack**, an
-initial `index` cap of **$5.69** (+20%). Before `paid.sh prefixes` runs, the owner either raises its cap to $4.72
-($4.29 + 10%; stage1 spent + all caps = $12.51), or keeps $12.00 and lowers the judge cap to $4.22.
+sequential at the measured 1.76 s mean)**. That was above the stage's $4.01 cap (the stage would have stopped at
+about 93% coverage). The whole-book prefix cost becomes $0.45 + $4.29 = **$4.74 per pack**, an initial `index` cap
+of **$5.69** (+20%).
 
-## Paid runner (approved by the owner 2026-11-26, $12.00 staged; the owner runs it)
+**Owner decision (2026-11-27):** the paid-arm total is raised from $12.00 to **$12.51**, the `prefixes` cap from
+$4.01 to **$4.72** ($4.29 + 10%), other caps unchanged, because stage 1 measured +15% from the CLI's cache writes
+of each span at 2× the input price. Stage 1's $0.4493 + the caps of the four remaining stages = $12.51.
+
+## Paid runner (approved by the owner 2026-11-26, $12.00 staged; raised to $12.51 on 2026-11-27; the owner runs it)
 
 `paid.sh <stage> [concurrency]` follows `spikes/tutor-call/run.sh`: the Keychain item is piped on stdin into a
 hardened container of the compile-cost image (read-only root, cap-drop ALL, no-new-privileges, tmpfs home, 4 GiB,
 `timeout -s KILL`), exported only inside its process tree, never printed or written. `paid.py` makes one CLI call
-per item with no tools and thinking off. Stages and caps (projection + 20%, except `prefixes`, whose $4.01 is $3.63 + 10.5% once group 0's real context
-is counted): `stage1` $0.47, `prefixes` $4.01
+per item with no tools and thinking off. Stages and caps (projection + 20%, except `prefixes`, whose $4.72 is stage 1's measured re-projection $4.29 + 10%):
+`stage1` $0.47, `prefixes` $4.72
 (refused unless stage1 passed), `summaries` $0.19, then the free `v12.sh` (V1/V2 embedding, recall, `topk.json`),
-`judge` $4.73, `factcheck` $2.42; together $11.82 ≤ $12.00. Gates (`gates.sh`): `prefixes` needs stage1 passed
+`judge` $4.73, `factcheck` $2.42; stage 1's spend plus the other caps = $12.51, the owner's total. Gates (`gates.sh`): `prefixes` needs stage1 passed
 (not stopped, every stage span prefixed, cache rule met); `judge` and `v12.sh` need stage1, prefixes and summaries
 passed, every indexed span prefixed and every outline node summarised; a rerun of a passed stage makes no calls and
 stays passed. Inside each concurrency slot, before a call starts, the runner reserves its estimated cost and starts
-it only if recorded spend + reservations in flight + the estimate fit the stage cap and what is left of $12.00, so
+it only if recorded spend + reservations in flight + the estimate fit the stage cap and what is left of the owner's total, so
 a stage makes at most cap / price + concurrency calls. A prefix stage stops after 3 consecutive later calls of a
 chapter that read under 80% of its context from cache (calls in flight finish: at most concurrency − 1 more) and
 fails if its cache reads over all its calls, all runs, are under 80% of expected (`ctx_expected` per row). A stage

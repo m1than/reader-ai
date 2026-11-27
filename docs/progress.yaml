@@ -1917,11 +1917,13 @@ tasks:
         fact-check question, so by recall only thematic can keep a prefix or summary. Paid arms projected: prefixes
         $3.73 with the chapter cached ($31.02 without), summaries $0.16, judge.eval sufficiency $3.94 (Sonnet),
         fact-check whole-section baseline $2.02; total $9.85",
-      ask: "The owner runs spikes/retrieval-ablation/paid.sh ($12.00 approved 2026-11-26, staged). stage1 done
-        2026-11-26: $0.4493, cache ratio 0.9899, 822/822. Measured re-projection of `prefixes`: $4.29 (8,282 calls,
-        ≈ 62 min at concurrency 4), above its $4.01 cap. Owner: raise the prefixes cap to $4.72 (+10%) and the
-        total to $12.51 (stage1 spent + all caps), or keep $12.00 with the judge cap cut to $4.22, before running
-        `paid.sh prefixes`",
+      approval: { usd: 12.51, funding: test_budget_usd, by: owner, date: 2026-11-27,
+        was: "12.00, 2026-11-26, staged",
+        why: "stage-1 measured cost +15% from the CLI's cache writes of each span at 2x the input price; prefixes
+          cap $4.01 -> $4.72 (re-projection $4.29 + 10%), other caps unchanged" }
+      ask: "The owner runs spikes/retrieval-ablation/paid.sh. stage1 done 2026-11-26: $0.4493, cache ratio 0.9899,
+        822/822. Next: `paid.sh prefixes` (8,282 calls, re-projected $4.29, cap $4.72, ≈ 62 min at concurrency 4),
+        then `paid.sh summaries`; the agent runs v12.sh; then `paid.sh judge` and `paid.sh factcheck`",
       note: "ADR-0039 B10 on SRV-INGEST spans.jsonl and the live search: V0 spans, +context prefix, +L2 summaries,
         +form filter, +RRF hybrid; the fact-check route against today's whole-section fact-check. Keep a step if its
         gain on its type is significant: exact McNemar p < 0.05 (at least a net 6 of 30, more with discordant losses);
