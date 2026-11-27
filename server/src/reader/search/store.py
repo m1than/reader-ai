@@ -52,6 +52,19 @@ async def material_deleted(engine: AsyncEngine, owner_id: UUID, material_sha256:
         return row.first() is not None
 
 
+async def forget_legacy(conn: AsyncConnection, owner_id: UUID, ingest_id: UUID) -> int:
+    """FR-SEARCH-21: the owner's chunk and embed rows of one ingest, deleted on the caller's connection
+    (SRV-INGEST's GC and purge call it in their transaction); returns the number of rows deleted."""
+    count = 0
+    for table in ("search_chunks", "search_embeds"):  # constants only
+        done = await conn.execute(
+            text(f"DELETE FROM {table} WHERE owner_id = :o AND ingest_id = :i"),  # noqa: S608
+            {"o": owner_id, "i": ingest_id},
+        )
+        count += int(done.rowcount)
+    return count
+
+
 @dataclass(frozen=True)
 class Hit:
     chunk_id: int

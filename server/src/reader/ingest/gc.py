@@ -22,8 +22,10 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
 from reader.ingest import manifest, packs
+from reader.ingest.errors import import_error
 
 log = logging.getLogger("reader.ingest")
+SeamUnbound = import_error("seam_unbound")  # a text-holding seam not bound yet: the delete rolls back
 KEEP_ENTRIES: Final = 20  # bounds.gc_keep_entries
 AGE_FLOOR_DAYS: Final = 30  # bounds.gc_age_floor_days (judge.find output retention)
 GC_PACK_KIND: Final = "ingest.gc_pack"
@@ -45,8 +47,22 @@ async def _judges_forget_overlay(conn: AsyncConnection, owner_id: uuid.UUID, ove
 
 
 async def _unbound(conn: AsyncConnection, owner_id: uuid.UUID, value: Any) -> None:
-    """A seam whose owning module has not bound it yet (SRV-SEARCH, SRV-EVENTS paired)."""
+    """A text-holding seam whose owning module has not bound it yet (SRV-SEARCH forget_overlay, paired).
+    It is never called: a delete that needs it raises `seam_unbound` and rolls back (FR-INGEST-44, -45)."""
     del conn, owner_id, value
+    raise SeamUnbound
+
+
+async def _requests_expire(conn: AsyncConnection, owner_id: uuid.UUID, pack_id: Any) -> None:
+    """SRV-EVENTS' judge_requests purge (paired, not yet bound): a pending request's card text stays until its
+    deadline plus the collector's grace (FR-INGEST-45's recorded deviation), so this no-op does not refuse."""
+    del conn, owner_id, pack_id
+
+
+async def _search_forget_legacy(conn: AsyncConnection, owner_id: uuid.UUID, ingest_id: Any) -> Any:
+    from reader.search import store
+
+    return await store.forget_legacy(conn, owner_id, ingest_id)
 
 
 async def _cited_until_bound(conn: AsyncConnection, owner_id: uuid.UUID, pack_id: Any) -> bool:
@@ -67,11 +83,11 @@ class Seams:
 
     forget_pack: OwnerCall = _judges_forget_pack  # SRV-AGENT judges.forget_pack
     forget_overlay: OwnerCall = _judges_forget_overlay  # SRV-AGENT judges.forget_overlay
-    search_forget_overlay: OwnerCall = _unbound  # SRV-SEARCH forget_overlay (paired)
-    search_forget_legacy: OwnerCall = _unbound  # SRV-SEARCH forget_legacy(conn, owner_id, ingest_id) (paired)
+    search_forget_overlay: OwnerCall = _unbound  # SRV-SEARCH forget_overlay (paired; refuses until bound)
+    search_forget_legacy: OwnerCall = _search_forget_legacy  # SRV-SEARCH FR-SEARCH-21
     cited: Callable[[AsyncConnection, uuid.UUID, Any], Awaitable[bool]] = _cited_until_bound
     purge_judge_inputs: Callable[[AsyncConnection, str], Awaitable[Any]] = _obs_purge_judge_inputs  # SRV-OBS
-    purge_judge_requests: OwnerCall = _unbound  # SRV-EVENTS (paired)
+    purge_judge_requests: OwnerCall = _requests_expire  # SRV-EVENTS (paired)
 
 
 @dataclass(frozen=True)
@@ -103,6 +119,7 @@ _OVERLAY_ELIGIBLE: Final = (  # constants only
     "SELECT o.pack_id FROM overlays o"  # noqa: S608
     " JOIN base_packs b ON b.owner_id = o.owner_id AND b.pack_id = o.pack_id"
     " WHERE o.owner_id = :o AND o.overlay_id = :i AND o.collected_at IS NULL"
+    " AND o.kind NOT IN ('profile', 'vectors')"  # kept while their pack is: a flip back reuses them
     " AND b.collected_at IS NULL AND b.purged_at IS NULL"
     " AND ((o.state = 'sealed'"
     "   AND o.sealed_at < coalesce(CAST(:now AS timestamptz), now()) - make_interval(days => :d))"

@@ -9,6 +9,7 @@ from __future__ import annotations
 import ast
 import asyncio
 import json
+import types
 import uuid
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -17,7 +18,7 @@ from typing import Any
 import pytest
 from sqlalchemy import text
 
-from .conftest import SRC, Pg, World, build_artifact, need, world
+from .conftest import SPEC, SRC, Pg, World, build_artifact, need, world
 from .test_manage_db import add_owner
 from .test_overlays_db import activate, vectors
 from .test_seqmap_db import R2, R3, sha_of, spans_of
@@ -66,6 +67,17 @@ class Calls:
 
     def of(self, name: str) -> list[str]:
         return [v for n, v in self.calls if n == name]
+
+
+async def tags(conn: Any, owner: Any, pid: str, facets: str, *, seal: bool = True) -> str:
+    """A tags overlay of the pack (the lone-overlay GC subject: profile and vectors go with their pack)."""
+    overlays = need("reader.ingest.overlays")
+    inputs = {"facets_sha256": facets, "tagger_version": "t/1"}
+    oid = overlays.overlay_id("tags", pid, inputs, "test/1")
+    await overlays.begin(conn, owner, oid, kind="tags", pack_id=pid, inputs=inputs, builder_version="test/1")
+    if seal:
+        await overlays.seal(conn, owner, oid)
+    return str(oid)
 
 
 def policy(keep: int = 1, later: timedelta = LATER) -> Any:
@@ -207,36 +219,64 @@ async def test_overlays_desired_building_and_lone(pg: Pg, tmp_path: Path) -> Non
         pid = await pack(w, sha_of("overlays"))
         v1 = await activate(w, pid)
         async with w.engine.begin() as conn:
+            t1 = await tags(conn, owner, pid, "f1")
+            await manifest.request_activation(conn, owner, pid, {"tags": t1})
+            assert await manifest.try_activate(conn, owner, pid) == "appended"
             v2 = await vectors(conn, owner, pid, model="m2")
-            await manifest.request_activation(conn, owner, pid, {"vectors": v2})
-            assert await manifest.try_activate(conn, owner, pid) == "appended"  # entry 2: v1 left the head
-            v3 = await vectors(conn, owner, pid, model="m3")
-            await manifest.request_activation(conn, owner, pid, {"vectors": v3})  # desired, not activated
-            inputs = {"model": "m4", "params_sha256": "0" * 64}
-            building = overlays.overlay_id("vectors", pid, inputs, "test/1")
-            await overlays.begin(conn, owner, building, kind="vectors", pack_id=pid, inputs=inputs,
-                                 builder_version="test/1")
+            t2 = await tags(conn, owner, pid, "f2")
+            await manifest.request_activation(conn, owner, pid, {"vectors": v2, "tags": t2})
+            assert await manifest.try_activate(conn, owner, pid) == "appended"  # v1 and t1 left the head
+            t3 = await tags(conn, owner, pid, "f3")
+            await manifest.request_activation(conn, owner, pid, {"tags": t3})  # desired, not activated
+            building = await tags(conn, owner, pid, "f4", seal=False)
         calls = Calls()
-        assert await collect_overlay(w, v2, policy(), calls) is False  # in the head
-        assert await collect_overlay(w, v3, policy(), calls) is False  # desired by a pending row
+        assert await collect_overlay(w, t2, policy(), calls) is False  # in the head
+        assert await collect_overlay(w, t3, policy(), calls) is False  # desired by a pending row
         assert await collect_overlay(w, building, policy(), calls) is False  # building, its pack in the head
-        assert await collect_overlay(w, v1, policy(keep=2), calls) is False  # within N
-        assert await collect_overlay(w, v1, policy(later=timedelta(0)), calls) is False  # younger
-        assert await collect_overlay(w, v1, policy(), calls) is True
-        assert calls.calls == [("search_forget_overlay", v1), ("forget_overlay", v1)]
-        assert await w.scalar("SELECT collected_at IS NOT NULL FROM overlays WHERE overlay_id = :i", i=v1)
+        assert await collect_overlay(w, t1, policy(keep=2), calls) is False  # within N
+        assert await collect_overlay(w, t1, policy(later=timedelta(0)), calls) is False  # younger
+        assert await collect_overlay(w, v1, policy(), calls) is False  # vectors go only with their pack
+        assert await collect_overlay(w, t1, policy(), calls) is True
+        assert calls.calls == [("forget_overlay", t1)]
+        assert await w.scalar("SELECT collected_at IS NOT NULL FROM overlays WHERE overlay_id = :i", i=t1)
+        assert await w.scalar("SELECT collected_at FROM overlays WHERE overlay_id = :i", i=v1) is None
         async with w.engine.begin() as conn:  # a collected id is never built again
             with pytest.raises(overlays.OverlayError) as gone:
-                await vectors(conn, owner, pid)
+                await tags(conn, owner, pid, "f1")
         assert gone.value.code == "overlay_collected"
 
         other = await pack(w, sha_of("outside the head"))
         async with w.engine.begin() as conn:
-            inputs = {"model": "m", "params_sha256": "1" * 64}
-            stale = overlays.overlay_id("vectors", other, inputs, "test/1")
-            await overlays.begin(conn, owner, stale, kind="vectors", pack_id=other, inputs=inputs,
-                                 builder_version="test/1")
+            stale = await tags(conn, owner, other, "f5", seal=False)
         assert await collect_overlay(w, stale, policy(), Calls()) is True  # building, pack not in the head
+
+
+async def test_a_flip_back_reuses_the_profile_gc_left(pg: Pg, tmp_path: Path) -> None:
+    """personal-use → shareable → GC → personal-use: the reconcile reuses the earlier profile overlay."""
+    gc, packs = need("reader.ingest.gc"), need("reader.ingest.packs")
+    async with world(pg, tmp_path) as w:
+        owner = w.users["ivan"]
+        sha = sha_of("flip back")
+        pid = await pack(w, sha)
+        await activate(w, pid)
+
+        async def reconcile(license_: str) -> Any:
+            rule = [types.SimpleNamespace(sha256=sha, license=license_, language="ru")]
+            await packs.reconcile(w.engine, owner, rule)
+            async with w.engine.connect() as conn:
+                return await packs.profile_for_pack(conn, owner, pid)
+
+        assert (await reconcile("personal-use"))["license"] == "personal-use"
+        personal = await w.scalar(
+            "SELECT overlay_id FROM overlays o JOIN pack_profiles p USING (owner_id, overlay_id)"
+            " WHERE o.pack_id = :p AND p.license = 'personal-use'", p=pid)
+        assert packs.shareable(await reconcile("shareable"))
+        async with w.engine.begin() as conn:
+            _, lone = await gc.candidates(conn, policy(), Calls().seams())
+        assert (owner, personal) not in lone
+        assert await collect_overlay(w, personal, policy(), Calls()) is False
+        profile = await reconcile("personal-use")
+        assert profile["license"] == "personal-use" and not packs.shareable(profile)
 
 
 async def test_the_default_seams_keep_every_pack(pg: Pg, tmp_path: Path) -> None:
@@ -251,7 +291,7 @@ async def test_the_default_seams_keep_every_pack(pg: Pg, tmp_path: Path) -> None
 
 
 async def test_the_scanner_enqueues_one_job_per_candidate_once_per_slot(pg: Pg, tmp_path: Path) -> None:
-    gc, overlays = need("reader.ingest.gc"), need("reader.ingest.overlays")
+    gc = need("reader.ingest.gc")
     async with world(pg, tmp_path) as w:
         owner = w.users["ivan"]
         a, b = sha_of("scan a"), sha_of("scan b")
@@ -260,12 +300,9 @@ async def test_the_scanner_enqueues_one_job_per_candidate_once_per_slot(pg: Pg, 
         pb = await pack(w, b)
         await activate(w, pb)
         await delete(w, a)  # pa outside the last entry
-        async with w.engine.begin() as conn:  # pb stays active; a stale building overlay of it is not lone
-            inputs = {"model": "m9", "params_sha256": "0" * 64}
-            lone = overlays.overlay_id("vectors", pb, inputs, "test/1")
-            await overlays.begin(conn, owner, lone, kind="vectors", pack_id=pb, inputs=inputs,
-                                 builder_version="test/1")
-            await overlays.seal(conn, owner, lone)
+        async with w.engine.begin() as conn:  # pb stays active; a sealed tags overlay off the head is lone
+            lone = await tags(conn, owner, pb, "f9")
+            await vectors(conn, owner, pb, model="m9")  # a lone vectors overlay is never a candidate
         for _ in range(2):
             async with w.engine.begin() as conn:
                 await gc.scan(conn, "2026-12-01", policy(), Calls().seams())
@@ -385,11 +422,15 @@ async def test_rollback_racing_gc_overlay(pg: Pg, tmp_path: Path) -> None:
 
         async def switched(name: str) -> tuple[str, str, int]:
             pid = await pack(w, sha_of(name))
-            old = await activate(w, pid)
+            await activate(w, pid)
+            async with w.engine.begin() as conn:
+                old = await tags(conn, owner, pid, f"{name} 1")
+                await manifest.request_activation(conn, owner, pid, {"tags": old})
+                assert await manifest.try_activate(conn, owner, pid) == "appended"
             at = int(await w.scalar("SELECT max(seq) FROM manifest_entries"))
             async with w.engine.begin() as conn:
-                new = await vectors(conn, owner, pid, model=f"{name} 2")
-                await manifest.request_activation(conn, owner, pid, {"vectors": new})
+                new = await tags(conn, owner, pid, f"{name} 2")
+                await manifest.request_activation(conn, owner, pid, {"tags": new})
                 assert await manifest.try_activate(conn, owner, pid) == "appended"
             return pid, old, at
 
@@ -413,6 +454,16 @@ async def test_rollback_racing_gc_overlay(pg: Pg, tmp_path: Path) -> None:
         assert await rollback(at2) == "appended"
         assert await named(w, "overlay", old2) == 1
         assert await collect_overlay(w, old2, policy(), Calls()) is False
+
+
+def test_the_gc_bounds_equal_the_spec() -> None:
+    from ruamel.yaml import YAML
+
+    bounds = YAML(typ="safe").load(SPEC.read_text(encoding="utf-8"))["bounds"]
+    gc = need("reader.ingest.gc")
+    declared = (bounds["gc_keep_entries"], bounds["gc_age_floor_days"])
+    assert declared == (gc.KEEP_ENTRIES, gc.AGE_FLOOR_DAYS)
+    assert declared == (gc.POLICY[0].keep_entries, gc.POLICY[0].age_floor_days)
 
 
 # ---- INV-INGEST-14 ----

@@ -728,6 +728,10 @@ owner_notes:
 # `reader.config.checks.material_id_problem`
 # is the one definition, so every id reader.yaml accepts is auditable); an OVERRIDABLE key is SRV-CONFIG
 # FR-CONFIG-26's.
+# Paired change from SRV-INGEST FR-INGEST-45 (V.kl-ingest-packs code review of unit B, 2026-11-27):
+# `material.purge_pack` (kind material, id the material id, detail [pack_id] = 64 lowercase hex) is written by the
+# `ingest.purge` job in its own transaction, with the owner as actor, only when the purge is applied (a repeated
+# purge, a 404 and a confirm_mismatch write none). The table-equality test and an accepted-row case cover it.
 audit_actions:
     course.rename: { kind: course, id: uuid, detail: [version] }
     course.describe: { kind: course, id: uuid, detail: [version] }
@@ -746,6 +750,7 @@ audit_actions:
     material.rename: { kind: material, id: "a material id as GET /api/materials returns it (`up-<12 hex>` or a reader.yaml id)", detail: [version] }
     material.delete: { kind: material, id: "a material id", detail: [courses] }
     material.restore: { kind: material, id: "a material id", detail: [courses] }
+    material.purge_pack: { kind: material, id: "a material id", detail: [pack_id] }
     compile.cancel: { kind: run, id: uuid, detail: [lesson_id] }
     tutor.clear: { kind: lesson, id: uuid, detail: [count] }
     user.sessions_revoke: { kind: user, id: uuid, detail: [count] }

@@ -99,6 +99,20 @@ class PurgeArgs(BaseModel):
     pack_id: str = Field(pattern=r"^[0-9a-f]{64}$")
 
 
+ManifestConflict = import_error("manifest_conflict")  # FR-INGEST-45: a purge's lost CAS is transient
+
+
+async def _audit_purge(conn: AsyncConnection, owner_id: uuid.UUID, pack_id: str) -> None:
+    """FR-INGEST-45 (4): the applied purge's audit row, in the job's transaction (SRV-EVENTS FR-EVENTS-30)."""
+    from reader.jobs import audit
+
+    material_id = (await conn.execute(text(
+        "SELECT m.config_id FROM base_packs b JOIN materials m"
+        " ON m.owner_id = b.owner_id AND m.sha256 = b.material_sha256"
+        " WHERE b.owner_id = :o AND b.pack_id = :p"), {"o": owner_id, "p": pack_id})).scalar_one()
+    await audit.record(conn, owner_id, "material.purge_pack", str(material_id), {"pack_id": pack_id})
+
+
 def _gc_kinds(blobs_root: Path) -> tuple[JobKind, ...]:
     """FR-INGEST-44, -45: the scanner, the two deleters and purge; artifact directories go after commit."""
 
@@ -121,10 +135,16 @@ def _gc_kinds(blobs_root: Path) -> tuple[JobKind, ...]:
         await gc.collect_overlay(conn, args.owner_id, args.overlay_id, gc.POLICY[0], gc.SEAMS[0])
 
     async def purge(args: PurgeArgs, conn: AsyncConnection, ctx: JobContext) -> None:
-        from reader.ingest import gc
+        from reader.ingest import gc, manifest
 
         del ctx
-        await gc.purge(conn, args.owner_id, args.pack_id, gc.SEAMS[0])
+        try:
+            if await gc.purge(conn, args.owner_id, args.pack_id, gc.SEAMS[0]):
+                await _audit_purge(conn, args.owner_id, args.pack_id)
+        except manifest.ManifestError as error:
+            if error.code != "manifest_conflict":
+                raise
+            raise ManifestConflict from None  # transient: retried with SRV-EVENTS' backoff
 
     async def remove_artifact(engine: Any, payload: Mapping[str, Any], outcome: str) -> None:
         from reader.ingest import gc
@@ -146,7 +166,7 @@ def _gc_kinds(blobs_root: Path) -> tuple[JobKind, ...]:
         JobKind(name=GC_OVERLAY_KIND, queue="ingest", args=GcOverlayArgs,
                 key=("owner_id", "overlay_id", "slot"), handler=gc_overlay, transient=_TRANSIENT),
         JobKind(name=PURGE_KIND, queue="ingest", args=PurgeArgs, key=("owner_id", "pack_id"), handler=purge,
-                transient=_TRANSIENT, after_end=remove_artifact),
+                transient=(*_TRANSIENT, ManifestConflict), after_end=remove_artifact),
     )
 
 
@@ -404,3 +424,9 @@ def key_for(material_sha256: str, converter_version: str) -> str:
     """The SRV-EVENTS idempotency key of the import of one material under one converter version."""
     payload: dict[str, Any] = {"material_sha256": material_sha256, "converter_version": converter_version}
     return idempotency_key(JOB_KINDS[0], payload)
+
+
+def purge_key(owner_id: uuid.UUID, pack_id: str) -> str:
+    """The SRV-EVENTS idempotency key of `ingest.purge` of one pack of one owner (FR-INGEST-45)."""
+    kind = next(k for k in JOB_KINDS if k.name == PURGE_KIND)
+    return idempotency_key(kind, {"owner_id": str(owner_id), "pack_id": pack_id})

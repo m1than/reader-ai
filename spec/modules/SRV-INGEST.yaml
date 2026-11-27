@@ -1815,7 +1815,14 @@ requirements:
         (a seam returning none until SRV-KB);
       - it is not the pack of, nor an overlay desired by, a `pending_activations` row (a waiting activation keeps
         what it waits to activate; a pack whose rows are only stale desires leaves with its row when the owner purges
-        it).
+        it);
+      - for a lone overlay, its kind is neither `profile` nor `vectors` (code review of unit B, blocking 2): those are
+        kept for as long as their pack is and go only with it (pack GC or purge). A collected id is never built again
+        (FR-INGEST-35), so collecting them would strand a flip back: a license or language that returns to an earlier
+        value must reuse that profile overlay (FR-INGEST-36's A → B → A), and an embedding model or SRV-SEARCH params
+        that are reverted must be able to resume their vector overlay; were either collected, the reconcile would log
+        `overlay_collected` and keep the head's, so a `personal-use` material could stay `shareable`. A profile row is
+        a few ids and values; a lone vector overlay's rows are the cost of a reversible model change.
       Each pack is collected in its own transaction with `reader.pack_delete = on`; the transaction also calls
       `judges.forget_pack`, `judges.forget_overlay` (SRV-AGENT), SRV-SEARCH's `forget_overlay` for each of its
       vector overlays and SRV-SEARCH's `search.forget_legacy(conn, owner_id, ingest_id)` for its `ingests` row, which
@@ -1827,15 +1834,25 @@ requirements:
       inbox originals are never touched (P6). This replaces FR-INGEST-32's tombstone-only rule for span, outline and
       overlay data.
       **Green (phase 2 unit 5), stated.** `reader.ingest.gc` holds the scanner, the deleters and purge; the four
-      kinds are declared in `reader.ingest.jobs.PACK_KINDS` (served once SRV-EVENTS' paired KIND_MODULES change
-      takes them, with `ingest.gc`'s daily periodic entry). The seams to other modules are one declared record,
+      kinds are declared by `reader.ingest.jobs.make_kinds` and served through `JOB_KINDS` (SRV-EVENTS
+      KIND_MODULES, FR-INGEST-40's merge gate, unit 7), with `ingest.gc`'s daily periodic entry. The seams to other
+      modules are one declared record,
       `reader.ingest.gc.Seams` (`SEAMS[0]` is the production binding; tests pass doubles): `forget_pack` and
-      `forget_overlay` are SRV-AGENT's `reader.agent.judges` functions; SRV-SEARCH's `forget_overlay` and
-      `forget_legacy` are no-ops until SRV-SEARCH's revision binds them (its legacy `search_chunks` rows carry no
-      foreign key, so the ingest's rows stay until then); **`cited` fails closed**: until SRV-LESSON's
+      `forget_overlay` are SRV-AGENT's `reader.agent.judges` functions; `search_forget_legacy` is SRV-SEARCH's
+      `reader.search.store.forget_legacy` (FR-SEARCH-21, paired; code review of unit B, blocking 1), so a collected
+      or purged pack's legacy chunk text goes in the same transaction; SRV-SEARCH's `forget_overlay` is not bound yet
+      and **fails closed**: a delete that reaches a `vectors` overlay through an unbound text-holding seam raises
+      `seam_unbound` and rolls back, so no pack or overlay is marked collected or purged while its text stays (no
+      vector overlay exists before SRV-SEARCH's embed revision, which binds the seam); **`cited` fails closed**:
+      until SRV-LESSON's
       `revision_packs` and SRV-KB's findings bind it, every pack counts as cited, so the GC collects lone overlays
       but no pack (a collected pack can never be rebuilt under its id, FR-INGEST-35). The deleter takes the bounds as
       parameters (`keep_entries` ≥ 1, `age_floor_days`, `now`), the job passes the initial values and the clock.
+      **Recorded deviation (code review of unit B):** `gc_keep_entries` and `gc_age_floor_days` are promoted to
+      `bounds` and are the constants `reader.ingest.gc.KEEP_ENTRIES` and `AGE_FLOOR_DAYS` (`POLICY[0]`); they are not
+      read from reader.yaml, because SRV-CONFIG's optional `ingest.gc.keep_entries` and `ingest.gc.age_floor_days`
+      (the revision block's cross-spec list) are not added yet. Until that paired change, changing either is a code
+      change. [unit] test_gc_db.py: the constants and the default policy equal `bounds`.
       [db] test_gc_db.py (Seams doubles): a pack outside the last N entries and older than the floor is collected —
       spans, outline, overlays and their rows gone, each seam called once with its id (forget_pack, forget_overlay per
       overlay, search forget_overlay per vector overlay, forget_legacy with its ingest id), ingests and base_packs
@@ -1851,7 +1868,11 @@ requirements:
       appends no entry naming it; the restore committing first keeps the pack (it is in the head); never an entry
       naming a collected pack. A rollback racing `ingest.gc_overlay` of an overlay the rolled-back entry names (pack
       unchanged, overlay id differs from the head's) — GC first: the rollback is refused `overlay_collected`;
-      rollback first: GC keeps the overlay; never an entry naming a collected overlay.
+      rollback first: GC keeps the overlay; never an entry naming a collected overlay. The lone-overlay cases use
+      `tags` overlays (code review of unit B, blocking 2), and two more hold: a lone sealed `vectors` overlay past the
+      floor and outside the last N entries is kept, and the **flip back** — profile `personal-use` → `shareable`
+      (reconcile), a GC pass over the left `personal-use` profile overlay (kept), the rule back to `personal-use` →
+      reconcile → the head profile's license is `personal-use` and `shareable(profile_for_pack)` is false.
   - id: FR-INGEST-45
     text: >-
       **Owner purge** (P6, ADR-0017 data ownership).
@@ -1875,10 +1896,47 @@ requirements:
       output written by a `judge.find` whose transaction commits after the purge's can still name the purged pack (its
       `pack_ids`); such a row holds ids and outputs, no span text, and expires with judge.find's retention (30 days).
       The `judge_requests` seam is a no-op until SRV-EVENTS' paired change adds its purge function; a pending request
-      expires at its deadline plus grace. Both are listed in the FR-INGEST-46-guard-tests block.
+      expires at its deadline plus grace. Both are listed in the FR-INGEST-46-guard-tests block. What the no-op
+      leaves, stated (code review of unit B): a `judge_requests` row pending at the purge keeps its query and its
+      cards' **text** (span text of the purged pack) until the SRV-EVENTS collector deletes it, at most its deadline
+      (the B6 timeout after it was put) plus `judge request grace` (60 s, SRV-EVENTS bounds) plus one collector
+      interval; it is transport for one judge call, never read after its deadline, and lives only in Postgres. This
+      seam is therefore not one that refuses a purge while unbound (unlike SRV-SEARCH's `forget_overlay`).
       **Green, stated:** the route answers 202 `{pack_id, enqueued}` (`enqueued` false when the key already exists),
       503 `unavailable` when the api holds no job runtime, 400 `bad_request` for a body other than `{confirm}`; a
       deleted material's packs are listed and purgeable.
+      **Code review of unit B (2026-11-27), stated:** (1) purge removes the pack's search text: the production
+      `search_forget_legacy` seam is SRV-SEARCH's `forget_legacy` (FR-SEARCH-21), and a purge that would reach an
+      unbound text-holding seam (SRV-SEARCH's `forget_overlay` for a `vectors` overlay) raises `seam_unbound`, rolls
+      back and leaves `purged_at` null (the job ends dead; a second request requeues it once the seam is bound).
+      [db] test_purge_db.py (production seams): purge of an r2 pack with legacy search rows leaves 0 `search_chunks`
+      and 0 `search_embeds` rows of its ingest and another pack's rows unchanged; with a `vectors` overlay on the
+      pack, purge raises `seam_unbound` and spans, search rows and `purged_at` are unchanged.
+      (3) A purge request whose key is `dead` requeues it (SRV-EVENTS `requeue_dead`, key
+      `reader.ingest.jobs.purge_key(owner_id, pack_id)`) and answers 202 `{pack_id, enqueued: true}`; `enqueued` is
+      false when the key is queued, running or done. The job treats `manifest_conflict` (its head append lost every
+      CAS retry, FR-INGEST-38) as transient: the run fails, the key is not dead and SRV-EVENTS retries it with its
+      backoff. [db] test_purge_db.py: a purge job that ends dead on `seam_unbound`, then the seam bound and the route
+      called again → 202 enqueued true, and the next run purges the pack; a `manifest_conflict` raised once by the
+      job leaves its key with no outcome and one counted attempt (not dead; a retry is scheduled).
+      (4) An applied purge writes one audit row `material.purge_pack` {object id: the material's id
+      (`materials.config_id`), detail `{pack_id}`} with the owner as actor, in the job's transaction (paired SRV-EVENTS
+      `audit_actions`, FR-EVENTS-30), so it commits or rolls back with the purge; a repeated purge, a 404 and a
+      `confirm_mismatch` write none. [db] test_purge_db.py: one row with that id and detail after the job; none after
+      the refused requests and none after a second purge.
+      (5) **Races** (two connections, the pack lock of FR-INGEST-46): restore of a deleted material racing the purge
+      of its pack — the purge holding the pack lock first purges it and the restore, which waited on that lock,
+      appends no entry naming it; the restore holding the lock first commits the pack into the head, and the purge,
+      which waited, then appends one entry without it and sets `purged_at`; never a head entry naming a purged
+      pack. [db] test_purge_db.py, with the awaited lock read from `pg_locks`.
+      (6) The route refuses, after the confirm check and before any enqueue: 409 `material_busy` when FR-INGEST-31's
+      busy rule holds for the material (`manage.busy`: an open upload, a running import or embed key, a running
+      freshness report), and 409 `{error: material_in_use, courses}` when the pack is in the owner's head entry and
+      a course that is not deleted (archived included) uses the material, as the delete's rule; the owner deletes or
+      moves those courses first. A pack outside the head (an older or never-activated one, or any pack of a deleted
+      material, whose courses the delete cascaded) is purgeable while courses exist: its citations resolve
+      `removed`. [db] test_purge_db.py: a busy check that holds → 409 material_busy and no key; an archived course
+      on the material → 409 material_in_use for the active pack and 202 for an inactive pack of the same material.
       [db] test_purge_db.py (Seams doubles): purge of an active pack → one entry without it; spans, outline,
       overlays and their rows gone, forget_pack, judge_inputs and judge_requests seams called with the pack id;
       purge of a migrated r2 pack calls search forget_legacy once with its ingest id; ingests and base_packs rows
@@ -2415,7 +2473,7 @@ review: "draft 2026-11-21. deep-reviewer round 1 (909dba1): ADR-0027 no blockers
 #     `ingest.gc_pack`, `ingest.gc_overlay`, `ingest.purge`, and conditionally `ingest.prefix`, `ingest.summary`);
 #     the periodic entry enqueues `ingest.gc` {slot} once a day (FR-INGEST-44).
 #   - SRV-CONFIG: optional `ingest.gc.keep_entries` (integer ≥ 1) and `ingest.gc.age_floor_days` (integer ≥ 1), file
-#     settings with the defaults of `proposed_bounds`.
+#     settings with the defaults of `bounds` (not added yet: FR-INGEST-44's recorded deviation).
 #   - SRV-OBS: build spans `ingest.pack`, `ingest.overlay`, `ingest.manifest`, `ingest.gc`, `ingest.purge` with ids,
 #     counts and hashes only (INV-OBS-1/2); their attributes join VEC-OBS-1's allow-list.
 #   - SRV-KB (stage 7): concept evidence and pair link runs are overlay kinds added there; GC and purge call its
@@ -2439,11 +2497,15 @@ review: "draft 2026-11-21. deep-reviewer round 1 (909dba1): ADR-0027 no blockers
 #     and pending `judge_requests` rows (SRV-EVENTS seam `JudgeRequestsForget.forget_pack`) whose cards cite the pack.
 #     Until the SRV-AGENT change above lands, the production guard stays `AlwaysActive`.
 
-proposed_bounds:
+# Promoted (code review of unit B, FR-INGEST-44's recorded deviation): constants in reader/ingest/gc.py, not yet
+# read from reader.yaml's `ingest.gc.*` (SRV-CONFIG paired).
+bounds:
   gc_keep_entries: 20          # initial value (ADR-0039 P6 "last N manifest entries"); `ingest.gc.keep_entries`
   gc_age_floor_days: 30        # initial value (P6 "age floor"); equals judge.find output retention (B7), so a GC'd
                                # pack has no live judge output that cites it
-  manifest_cas_retries: 3      # structural: an append that loses the compare-and-swap re-reads the head and retries
+
+proposed_bounds:
+  manifest_cas_retries: 3     # structural: an append that loses the compare-and-swap re-reads the head and retries
   active_packs_warn: 200       # ADR-0039 revisit_when: more than 200 active packs in one manifest is logged
   locator_path_bytes_max: 1024 # structural, non-PDF path field after percent-encoding
   prefix_batch_spans: 25       # ADR-0039 B7 initial value (conditional, FR-INGEST-47)
@@ -2664,7 +2726,7 @@ proposed_defers:
 
 proposed_owner_notes:
   - "8. (Revision 3, ADR-0039.) After this update every book you have imported is re-indexed once at its new span level: until that finishes, search and tutor answers find nothing in it. For the Bashir book that took 26.8 minutes (measured). The later move to the re-converted copy (about 12 minutes of conversion on your Mac, then its own indexing in the background) causes no second gap. Lessons and the notebook stay readable throughout. If the local embedding service is down at that moment, the gap lasts until it is back: the indexing retries by itself at the next start of the stack (`reader up`)."
-  - "9. (Revision 3.) Old copies of a book's index that no recent state uses (absent from the last 20 changes and older than 30 days, and not cited by a published lesson) are cleaned up automatically. A cleaned-up copy, like one you purge yourself, cannot be rebuilt under the same converter version: it comes back only when a newer converter version converts the book again. This also applies to a book you deleted and left deleted that long: restoring it brings back the material row and its courses, but its index returns only with the next converter version."
+  - "9. (Revision 3.) Old copies of a book's index that no recent state uses (absent from the last 20 changes and older than 30 days, and not cited by a published lesson) are cleaned up automatically. A cleaned-up copy, like one you purge yourself, cannot be rebuilt under the same converter version: it comes back only when a newer converter version converts the book again. This also applies to a book you deleted and left deleted that long: restoring it brings back the material row and its courses, but its index returns only with the next converter version. Today no whole copy is cleaned up automatically: until the published-lesson citation check is connected (SRV-LESSON, SRV-KB), every copy counts as cited and only unused side data (such as old tag sets) goes. Once that check is connected, a deleted book's only copy becomes collectable 30 days after the deletion's change left the last 20 changes, unless a published lesson cites it; to keep a deleted book's index, restore the book before then. Profile and vector data are never cleaned up on their own, only with their copy, so switching a book's license or embedding model back always works."
 
 # Round 1 (deep-reviewer, Fable, on fe2dc2b): changes, 7 blocking; all addressed in this draft:
 #   B1 GC and purge keep `ingests` and `base_packs` rows as tombstones (FR-INGEST-35, -44, -45; FKs of

@@ -25,7 +25,7 @@ from reader.api.http import Ctx, Handler, Route, error
 from reader.config import ConfigError, load_config
 from reader.config.model import Material
 from reader.ingest import manage, manifest, packs, params, store, upload, uploads
-from reader.ingest.jobs import KIND, PURGE_KIND, key_for
+from reader.ingest.jobs import KIND, PURGE_KIND, key_for, purge_key
 from reader.jobs import audit
 from reader.jobs.queue import job_status_of
 
@@ -539,10 +539,18 @@ async def purge_pack(ctx: Ctx) -> Response:
         display = await manage.display_title(conn, owner, material_id, row)
         if not manage.confirm_matches(body["confirm"], display):
             raise manage.refused(400, "confirm_mismatch")
+        if await manage.busy(conn, owner, row):
+            raise manage.refused(409, "material_busy")
+        active = any(e["pack_id"] == pid for e in (await manifest.active_view(conn, owner)).entry["packs"])
+        courses = await manage.courses_using(conn, owner, sha) if active else []
+        if courses:
+            raise manage.Refused(409, {"error": "material_in_use", "courses": courses})
     jobs = getattr(ctx.request.app.state, "jobs", None)
     if jobs is None:
         return error(503, "unavailable")
     result = await jobs.enqueue(PURGE_KIND, {"owner_id": str(owner), "pack_id": pid})
+    if result.kind == "dead":  # a purge that ended dead runs again on the owner's next request
+        result = await jobs.requeue_dead(PURGE_KIND, purge_key(owner, pid))
     return JSONResponse({"pack_id": pid, "enqueued": result.kind == "queued"}, status_code=202)
 
 

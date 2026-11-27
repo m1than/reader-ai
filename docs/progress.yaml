@@ -2083,7 +2083,14 @@ tasks:
         note and test, SRV-OBS VEC-OBS-1 job_args {} and attributes.py), on_worker_start enqueues ingest.reconcile,
         whose job runs start_reconcile and the sweep (the hook contract allows only enqueues); enqueue_known skips
         without a worker (api restore). Still proposed: INV-INGEST-16, FR-INGEST-13 embed args, FR-INGEST-15/19/23
-        view changes, VEC-INGEST-2..6, FR-INGEST-6 rev, PackGuard, FR-INGEST-47/-48 (conditional).",
+        view changes, VEC-INGEST-2..6, FR-INGEST-6 rev, PackGuard, FR-INGEST-47/-48 (conditional).
+        Code review of unit B (GC and purge), fixes with tests: SRV-SEARCH FR-SEARCH-21 forget_legacy bound in
+        gc.SEAMS (purge leaves 0 search rows), an unbound text seam (SRV-SEARCH forget_overlay) refuses with
+        seam_unbound; profile and vectors overlays never lone-GC'd (flip-back test); purge route requeues a dead key,
+        manifest_conflict transient; audit material.purge_pack (SRV-EVENTS audit_actions); purge-vs-restore lock
+        races; route refuses material_busy and material_in_use (active pack); gc bounds promoted as constants
+        (recorded deviation: no SRV-CONFIG ingest.gc.* yet); judge_inputs purge kept unscoped by owner (owner_id is
+        the caller), stated in SRV-OBS FR-OBS-38.",
       what: "SRV-INGEST revision (~1,200–1,850 lines with the citation readers): span identity = ADR-0039 P2 locator
         (offsets into the page's canonical span text; empty text as a zero-length range with an ordinal; file and
         line range for non-PDF) + quote hash. Order: converter revision -> re-conversion -> seq-to-locator map, 1:1

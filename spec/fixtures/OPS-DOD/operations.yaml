@@ -238,17 +238,19 @@ operations:
   - id: material.purge_pack
     title: List a material's packs and purge one (owner)
     surface: [api]
-    specs: [SRV-INGEST]
+    specs: [SRV-INGEST, SRV-EVENTS, SRV-SEARCH]
     routes: ["GET /api/materials/{material_id}/packs", "POST /api/materials/{material_id}/packs/{pack_id}/purge"]
     gate: tracked
     criteria:
       functional: { items: [FR-INGEST-45] }
       security: { items: [FR-INGEST-45, INV-INGEST-14] }
-      privacy: { items: [FR-INGEST-45] }
+      privacy: { items: [FR-INGEST-45, FR-SEARCH-21] }
       a11y: { na: no web surface yet (a WEB-MANAGE control is not specified) }
       latency: { missing: "no sourced budget" }
       cost: { na: no provider call }
-      observability: { missing: "the purge job logs `ingest purged` only; no span or job_args catalogue entry yet" }
+      # The job span around each ingest.purge run (FR-EVENTS-19, job_args {} in SRV-OBS VEC-OBS-1) and the
+      # material.purge_pack audit row in the job's transaction (FR-INGEST-45 (4), FR-EVENTS-30).
+      observability: { items: [FR-INGEST-45, FR-EVENTS-19, FR-EVENTS-30] }
       recovery: { items: [FR-INGEST-44] }
 
   # Added 2026-11-23 (V/onboarding) from the items of SRV-INGEST revision 2 and WEB-IMPORT (ADR-0029, accepted by
