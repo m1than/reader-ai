@@ -96,6 +96,16 @@ for line in sys.stdin:
         if k > 1:
             usage["cache_read_input_tokens"] = (k if hit else k - 1) * size
             usage["output_tokens"] = 300 * (k - 1) + 74
+        # DISABLE_PROMPT_CACHING=1: nothing is written or read; the whole prompt is plain input. The real CLI writes
+        # the prompt (system and message) to the 1-hour cache otherwise, so the stub then writes the message too.
+        # STUB_IGNORE_DISABLE=1 simulates a CLI that ignores the variable.
+        if os.environ.get("DISABLE_PROMPT_CACHING") == "1" and os.environ.get("STUB_IGNORE_DISABLE") != "1":
+            usage["input_tokens"] += size
+            usage["cache_creation_input_tokens"] = usage["cache_read_input_tokens"] = 0
+            usage["cache_creation"] = {"ephemeral_1h_input_tokens": 0, "ephemeral_5m_input_tokens": 0}
+        elif "expected_facts" in prompt:
+            usage["cache_creation_input_tokens"] += len(prompt.encode()) // 3
+            usage["cache_creation"]["ephemeral_1h_input_tokens"] += len(prompt.encode()) // 3
         send({"type": "assistant", "message": {"role": "assistant", "model": "stub",
                                                 "content": [{"type": "text", "text": text}]},
               "parent_tool_use_id": None, "session_id": "stub"})

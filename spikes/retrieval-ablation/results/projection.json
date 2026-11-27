@@ -95,10 +95,10 @@
  },
  "judge_eval": {
   "claude-sonnet-5-5": {
-   "calls": 477,
-   "input_tokens": 1491640,
-   "output_tokens": 95400,
-   "usd": "3.937280",
+   "calls": 430,
+   "input_tokens": 1377768,
+   "output_tokens": 86000,
+   "usd": "3.615536",
    "per_variant": {
     "C_chunks": {
      "calls": 90,
@@ -118,19 +118,19 @@
     },
     "V1_prefix": {
      "calls": 90,
-     "input_tokens": 256925
+     "input_tokens": 278283
     },
     "V2_summaries": {
-     "calls": 90,
-     "input_tokens": 256925
+     "calls": 43,
+     "input_tokens": 121695
     }
    }
   },
   "claude-opus-5-5": {
-   "calls": 477,
-   "input_tokens": 1491640,
-   "output_tokens": 95400,
-   "usd": "7.874560",
+   "calls": 430,
+   "input_tokens": 1377768,
+   "output_tokens": 86000,
+   "usd": "7.231072",
    "per_variant": {
     "C_chunks": {
      "calls": 90,
@@ -150,11 +150,11 @@
     },
     "V1_prefix": {
      "calls": 90,
-     "input_tokens": 256925
+     "input_tokens": 278283
     },
     "V2_summaries": {
-     "calls": 90,
-     "input_tokens": 256925
+     "calls": 43,
+     "input_tokens": 121695
     }
    }
   }

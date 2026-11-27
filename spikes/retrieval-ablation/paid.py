@@ -206,9 +206,15 @@ def system_file(text: str) -> str:
     return str(path)
 
 
-async def call(model: str, system: str, prompt: str, max_usd: float, max_out: int) -> tuple[str, dict]:
+async def call(model: str, system: str, prompt: str, max_usd: float, max_out: int,
+               cache: bool = True) -> tuple[str, dict]:
+    """cache False: Claude Code's DISABLE_PROMPT_CACHING, for single-use prompts. The CLI otherwise writes the whole
+    prompt to the 1-hour cache at 2x the input price (measured in every Haiku stage of this spike), which nothing
+    re-reads when each prompt is used once (judge, factcheck)."""
     env = {"CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1", "DISABLE_TELEMETRY": "1", "MAX_THINKING_TOKENS": "0",
            "CLAUDE_CODE_MAX_OUTPUT_TOKENS": str(max_out)}
+    if not cache:
+        env["DISABLE_PROMPT_CACHING"] = "1"
     opts = ClaudeAgentOptions(system_prompt={"type": "file", "path": system_file(system)}, tools=[], allowed_tools=[],
                               setting_sources=[], max_turns=1, model=model, max_budget_usd=max_usd, env=env,
                               cli_path=os.environ.get("CLI_PATH") or None,
@@ -527,7 +533,7 @@ async def judge_calls(led: Ledger, items: list[tuple[str, dict, list[str]]], con
             base = {"id": key, "qid": q["id"], "type": q["type"], "facts": len(q["expected_facts"])}
             row: dict = base | {"error": "NotRecorded", "usd": None, "subtype": None, "parse_ok": False}
             try:
-                text, got = await call(STRONG, JUDGE_SYSTEM, prompt, 0.5, 600)
+                text, got = await call(STRONG, JUDGE_SYSTEM, prompt, 0.5, 600, cache=False)
                 row = got | base | {"parse_ok": False}
                 verdict = parse_judge(text)
                 verdict["facts_present"] = [i for i in verdict["facts_present"] if 0 <= i < len(q["expected_facts"])]
@@ -538,7 +544,14 @@ async def judge_calls(led: Ledger, items: list[tuple[str, dict, list[str]]], con
                 row |= verdict
             finally:
                 led.add(row, res)  # the spend is recorded whatever happens after the call
+            # caching must be off: a judge prompt written to the 1-hour cache costs 2x (Sonnet $4 instead of $2
+            # per million), which neither cap was sized for
+            cached.append(1 if row.get("cache_write", 0) > 1000 else 0)
+            if sum(cached[-STOP_AFTER:]) == STOP_AFTER and not led.stopped:
+                led.stopped = (f"{STOP_AFTER} consecutive judge calls wrote over 1,000 tokens to the cache: "
+                               "DISABLE_PROMPT_CACHING did not take effect")
 
+    cached: list[int] = []
     await asyncio.gather(*(one(k, q, c) for k, q, c in items))
     judged = {r["id"] for r in led.rows if r.get("parse_ok")}
     return {"concurrency": conc, "items": len(items), "judged": len(judged),

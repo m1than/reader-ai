@@ -327,6 +327,63 @@ projection fits with a margin of ≥ 30%; the total stays $12.51 (spent $5.1452 
 $4.73 + factcheck $2.42 = $12.44). Whole-book L2 summaries then cost ≈ $0.46 per pack, an initial `index` cap of
 ≈ $0.55.
 
+## `summaries` run 3 (owner's run, 2026-11-27): stage complete
+
+103 calls, $0.09906665 (projected $0.10–0.11), 139.5 s; all 495 nodes done, 5 with no summary (failed twice), exit
+0. **Whole-book L2 summaries: $0.45451816 per pack** (recompute 0.454549) over 553 calls in three runs; initial
+`index` cap per pack (cost + 20%) **$0.55**. Paid so far for the spike: $5.2442 of the $12.51 total.
+
+## V1 (context prefixes) and V2 (+ L2 summaries): recall measured (`v12.sh`, run by the agent, 2026-11-27)
+
+Free and local: the embed service's image and encoder with `--network none`, no token, no model call. V1 embeds
+each span as prefix + newline + span text (9,074 spans with a prefix; the 30 `prefix: none` spans keep their own
+text); V2 adds one entry per L2 summary (489 of 495: the root has no page and 5 nodes have no summary), whose pages
+are the node's own text range.
+
+| Measure | Value |
+| --- | --- |
+| Re-embedding V1, 9,104 texts | 1,806.8 s (30.1 min; V0's plain spans took 26.8 min), 13 CPUs, batches of 8 |
+| Embedding the 489 summaries | 50.4 s |
+| Mean characters in the top 10 | V0 2,750; V1 3,346 (spans + prefixes); V2 3,068 (with summary entries) |
+| Summary entries in V2's top-10 lists | 70 over the 90 questions; 47 of 90 top-10 lists equal V1's |
+
+| Variant | exact | thematic | fact-check | all (90) |
+| --- | --- | --- | --- | --- |
+| C_chunks (today) | 27 | 20 | 29 | 76 |
+| V0_spans | 25 | 17 | 29 | 71 |
+| **V1_prefix** | **28** | **20** | 29 | **77** |
+| **V2_summaries** | 28 | 20 | 29 | 77 |
+
+| Base → new | exact: g/l, p | thematic: g/l, p | fact-check: g/l, p |
+| --- | --- | --- | --- |
+| V0_spans → V1_prefix | 3/0, 0.25 | 3/0, 0.25 | 1/1, 1.0 |
+| V1_prefix → V2_summaries | 0/0, 1.0 | 0/0, 1.0 | 0/0, 1.0 |
+
+**Decisions where recall can decide (B10):**
+- **Context prefixes on thematic: not significant by recall** (net +3 of 30, p = 0.25; 6–0 would be needed). On
+  exact (net +3, p = 0.25) and fact-check (net 0) recall cannot reach significance anyway (Decision 5). Every
+  change points up, and V1 now matches today's chunk baseline (77 vs 76 of 90) with a third of its text; whether
+  prefixes are kept is left to judge sufficiency, the only measure that can still show a significant gain.
+- **L2 summaries: no gain by recall on any type** (0/0 discordant on each): recall drops them; sufficiency decides
+  whether the summary cards help an answer even where the gold page was already in the top 10.
+
+## Judge stage: gates and re-projection
+
+The gates pass (`gates.sh`: stage1, prefixes and summaries complete, every span prefixed or `prefix: none`, every
+node summarised or none) and `results/topk.json` now holds the real V1 and V2 card sets. Items, deduplicated as
+`paid.py` does (one per question and distinct card set; prefixed variants separate): **430** (C_chunks 90, V0 90,
+V1 90, H_w5 65, V3_form 52, V2 43), ≈ 1.37 M input tokens at 0.40 tokens per character + ≈ 900 of question, facts,
+instructions and CLI overhead each.
+
+Every Haiku stage of this spike showed the CLI writing the whole prompt to the 1-hour cache at 2× the input price.
+For the judge that would be Sonnet's $4 per million instead of $2, ≈ **$6.14**, over the $4.73 cap and over what
+the $12.51 total leaves. A judge prompt is used once, so `paid.py` now runs the judge and factcheck calls with
+Claude Code's `DISABLE_PROMPT_CACHING=1`, and stops a stage after 3 consecutive judge calls that still write over
+1,000 tokens to the cache (`dry_run.sh` covers both). **Projection with caching off: ≈ $3.39** at 150 output
+tokens per verdict (≈ $5.33 if every verdict used the 600-token cap, which the $4.73 cap would stop first), about
+10 min at concurrency 4. **factcheck:** 30 calls, ≈ 0.98 M input tokens, **≈ $2.02** against its $2.42 cap.
+Total: spent $5.2442 + judge cap $4.73 + factcheck cap $2.42 = $12.39 ≤ $12.51.
+
 ## Paid runner (approved by the owner 2026-11-26, $12.00 staged; raised to $12.51 on 2026-11-27; the owner runs it)
 
 `paid.sh <stage> [concurrency]` follows `spikes/tutor-call/run.sh`: the Keychain item is piped on stdin into a

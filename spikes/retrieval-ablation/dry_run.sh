@@ -30,7 +30,7 @@ run() {  # run <case> <stage> <cap> [env...]
   local case="$1" stage="$2" cap="$3"; shift 3
   mkdir -p "$S/$case/num" "$S/$case/text"
   # full runs chain like the real stages: each starts from the texts the earlier stages wrote
-  if [[ "$case" =~ ^(full-|cap-judge|cap-factcheck) && -d "$S/text-seed" ]]; then cp "$S"/text-seed/* "$S/$case/text/" 2>/dev/null || true; fi
+  if [[ "$case" =~ ^(full-|cap-judge|cap-factcheck|judge-cached) && -d "$S/text-seed" ]]; then cp "$S"/text-seed/* "$S/$case/text/" 2>/dev/null || true; fi
   docker run --rm --network none --platform linux/arm64 --read-only \
     --tmpfs /home/worker:uid=1000,size=512m --tmpfs /tmp:uid=1000,size=512m --cap-drop ALL \
     --security-opt no-new-privileges -e STAGE_CAP_USD="$cap" -e TOTAL_LEFT_USD=12.00 -e CONCURRENCY=4 \
@@ -62,6 +62,10 @@ for stage in judge factcheck; do
 done
 check "judge calls 477" '[[ $(sum .calls full-judge judge) == 477 ]]'
 check "factcheck calls 30" '[[ $(sum .calls full-factcheck factcheck) == 30 ]]'
+check "judge: prompt caching off (no cache writes)" '[[ $(sum .tokens.cache_write full-judge judge) == 0 ]]'
+# a CLI that ignores DISABLE_PROMPT_CACHING writes every judge prompt to the cache: the stage stops after 3
+rc=$(run judge-cached judge 12.00 -e STUB_USD=0.0004 -e STUB_IGNORE_DISABLE=1)
+check "judge: stops when caching is not disabled" '[[ $rc == 3 && $(sum .stopped judge-cached judge) == 3\ consecutive\ judge* ]]'
 check "no committed row holds free text" \
   '! cat "$S"/full-*/num/*/calls.jsonl | jq -r "to_entries[] | select(.value|type==\"string\") | .key" | sort -u | grep -vxE "model|error|subtype|id|kind|qid|type|claim" >/dev/null'
 

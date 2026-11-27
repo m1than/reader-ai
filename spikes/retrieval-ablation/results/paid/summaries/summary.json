@@ -2,30 +2,30 @@
  "concurrency": 4,
  "empty_returns_this_run": 0,
  "nodes": 495,
- "summaries": 405,
- "summary_none": 11,
- "summary_none_this_run": 11,
- "retried_this_run": 45,
- "coverage_complete": false,
+ "summaries": 495,
+ "summary_none": 5,
+ "summary_none_this_run": 5,
+ "retried_this_run": 16,
+ "coverage_complete": true,
  "stage": "summaries",
- "cap_usd": "0.36",
- "calls": 450,
- "calls_this_run": 427,
- "usd_stage_total": "0.355451510000000016106",
- "usd_this_run": "0.328890360000000013696",
- "usd_recomputed_total": "0.355473",
- "usd_reported_same_rows": "0.355451510000000016106",
- "stopped": "stage cap 0.36 USD reached (spent 0.351606870000000016006, in flight 0.0063216000000000000)",
- "run_wall_s": 465.4,
+ "cap_usd": "0.50",
+ "calls": 553,
+ "calls_this_run": 103,
+ "usd_stage_total": "0.454518160000000021426",
+ "usd_this_run": "0.099066650000000005320",
+ "usd_recomputed_total": "0.454549",
+ "usd_reported_same_rows": "0.454518160000000021426",
+ "stopped": null,
+ "run_wall_s": 139.5,
  "tokens": {
-  "input": 1580,
-  "output": 206745,
-  "cache_write": 1243938,
-  "cache_read": 313341
+  "input": 1910,
+  "output": 277066,
+  "cache_write": 1560929,
+  "cache_read": 360836
  },
- "wall_s_per_call_p50": 1.97,
- "wall_s_per_call_p95": 15.32,
- "failed_calls": 56,
+ "wall_s_per_call_p50": 2.16,
+ "wall_s_per_call_p95": 14.97,
+ "failed_calls": 63,
  "tmpfs_bytes": {
   "/home/worker": {
    "total": 536870912,
@@ -34,13 +34,13 @@
   },
   "/tmp": {
    "total": 536870912,
-   "used": 8192,
-   "free": 536862720
+   "used": 12288,
+   "free": 536858624
   }
  },
- "at": "2026-11-27T15:12:34+00:00",
- "home_bytes_per_call": 77,
- "home_extrapolated_bytes_9104_calls": 698641,
+ "at": "2026-11-27T17:48:02+00:00",
+ "home_bytes_per_call": 318,
+ "home_extrapolated_bytes_9104_calls": 2896309,
  "home_tmpfs_ok": true,
- "ledger_row": "- { task: V.spike.retrieval-ablation, usd: 0.328890360000000013696, date: 2026-11-27, funding: test_budget_usd, what: \"paid arm summaries: 427 calls this run, 450 in total; spikes/retrieval-ablation/results/paid/summaries/\" }"
+ "ledger_row": "- { task: V.spike.retrieval-ablation, usd: 0.099066650000000005320, date: 2026-11-27, funding: test_budget_usd, what: \"paid arm summaries: 103 calls this run, 553 in total; spikes/retrieval-ablation/results/paid/summaries/\" }"
 }
