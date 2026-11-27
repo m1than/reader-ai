@@ -1,6 +1,7 @@
 """SRV-SEARCH FR-SEARCH-25..27: the B5 greedy algorithms over a weighted coverage, pure.
 
-Nothing here enumerates subsets or calls a solver (ADR-0039 invariant 3); the tests hold the exhaustive oracles.
+Nothing here enumerates subsets or calls a solver (ADR-0039 invariant 3); the tests hold the exhaustive
+oracles.
 """
 
 from __future__ import annotations
@@ -35,7 +36,7 @@ class Coverage:
         return sum(self.weights.get(e, 0.0) for e in covered)
 
     def marginal(self, base: frozenset[str]) -> Coverage:
-        """f(. ∪ base) − f(base): step 7's pass-2 objective with pass 1's output fixed."""
+        """f(S | base) - f(base): step 7's pass-2 objective with pass 1's output fixed."""
         return Coverage(self.weights, self.covers, self.base | base)
 
 
@@ -144,14 +145,15 @@ def pivot_in_order(order: Sequence[str], plus: Callable[[str, str], bool]) -> li
 
 
 def pivot(cards: Sequence[str], plus: Callable[[str, str], bool], seed: str) -> list[list[str]]:
-    """The order is sha256(seed ‖ id), seed = the request hash (INV-SEARCH-4: a function of the request only)."""
+    """The order is sha256(seed ‖ id), seed = the request hash (INV-SEARCH-4: the request's function)."""
     return pivot_in_order(sorted(cards, key=lambda c: _pivot_key(seed, c)), plus)
 
 
 def set_cover(
     universe: Mapping[str, float], sets: Mapping[str, frozenset[str]], cost: Mapping[str, float]
 ) -> list[str]:
-    """FR-SEARCH-27 (b): lowest cost per newly covered weight first, ties by id, until nothing new is coverable."""
+    """FR-SEARCH-27 (b): lowest cost per newly covered weight first, ties by id, until nothing new is
+    coverable."""
     covered: set[str] = set()
     chosen: list[str] = []
     while True:
