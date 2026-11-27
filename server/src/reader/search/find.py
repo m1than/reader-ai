@@ -25,6 +25,8 @@ from reader.search.policy import CHANNELS, Policy, canonical, estimate
 QUERY_MAX: Final = 1000
 UNBUILT: Final = frozenset({"L3", "L5"})  # FR-SEARCH-23: layers whose specs have not landed
 DEGRADING: Final = frozenset({"timeout", "error", "budget", "saturated", "quota_refused", "no_provider"})
+SKIPS: Final = DEGRADING | {"gate", "slice_empty"}  # FR-SEARCH-29's closed set
+SOURCES: Final = frozenset({"live", "recorded"})
 # The envelope's largest form (FR-SEARCH-22): the longest value of each optional key.
 _LONGEST_SKIP: Final = "quota_refused"
 _LONGEST_SOURCE: Final = "recorded"
@@ -344,7 +346,8 @@ async def find(
     kind, identifiers = classify(policy, request.query, question_type, channel)
     route = route_for(policy, channel, kind, findings=deps.findings is not None)
     found = await deps.corpus.candidates(caller, channel, route, request.query, request.filters, identifiers)
-    pool = [c for c in found.cards if card_shape.eligible(c, channel)]
+    eligible = [c for c in found.cards if card_shape.eligible(c, channel)]
+    pool = _by_score(eligible)[: policy.data["candidates_max"]]  # B6 step 2: at most candidates_max
     if "L4" in route.layers and deps.findings is not None:
         pool += [x.card for x in await deps.findings.for_query(caller, channel, request.query) if x.reviewed]
     pool = [_served(c, policy, channel) for c in pool]
@@ -397,10 +400,10 @@ async def find(
                 pack_ids=tuple(sorted({by_id[c].pack_id for c in judged_slice})), cards_budget=cards_budget,
                 preselection_cost=sum(cost[c] for c in preselection),
             ))
-            if outcome.kept is None:
-                skip = outcome.skip if outcome.skip is not None else "error"
+            if outcome.kept is None or outcome.source not in SOURCES:
+                skip = outcome.skip if outcome.kept is None and outcome.skip in SKIPS else "error"
             else:
-                kept = [c for c in outcome.kept if c in sliced]
+                kept = list(dict.fromkeys(c for c in outcome.kept if c in sliced))
                 source = outcome.source
     picked = step7(f, cost, score, cards_budget, request.k, pool=list(by_id), preselection=preselection,
                    judged_slice=judged_slice, kept=kept)

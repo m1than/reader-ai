@@ -92,7 +92,7 @@ def cut_chars(text: str, limit: int) -> str:
     if len(text) <= limit:
         return text
     head = text[: limit + 1]
-    for i in range(len(head) - 1, -1, -1):
+    for i in range(len(head) - 1, 0, -1):  # whitespace only at 0 would leave nothing: cut hard instead
         if head[i].isspace():
             return text[:i]
     return text[:limit]
