@@ -1483,7 +1483,12 @@ requirements:
       may outlive its `judge_inputs` row or the reverse; neither holds text, and a label needs only
       `judge_inputs`. `reader.obs.judge_inputs.purge_pack(conn, pack_id)` deletes every row whose `pack_ids`
       contains the pack (and so, by cascade, its sample scores); SRV-INGEST's purge calls it inside its
-      transaction under the same per-pack locks (paired), so a purge and a copy never interleave. [unit, db]
+      transaction under the same per-pack locks (paired), so a purge and a copy never interleave. **Not scoped by
+      owner, stated** (SRV-INGEST code review of unit B, 2026-11-27): a row's `owner_id` is the *caller* (a
+      consenting learner's row cites the owner's packs), so a filter on the purging owner would leave learners'
+      copies of the purged pack's cards; the cost of the wider delete is that a second owner of the same book (pack
+      ids carry no owner) loses the diagnostic copies citing that pack id, never data of record (labels come only
+      from these rows; outputs stay in `judge_outputs`). [unit, db]
   - id: FR-OBS-39
     text: >-
       Local judge evaluation (ADR-0039 B9; ADR-0038 amended under its `revisit_when`; ADR-0035 Decision 1

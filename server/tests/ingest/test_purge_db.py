@@ -249,6 +249,34 @@ async def test_restore_racing_purge_of_the_same_pack(pg: Pg, tmp_path: Path) -> 
             "SELECT count(*) FROM manifest_entries WHERE reason = 'purge'") == 1
 
 
+async def test_purge_refuses_a_busy_material_and_an_active_pack_in_use(
+    pg: Pg, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    manage = need("reader.ingest.manage")
+    async with world(pg, tmp_path) as w:
+        legacy = await pack(w, MATERIAL_SHA, R2, material_id="synthetic")
+        await activate(w, legacy)
+        r3 = await pack(w, MATERIAL_SHA, R3, material_id="synthetic")  # waiting, not in the head
+        base = "/api/materials/synthetic/packs"
+
+        async def busy(conn: Any, owner: Any, material: Any) -> bool:
+            return True
+
+        monkeypatch.setattr(manage, "BUSY_CHECKS", [busy])
+        async with client(w, jobs=w.jobs) as c:
+            got = await c.post(f"{base}/{r3}/purge", json={"confirm": "synthetic"})
+        assert (got.status_code, got.json()) == (409, {"error": "material_busy"})
+        monkeypatch.setattr(manage, "BUSY_CHECKS", [])
+        await plan_and_report(w, MATERIAL_SHA, legacy)  # an archived course on the material
+        async with client(w, jobs=w.jobs) as c:
+            got = await c.post(f"{base}/{legacy}/purge", json={"confirm": "synthetic"})
+            assert got.status_code == 409 and got.json()["error"] == "material_in_use"
+            assert [course["title"] for course in got.json()["courses"]] == ["c"]
+            assert await w.scalar("SELECT count(*) FROM job_keys WHERE kind = 'ingest.purge'") == 0
+            got = await c.post(f"{base}/{r3}/purge", json={"confirm": "synthetic"})
+            assert (got.status_code, got.json()) == (202, {"pack_id": r3, "enqueued": True})
+
+
 async def test_a_dead_purge_is_requeued_by_the_next_request(
     pg: Pg, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

@@ -18,7 +18,7 @@ from typing import Any
 import pytest
 from sqlalchemy import text
 
-from .conftest import SRC, Pg, World, build_artifact, need, world
+from .conftest import SPEC, SRC, Pg, World, build_artifact, need, world
 from .test_manage_db import add_owner
 from .test_overlays_db import activate, vectors
 from .test_seqmap_db import R2, R3, sha_of, spans_of
@@ -454,6 +454,16 @@ async def test_rollback_racing_gc_overlay(pg: Pg, tmp_path: Path) -> None:
         assert await rollback(at2) == "appended"
         assert await named(w, "overlay", old2) == 1
         assert await collect_overlay(w, old2, policy(), Calls()) is False
+
+
+def test_the_gc_bounds_equal_the_spec() -> None:
+    from ruamel.yaml import YAML
+
+    bounds = YAML(typ="safe").load(SPEC.read_text(encoding="utf-8"))["bounds"]
+    gc = need("reader.ingest.gc")
+    declared = (bounds["gc_keep_entries"], bounds["gc_age_floor_days"])
+    assert declared == (gc.KEEP_ENTRIES, gc.AGE_FLOOR_DAYS)
+    assert declared == (gc.POLICY[0].keep_entries, gc.POLICY[0].age_floor_days)
 
 
 # ---- INV-INGEST-14 ----
