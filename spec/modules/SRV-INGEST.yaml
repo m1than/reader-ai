@@ -2018,6 +2018,32 @@ requirements:
       file: two transactions locking {a,b} and {b,a} both complete (no deadlock_detected), with the awaited lock read
       from pg_locks; a second call with held keys does not wait, with a greater key succeeds, with a smaller new key
       raises lock_order and takes nothing.
+  - id: FR-INGEST-49
+    text: >-
+      **Packs a citation names** (r3_gates_revision; paired with SRV-LESSON FR-LESSON-32).
+      `reader.ingest.views.citing_packs(conn, owner_id, refs) -> set[str]`, `refs` a sequence of (span id,
+      quote_sha256 | None), reads only and returns, per reference, the one pack the resolver would read its text
+      from (FR-INGEST-42 steps 2 and 4):
+      - a locator (FR-INGEST-33's `parse` accepts it) with a hash → the material's **active** pack of this owner when
+        it holds a span with that `locator` and that `quote_sha256`; else the **lowest pack id** among this owner's
+        sealed packs, not collected or purged, holding it; else nothing. Never every pack holding it: `revision_packs`
+        is append-only, and a backfilled r2 pack holds the same (locator, hash) as r3 for every unchanged span, so
+        naming all of them would pin the superseded r2 pack for good (round 1, blocking 2);
+      - a legacy id (`locator.is_legacy_id`) → nothing. A legacy pack leaves the head only after an accepted seq map
+        (FR-INGEST-39's `seqmap_missing` precondition), and GC keeps an accepted map's target (FR-INGEST-44), through
+        which every legacy id resolves (FR-INGEST-42 step 1); while the legacy pack is in the head GC never
+        collects it. So a revision citing legacy ids needs no row, and revisions stored before SRV-LESSON's
+        `lessons_0003` (legacy ids only) need no backfill;
+      - anything else (malformed, a locator without a hash, another owner's material, no matching span) → nothing.
+      A bounded number of queries (one for the active packs, one for the fallback), whatever the number of refs.
+      Recorded at promotion: the two statements are the head entry's read and one query that picks, per
+      reference, the active pack first and else the lowest pack id; with no locator reference, none runs.
+      [db] test_citing_packs_db.py: a locator and hash held by the r2 legacy pack (backfilled) and by the r3 pack
+      with r3 active → r3 only; the same with the legacy pack active (r3 sealed, waiting) → the legacy pack only; a
+      locator held only by an inactive sealed pack → that pack; two inactive packs holding it → the lower pack id;
+      the same locator with another hash → none; a legacy id → none; a collected pack is never returned; another
+      owner's pack with the same locator and hash is never returned; a malformed id and a locator without a hash →
+      none; 200 refs run at most 2 statements (a SQLAlchemy before_cursor_execute listener).
 
 invariants:
   - id: INV-INGEST-1
@@ -2657,28 +2683,8 @@ proposed_requirements:
   # and (h) WEB-NOTEBOOK drafted as proposed revisions of those specs; (g) is V.kl-tutor-find's; (i) met:
   # reader.search.jobs seals the vector overlay, then request_activation({vectors}) and try_activate in the run
   # transaction, and try_activate refuses `vectors_missing` (test_manifest_db.py::test_activation_contract,
-  # test_search_active_pack_db.py). FR-INGEST-49 is the read helper gate (e) needs (INV-INGEST-16: SRV-LESSON reads
-  # packs only through views).
-  - id: FR-INGEST-49
-    text: >-
-      **Packs a citation names** (paired with SRV-LESSON FR-LESSON-32). `reader.ingest.views.citing_packs(conn,
-      owner_id, refs) -> set[str]`, `refs` a sequence of (span id, quote_sha256 | None), reads only and returns, per
-      reference, the one pack the resolver would read its text from (FR-INGEST-42 steps 2 and 4):
-      - a locator (FR-INGEST-33's `parse` accepts it) with a hash → the material's **active** pack of this owner when
-        it holds a span with that `locator` and that `quote_sha256`; else the **lowest pack id** among this owner's
-        sealed packs, not collected or purged, holding it; else nothing. Never every pack holding it: `revision_packs`
-        is append-only, and a backfilled r2 pack holds the same (locator, hash) as r3 for every unchanged span, so
-        naming all of them would pin the superseded r2 pack for good (round 1, blocking 2);
-      - a legacy id (`locator.is_legacy_id`) → nothing. A legacy pack leaves the head only after an accepted seq map
-        (FR-INGEST-39's `seqmap_missing` precondition), and GC keeps an accepted map's target (FR-INGEST-44), through
-        which every legacy id resolves (FR-INGEST-42 step 1); while the legacy pack is in the head GC never
-        collects it. So a revision citing legacy ids needs no row, and revisions stored before SRV-LESSON's
-        `lessons_0003` (legacy ids only) need no backfill;
-      - anything else (malformed, a locator without a hash, another owner's material, no matching span) → nothing.
-      A bounded number of queries (one for the active packs, one for the fallback), whatever the number of refs.
-    tests_planned:
-      - "add server/tests/ingest/test_citing_packs_db.py [db]: a locator and hash held by the r2 legacy pack (backfilled) and by the r3 pack with r3 active → r3 only; the same with the legacy pack active (r3 sealed, waiting) → the legacy pack only; a locator held only by an inactive sealed pack → that pack; two inactive packs holding it → the lower pack id; the same locator with another hash → none; a legacy id → none; a collected pack is never returned; another owner's pack with the same locator and hash is never returned; a malformed id and a locator without a hash → none; 200 refs run at most 2 statements (statement count through a SQLAlchemy before_cursor_execute listener)"
-      - "change server/tests/ingest/test_readers_scan_unit.py only if the scan needs reader/lessons/store.py listed as a paired reader (it reads through views)"
+  # test_search_active_pack_db.py). FR-INGEST-49, the read helper gate (e) needs, is promoted into `requirements`
+  # (r3_gates_revision, unit e).
   - id: FR-INGEST-40-r3-bump
     text: >-
       **The held r3 bump, the last step of gates (a)-(i).** Precondition: SRV-LESSON's revision (gate (e)),

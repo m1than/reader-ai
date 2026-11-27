@@ -1,7 +1,7 @@
 """SRV-LESSON write path, internal functions and schema constraints, against Postgres.
 
 @trace FR-LESSON-4 FR-LESSON-5 FR-LESSON-6 FR-LESSON-14 INV-LESSON-1 INV-LESSON-2 INV-LESSON-3
-@trace INV-LESSON-6 INV-LESSON-7 VEC-LESSON-3
+@trace INV-LESSON-6 INV-LESSON-7 VEC-LESSON-3 FR-LESSON-32
 """
 
 from __future__ import annotations
@@ -383,7 +383,18 @@ async def test_migration_creates_and_drops_the_tables(pg: Pg, tmp_path: Path) ->
         config.attributes["connection"] = connection
         command.downgrade(config, "lessons@-1")
 
-    # Amendment V/manage: lessons_0002 (FR-LESSON-20) is the branch head; its downgrade drops only its tables.
+    packs = "SELECT count(*) FROM pg_tables WHERE tablename = 'revision_packs'"
+    assert await scalar(w.engine, packs) == 1
+    # r3_gates_revision: lessons_0003 (FR-LESSON-32) is the branch head; its downgrade drops only revision_packs.
+    async with w.engine.connect() as conn:
+        await conn.run_sync(downgrade)
+        await conn.commit()
+    assert (await scalar(w.engine, packs), await scalar(w.engine, learner), await scalar(w.engine, TABLES)) == (
+        0,
+        3,
+        4,
+    )
+    # Amendment V/manage: lessons_0002 (FR-LESSON-20); its downgrade drops only its tables.
     async with w.engine.connect() as conn:
         await conn.run_sync(downgrade)
         await conn.commit()
@@ -393,4 +404,156 @@ async def test_migration_creates_and_drops_the_tables(pg: Pg, tmp_path: Path) ->
         await conn.commit()
     assert await scalar(w.engine, TABLES) == 0
     assert await scalar(w.engine, "SELECT count(*) FROM pg_tables WHERE tablename = 'users'") == 1
+    await w.engine.dispose()
+
+
+# FR-LESSON-32: the packs a revision cites (r3_gates_revision). Synthetic material and span texts, no book text.
+MATERIAL = hashlib.sha256(b"lessons r3 gates").hexdigest()
+SPANS = [(1, "text", "Synthetic span one."), (1, "text", "Synthetic span two."), (2, "text", "Synthetic span three.")]
+
+
+async def _material(w: Any, legacy_active: bool, with_r3: bool) -> tuple[str, str | None]:
+    """The material's r2 legacy pack and, optionally, its r3 pack (active when present)."""
+    from sqlalchemy import text
+
+    from ingest.packseed import R2, R3, add_pack
+
+    owner = w.users["ivan"]
+    async with w.engine.begin() as conn:
+        await conn.execute(
+            text("INSERT INTO materials (owner_id, sha256, config_id, page_count) VALUES (:o, :s, 'm', 2)"),
+            {"o": owner, "s": MATERIAL},
+        )
+        legacy = await add_pack(conn, owner, MATERIAL, R2, SPANS, activate=legacy_active)
+        r3 = await add_pack(conn, owner, MATERIAL, R3, SPANS, activate=True) if with_r3 else None
+    return legacy, r3
+
+
+async def _locators(w: Any, pack: str) -> list[tuple[str, str]]:
+    rows = await _rows(
+        w,
+        "SELECT locator, quote_sha256 FROM material_spans"
+        " WHERE ingest_id = (SELECT ingest_id FROM base_packs WHERE pack_id = :p) ORDER BY seq",
+        p=pack,
+    )
+    return [(str(r[0]), str(r[1])) for r in rows]
+
+
+async def _rows(w: Any, sql: str, **params: Any) -> list[Any]:
+    from sqlalchemy import text
+
+    async with w.engine.connect() as conn:
+        return list((await conn.execute(text(sql), params)).all())
+
+
+async def _cited(w: Any, lesson: uuid.UUID, sha: str) -> list[str]:
+    rows = await _rows(w, "SELECT pack_id FROM revision_packs WHERE lesson_id = :l AND sha256 = :s", l=lesson, s=sha)
+    return sorted(str(r[0]) for r in rows)
+
+
+def _citing(where: str, ref: tuple[str, str], legacy: str | None = None) -> bytes:
+    """F01 with one locator reference (and its hash) at `where`; optionally a legacy id in the erratum."""
+    doc = json.loads(F01)
+    cells = doc["cells"]
+    span, quote = ref
+    if where == "claim":
+        cells[2]["metadata"]["reader"]["claims"][0]["citations"].append(
+            {"span": span, "quote_sha256": quote, "page": 1}
+        )
+    elif where == "source_refs":
+        cells[1]["metadata"]["reader"]["source_refs"].append(
+            {"material_sha256": MATERIAL, "page": 1, "span": span, "quote_sha256": quote}
+        )
+    elif where == "erratum":
+        cells[4]["metadata"]["reader"]["source_ref"] = {
+            "material_sha256": MATERIAL,
+            "page": 1,
+            "span": span,
+            "quote_sha256": quote,
+        }
+    else:
+        cells[6]["metadata"]["reader"]["reference"] = {
+            "kind": "test_vector",
+            "span": span,
+            "quote_sha256": quote,
+            "expected": ["0.628"],
+        }
+    if legacy is not None:
+        cells[4]["metadata"]["reader"]["source_ref"]["span"] = legacy
+    return json.dumps(doc, ensure_ascii=False).encode()
+
+
+async def test_a_revision_records_the_active_pack_it_cites(pg: Pg, tmp_path: Path) -> None:
+    w = await world(pg, tmp_path)
+    legacy, r3 = await _material(w, legacy_active=False, with_r3=True)
+    assert r3 is not None
+    locs = await _locators(w, r3)
+    assert locs == await _locators(w, legacy)  # the backfilled legacy pack holds r3's (locator, hash)
+    _, lesson = await course_and_lesson(w)
+
+    doc = json.loads(_citing("claim", locs[0], legacy=f"{MATERIAL}:1"))
+    doc["cells"][2]["metadata"]["reader"]["claims"][0]["citations"].append(
+        {"span": locs[2][0], "quote_sha256": locs[2][1], "page": 2}
+    )
+    two = json.dumps(doc).encode()
+    sha, created = await write(w, "ivan", lesson, two)
+    assert created
+    assert await _cited(w, lesson, sha) == [r3]  # one row, r3 only; the legacy id adds none
+
+    again, created = await write(w, "ivan", lesson, two, stage="review")
+    assert (again, created) == (sha, False)
+    assert await _cited(w, lesson, sha) == [r3]  # rewriting the same bytes adds none
+
+    for where in ("source_refs", "erratum", "lab"):  # every place a span reference can stand
+        one, created = await write(w, "ivan", lesson, _citing(where, locs[1]))
+        assert created
+        assert await _cited(w, lesson, one) == [r3], where
+
+    wrong, created = await write(w, "ivan", lesson, _citing("claim", (locs[0][0], "0" * 64)))
+    assert created
+    assert await _cited(w, lesson, wrong) == []  # a hash that differs from the stored span's names no pack
+
+    f01, _ = await write(w, "ivan", lesson, F01)
+    assert await _cited(w, lesson, f01) == []  # the fixture's synthetic material has no pack
+
+    store = need("reader.lessons.store")
+    late = _citing("claim", locs[2])
+    with pytest.raises(RuntimeError, match="rollback"):
+        async with w.engine.begin() as conn:
+            rolled, _ = await store.write_revision(conn, w.blobs, w.users["ivan"], lesson, late, "draft", {})
+            raise RuntimeError("rollback")
+    assert await _cited(w, lesson, rolled) == []  # written in the revision's transaction
+    await w.engine.dispose()
+
+
+async def test_with_the_legacy_pack_active_the_legacy_pack_is_recorded(pg: Pg, tmp_path: Path) -> None:
+    w = await world(pg, tmp_path)
+    legacy, _ = await _material(w, legacy_active=True, with_r3=False)
+    locs = await _locators(w, legacy)
+    _, lesson = await course_and_lesson(w)
+    sha, created = await write(w, "ivan", lesson, _citing("claim", locs[0]))
+    assert created
+    assert await _cited(w, lesson, sha) == [legacy]
+    legacy_only, _ = await write(w, "ivan", lesson, _citing("claim", locs[0], legacy=f"{MATERIAL}:0"))
+    assert await _cited(w, lesson, legacy_only) == [legacy]  # the locator's row; the legacy id adds none
+    await w.engine.dispose()
+
+
+async def test_revision_packs_rows_are_immutable(pg: Pg, tmp_path: Path) -> None:
+    from sqlalchemy import text
+    from sqlalchemy.exc import DBAPIError
+
+    w = await world(pg, tmp_path)
+    legacy, _ = await _material(w, legacy_active=True, with_r3=False)
+    _, lesson = await course_and_lesson(w)
+    sha, _ = await write(w, "ivan", lesson, _citing("claim", (await _locators(w, legacy))[0]))
+    for sql in (
+        "UPDATE revision_packs SET pack_id = repeat('a', 64)",
+        "DELETE FROM revision_packs",
+        "TRUNCATE revision_packs",
+    ):
+        with pytest.raises(DBAPIError, match="immutable"):
+            async with w.engine.begin() as conn:
+                await conn.execute(text(sql))
+    assert await _cited(w, lesson, sha) == [legacy]
     await w.engine.dispose()

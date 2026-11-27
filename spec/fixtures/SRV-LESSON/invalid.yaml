@@ -126,6 +126,58 @@ cases:
   - id: span-uppercase-hex
     ops: [{ op: replace, path: /cells/2/metadata/reader/claims/0/citations/1/span, value: "BFAF5F84EC26D5D046B23C32827FF917C72A94707EF23407D77031429D53F1A1:1" }]
     write: cell_schema
+  # Locator span ids (r3_gates_revision, VEC-LESSON-1 / -3): PDF locators of F01's synthetic material with synthetic
+  # quote hashes (no book text). `quote_sha256` is required beside a locator and refused beside a legacy id.
+  - id: span-locator-with-quote
+    ops: [{ op: replace, path: /cells/2/metadata/reader/claims/0/citations/1/span, value: "spn:bfaf5f84ec26d5d046b23c32827ff917c72a94707ef23407d77031429d53f1a1:p1:0-120" }, { op: add, path: /cells/2/metadata/reader/claims/0/citations/1/quote_sha256, value: "1111111111111111111111111111111111111111111111111111111111111111" }]
+    write: null
+  - id: span-locator-empty-with-ordinal
+    ops: [{ op: replace, path: /cells/2/metadata/reader/claims/0/citations/1/span, value: "spn:bfaf5f84ec26d5d046b23c32827ff917c72a94707ef23407d77031429d53f1a1:p3:40-40#0" }, { op: add, path: /cells/2/metadata/reader/claims/0/citations/1/quote_sha256, value: "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855" }]
+    write: null
+  - id: span-locator-no-quote
+    ops: [{ op: replace, path: /cells/2/metadata/reader/claims/0/citations/1/span, value: "spn:bfaf5f84ec26d5d046b23c32827ff917c72a94707ef23407d77031429d53f1a1:p1:0-120" }]
+    write: cell_schema
+  - id: span-legacy-with-quote
+    ops: [{ op: add, path: /cells/2/metadata/reader/claims/0/citations/1/quote_sha256, value: "1111111111111111111111111111111111111111111111111111111111111111" }]
+    write: cell_schema
+  - id: span-locator-start-after-end
+    note: "matches the pattern; refused by FR-LESSON-1 step 7b (locator.parse)"
+    ops: [{ op: replace, path: /cells/2/metadata/reader/claims/0/citations/1/span, value: "spn:bfaf5f84ec26d5d046b23c32827ff917c72a94707ef23407d77031429d53f1a1:p1:9-3" }, { op: add, path: /cells/2/metadata/reader/claims/0/citations/1/quote_sha256, value: "1111111111111111111111111111111111111111111111111111111111111111" }]
+    write: cell_schema
+  - id: span-locator-ordinal-on-range
+    note: "step 7b: `#n` only on an empty span"
+    ops: [{ op: replace, path: /cells/2/metadata/reader/claims/0/citations/1/span, value: "spn:bfaf5f84ec26d5d046b23c32827ff917c72a94707ef23407d77031429d53f1a1:p1:0-9#0" }, { op: add, path: /cells/2/metadata/reader/claims/0/citations/1/quote_sha256, value: "1111111111111111111111111111111111111111111111111111111111111111" }]
+    write: cell_schema
+  - id: span-locator-empty-no-ordinal
+    note: "step 7b: an empty span needs its `#n`"
+    ops: [{ op: replace, path: /cells/2/metadata/reader/claims/0/citations/1/span, value: "spn:bfaf5f84ec26d5d046b23c32827ff917c72a94707ef23407d77031429d53f1a1:p1:4-4" }, { op: add, path: /cells/2/metadata/reader/claims/0/citations/1/quote_sha256, value: "1111111111111111111111111111111111111111111111111111111111111111" }]
+    write: cell_schema
+  - id: span-locator-file-form
+    note: "the non-PDF form is refused until a non-PDF converter exists"
+    ops: [{ op: replace, path: /cells/2/metadata/reader/claims/0/citations/1/span, value: "spn:bfaf5f84ec26d5d046b23c32827ff917c72a94707ef23407d77031429d53f1a1:notes.md:L1-2" }, { op: add, path: /cells/2/metadata/reader/claims/0/citations/1/quote_sha256, value: "1111111111111111111111111111111111111111111111111111111111111111" }]
+    write: cell_schema
+  - id: span-locator-page-zero
+    ops: [{ op: replace, path: /cells/2/metadata/reader/claims/0/citations/1/span, value: "spn:bfaf5f84ec26d5d046b23c32827ff917c72a94707ef23407d77031429d53f1a1:p0:0-1" }, { op: add, path: /cells/2/metadata/reader/claims/0/citations/1/quote_sha256, value: "1111111111111111111111111111111111111111111111111111111111111111" }]
+    write: cell_schema
+  - id: quote-uppercase
+    ops: [{ op: replace, path: /cells/2/metadata/reader/claims/0/citations/1/span, value: "spn:bfaf5f84ec26d5d046b23c32827ff917c72a94707ef23407d77031429d53f1a1:p1:0-120" }, { op: add, path: /cells/2/metadata/reader/claims/0/citations/1/quote_sha256, value: "ABABABABABABABABABABABABABABABABABABABABABABABABABABABABABABABAB" }]
+    write: cell_schema
+  - id: source-ref-locator-no-quote
+    ops: [{ op: replace, path: /cells/4/metadata/reader/source_ref/span, value: "spn:bfaf5f84ec26d5d046b23c32827ff917c72a94707ef23407d77031429d53f1a1:p2:0-50" }]
+    write: cell_schema
+  - id: lab-reference-locator-with-quote
+    ops: [{ op: add, path: /cells/6/metadata/reader/reference, value: { kind: test_vector, span: "spn:bfaf5f84ec26d5d046b23c32827ff917c72a94707ef23407d77031429d53f1a1:p1:0-120", quote_sha256: "1111111111111111111111111111111111111111111111111111111111111111", expected: ["0.628"] } }]
+    write: null
+  - id: source-ref-no-span
+    note: "F01's second source_refs entry has material_sha256 and page, no span"
+    ops: [{ op: replace, path: /cells/1/metadata/reader/source_refs/1/page, value: 3 }]
+    write: null
+  - id: source-ref-no-span-with-quote
+    ops: [{ op: add, path: /cells/1/metadata/reader/source_refs/1/quote_sha256, value: "1111111111111111111111111111111111111111111111111111111111111111" }]
+    write: cell_schema
+  - id: lab-reference-no-span
+    ops: [{ op: add, path: /cells/6/metadata/reader/reference, value: { kind: test_vector, expected: ["0.628"] } }]
+    write: null
   # Trailing newlines: `^…$` patterns accept them in Python's re; the schema's `single_line` guard refuses them.
   - id: span-trailing-newline
     ops: [{ op: replace, path: /cells/2/metadata/reader/claims/0/citations/1/span, value: "bfaf5f84ec26d5d046b23c32827ff917c72a94707ef23407d77031429d53f1a1:1\n" }]
