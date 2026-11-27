@@ -164,7 +164,7 @@ async def pack_outline(conn: AsyncConnection, pack: Pack) -> list[OutlineEntry]:
     return [OutlineEntry(int(r[0]), int(r[1]), str(r[2]), None if r[3] is None else int(r[3])) for r in rows]
 
 
-async def ingest_facts(conn: AsyncConnection, ingest_id: uuid.UUID) -> IngestFacts | None:
+async def ingest_facts(conn: AsyncConnection, ingest_id: uuid.UUID | str) -> IngestFacts | None:
     """An ingest's recorded row (SRV-OBS's Run of an import), whatever its pack's state."""
     row = (await conn.execute(text(
         "SELECT i.owner_id, m.sha256, i.converter_version, i.span_count, i.imported_at, m.page_count"
