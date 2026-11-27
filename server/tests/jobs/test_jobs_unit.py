@@ -146,7 +146,11 @@ def test_kind_modules_are_a_declared_list() -> None:
         "reader.agent.lane",  # FR-EVENTS-9 amended (ADR-0039 B7b)
     )
     assert list(jobs.load_kinds()) == [
-        "ingest.import", "search.embed", "pipeline.stage", "pipeline.verify", "tutor.answer",
+        "ingest.import",
+        # SRV-INGEST revision 3 (FR-EVENTS-1's paired note, V.kl-ingest-packs)
+        "ingest.seqmap", "ingest.reanchor", "ingest.gc", "ingest.gc_pack", "ingest.gc_overlay", "ingest.purge",
+        "ingest.reconcile",
+        "search.embed", "pipeline.stage", "pipeline.verify", "tutor.answer",
         "obs.feedback", "obs.prompts", "obs.retention",  # SRV-OBS FR-OBS-14, -15 (V.obs-analytics)
         "obs.setup", "obs.runs", "obs.bench", "obs.label", "obs.health",  # SRV-OBS phase 2 (FR-EVENTS-32)
         # SRV-OBS ADR-0039 (FR-EVENTS-32's paired note, V.kl-obs-spans)
@@ -158,15 +162,17 @@ def test_kind_modules_are_a_declared_list() -> None:
 
 
 def test_start_hooks_are_the_declared_modules_on_worker_start() -> None:
-    """FR-EVENTS-1: `hooks=None` means these, in KIND_MODULES order (ingest and tutor export none)."""
+    """FR-EVENTS-1: `hooks=None` means these, in KIND_MODULES order (tutor exports none)."""
     require_jobs()
     import reader.agent.lane
+    import reader.ingest.jobs
     import reader.obs.jobs
     import reader.pipeline.jobs
     import reader.search.jobs
     from reader.jobs.catalog import start_hooks
 
     assert start_hooks() == [
+        reader.ingest.jobs.on_worker_start,  # enqueues ingest.reconcile (SRV-INGEST FR-INGEST-40's gate)
         reader.search.jobs.on_worker_start,
         reader.pipeline.jobs.on_worker_start,
         reader.obs.jobs.on_worker_start,

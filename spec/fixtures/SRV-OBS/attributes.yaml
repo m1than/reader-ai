@@ -235,6 +235,14 @@ job_args:
   obs.eval_run: {}
   obs.eval_sample: {}
   obs.judge_score: {}
+  # SRV-INGEST revision 3 (V.kl-ingest-packs): the pack kinds copy nothing (SRV-INGEST lists no id).
+  ingest.seqmap: {}
+  ingest.reanchor: {}
+  ingest.gc: {}
+  ingest.gc_pack: {}
+  ingest.gc_overlay: {}
+  ingest.purge: {}
+  ingest.reconcile: {}
   obs.align: {}
 
 resource: { keys: [service.name, service.version], service.name: { enum: [reader-api, reader-worker] } }

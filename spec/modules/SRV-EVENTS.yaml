@@ -150,6 +150,12 @@ requirements:
       `judge.find` sets 86,400 (bounds); a value ≤ 0 → `kind_bounds_invalid`. (e) Reserved names: a kind may not be
       named `jobs.sweep`, `jobs.judge_reap`, `jobs.judge_gc` or any name ending in `.tick` (`kind_name_reserved`),
       because those are the periodic tasks' names (FR-EVENTS-15, -34).
+      Paired SRV-INGEST change (V.kl-ingest-packs, 2026-11-27; SRV-INGEST FR-INGEST-40's merge gate):
+      `reader.ingest.jobs.JOB_KINDS` adds `ingest.seqmap`, `ingest.reanchor`, `ingest.gc` (a daily periodic entry,
+      `ingest.gc.tick`), `ingest.gc_pack`, `ingest.gc_overlay`, `ingest.purge` and `ingest.reconcile` after
+      `ingest.import`, all on the `ingest` queue (the main lane), and the module exports `on_worker_start`, which only
+      enqueues `ingest.reconcile` (this contract); the start hooks become ingest, search, pipeline, obs, agent in
+      KIND_MODULES order. [unit] test_jobs_unit.py: the catalog's kind list and the start-hook list.
     tests_planned:
       - "change server/tests/jobs/test_jobs_unit.py [unit]: key_retention_s accepted when positive or None, refused at 0 and below (kind_bounds_invalid); kind_name_reserved for jobs.judge_reap, jobs.judge_gc and a name ending in .tick"
       - "test_lanes_db.py [db]: a judge.find stub handler that writes through its own connection and then raises leaves its write committed and the key dead"

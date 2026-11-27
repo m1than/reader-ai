@@ -1681,6 +1681,20 @@ requirements:
       V/kl-ingest-packs but must not merge into the integration branch before (a) SRV-EVENTS' KIND_MODULES and
       SRV-OBS's span-name list serve `ingest.seqmap` and `ingest.reanchor`, (b) `start_reconcile` and the sweep are
       wired at worker start, and (c) the `seqmap_missing` re-enqueue above is in place (done).
+      **Gate met (phase 2 unit 7, 2026-11-27), as paired changes on this branch:** `reader.ingest.jobs.JOB_KINDS`
+      holds every kind of this revision (`ingest.import`, `ingest.seqmap`, `ingest.reanchor`, `ingest.gc`,
+      `ingest.gc_pack`, `ingest.gc_overlay`, `ingest.purge`, `ingest.reconcile`), so SRV-EVENTS' worker serves them
+      (FR-EVENTS-1 note) and SRV-OBS's `job_args` lists each with `{}` (VEC-OBS-1 note: no argument reaches a span).
+      (b) is wired through SRV-EVENTS' start hooks, whose contract lets a hook only enqueue: `reader.ingest.jobs.
+      on_worker_start(jobs)` enqueues `ingest.reconcile` {started} (key [started], the hook's UTC time, priority 100
+      so it runs before queued imports, finished keys kept 7 days), whose handler runs `start_reconcile` (the
+      profile reconcile per owner, then the pending-activation sweep, each pack in its own transaction; rule work
+      only). `enqueue_known` also skips, logged `ingest enqueue_skipped no_worker`, when no worker runs (the api's
+      restore route reaching `seqmap_missing` or `anchors_missing`), so a refusal never fails the request; the next
+      worker start's sweep enqueues the follow-up.
+      [db] test_overlays_db.py: on_worker_start enqueues one ingest.reconcile; running it reconciles and sweeps (a
+      pending row of an imported pack is appended); every kind of this revision is in JOB_KINDS; enqueue_known
+      without a running worker enqueues nothing and returns False.
   - id: FR-INGEST-41
     text: >-
       **Migration step 4: mutable citations** (P2 (4)). `python -I -m reader.ingest.migrate_citations` (run by

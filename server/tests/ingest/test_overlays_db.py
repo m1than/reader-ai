@@ -227,6 +227,34 @@ async def test_start_reconcile_and_shareable(pg: Pg, tmp_path: Path, monkeypatch
         assert await w.scalar("SELECT count(*) FROM pending_activations") == 0
 
 
+async def test_worker_start_enqueues_the_reconcile(pg: Pg, tmp_path: Path, caplog: Any) -> None:
+    """FR-INGEST-40's merge gate: the start hook only enqueues; the reconcile job reconciles and sweeps."""
+    import logging
+
+    from reader.jobs import worker as jobs_worker
+
+    jobs = need("reader.ingest.jobs")
+    names = {k.name for k in jobs.JOB_KINDS}
+    assert names == {"ingest.import", "ingest.seqmap", "ingest.reanchor", "ingest.gc", "ingest.gc_pack",
+                     "ingest.gc_overlay", "ingest.purge", "ingest.reconcile"}
+    caplog.set_level(logging.INFO)
+    async with world(pg, tmp_path) as w:
+        pack = await imported(w)  # its pending {profile} row waits for an activation
+        assert await w.scalar("SELECT count(*) FROM pending_activations WHERE pack_id = :p", p=pack) == 1
+        await jobs.on_worker_start(w.jobs)
+        assert await w.scalar("SELECT count(*) FROM job_keys WHERE kind = 'ingest.reconcile'") == 1
+        assert await w.scalar("SELECT count(*) FROM manifest_entries") == 0  # the hook itself wrote nothing
+        await w.work()
+        assert await w.scalar("SELECT count(*) FROM pending_activations") == 0
+        assert await w.scalar("SELECT count(*) FROM manifest_entries") == 1
+        previous, jobs_worker._RUNNING[0] = jobs_worker._RUNNING[0], None  # the api: no worker runs
+        try:
+            assert await jobs.enqueue_known("ingest.seqmap", {}) is False
+        finally:
+            jobs_worker._RUNNING[0] = previous
+        assert "ingest enqueue_skipped no_worker" in caplog.text
+
+
 async def test_span_tags_cannot_move_into_a_sealed_overlay(pg: Pg, tmp_path: Path) -> None:
     """Code review of unit 2, blocking 1: the overlay-row guard checks the new row's overlay too."""
     overlays = need("reader.ingest.overlays")
