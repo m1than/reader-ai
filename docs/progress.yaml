@@ -2257,8 +2257,12 @@ tasks:
         variant (c) hits 40 of 40 (the block-for-owner branch is likely); M1 screen over variants (a) search(k=8)
         spans, (b) primaries, (c) +next, (d) +previous+next; M1 gates promotion, P1 gates done/merge (deviation in
         owner notes); judge ship condition (c) in SRV-SEARCH, no judge_ctx until the Waiter; SRV-INGEST draft
-        views.active_span_rows; traceability and NFC length at ask; no quote_sha256 beside a legacy id. Awaits
-        round 2",
+        views.active_span_rows; traceability and NFC length at ask; no quote_sha256 beside a legacy id. Round 2
+        (on 3b564b8/f0d2fa5): changes, 1 blocking, applied in 19bb784. Round 3 (on 19bb784): approve; its two nits
+        applied (this note; INV-TUTOR-2's Hypothesis case stated at the check-function level). Two thresholds on
+        M1: the build threshold (variant (c) gold_in_sources >= variant (a) and >= 26 of 40) gates promotion with
+        Red and the build; the P1 threshold (variant (c) 40 of 40, or the owner's explicit go) gates the paid
+        bench P1, which gates done and the merge. Phase 2: M1 in spikes/tutor-find-m1/",
       what: "SRV-TUTOR revision (~100–200 lines): retrieval through find on the tutor channel with its own maximum in
         policy, starting at today's 21,000-byte source budget, full span text for personal-use cards, NFR-TUTOR-3
         grounding re-measured as a gate; L5 boost once learner

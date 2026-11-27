@@ -642,7 +642,7 @@ proposed_revisions:
       for any model output (the model never sees a hash), and no stored or shown citation carries `quote_sha256`
       beside a legacy `<sha>:<seq>` id. [unit]
     tests_planned:
-      - "change the INV-TUTOR-2 Hypothesis property in server/tests/tutor/test_tutor_unit.py: generated outputs, including hex strings in quotes and text, never change a citation's quote_sha256 from the sent span's; with sent sets mixing locators and legacy ids, every citation with quote_sha256 names a locator"
+      - "change the INV-TUTOR-2 Hypothesis property in server/tests/tutor/test_tutor_unit.py, at the check-function level (the citation check over a generated sent set, not the handler): generated outputs, including hex strings in quotes and text, never change a citation's quote_sha256 from the sent span's; with sent sets mixing locators and legacy ids (as the check could receive them if FR-TUTOR-5's candidate filter were bypassed), every citation with quote_sha256 names a locator"
   - id: INV-TUTOR-4
     text: "As approved, with a case through the real find and StoreCorpus path (no fake find): the canary in the question and in a span appears in no log record and no job args."
     tests_planned:
