@@ -122,7 +122,7 @@ def parse(text: str, aliases: Mapping[str, Picked], material_sha256: str, today:
         kept.append(
             {
                 "id": f"c{len(kept) + 1}",
-                "span": span.id_in(material_sha256),
+                **span.ref(material_sha256),  # the span id, and its quote hash beside a locator (FR-FRESH-3)
                 "page": span.page,
                 "subject": sanitise(subject, params.SUBJECT_CHARS_MAX),
                 "kind": item["kind"],

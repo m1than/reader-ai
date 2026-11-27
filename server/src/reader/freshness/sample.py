@@ -21,6 +21,7 @@ from reader.freshness.signals import score
 from reader.freshness.text import cut, sanitise
 
 BODY_KINDS: Final = frozenset({"text", "list_item", "table", "code"})
+LOCATOR_PREFIX: Final = "spn:"  # SRV-INGEST FR-INGEST-33's locator form; a legacy id never starts with it
 SECTIONS_WITHOUT_OUTLINE: Final = 20
 
 
@@ -31,6 +32,7 @@ class SpanRow:
     kind: str
     text: str
     span_id: str | None = None  # SRV-INGEST views' id (FR-FRESH-2's paired change); None: `<sha>:<seq>`
+    quote_sha256: str | None = None  # the stored quote hash (SRV-INGEST FR-INGEST-34)
 
 
 @dataclass(frozen=True)
@@ -49,9 +51,20 @@ class Picked:
     text: str  # cut to span_chars_max
     front: bool
     span_id: str | None = None
+    quote_sha256: str | None = None
 
     def id_in(self, material_sha256: str) -> str:
         return self.span_id or span_id(material_sha256, self.seq)
+
+    def ref(self, material_sha256: str) -> dict[str, str]:
+        """The span id, plus its quote_sha256 beside a locator (SRV-INGEST FR-INGEST-34; r3_gates_revision).
+        A locator without a stored hash cannot occur (an active pack is sealed): asserted, so the job fails
+        closed instead of storing a locator without its hash."""
+        sid = self.id_in(material_sha256)
+        if not sid.startswith(LOCATOR_PREFIX):  # a legacy `<sha>:<seq>` id carries no hash
+            return {"span": sid}
+        assert self.quote_sha256 is not None, "locator span without its quote hash"  # noqa: S101
+        return {"span": sid, "quote_sha256": self.quote_sha256}
 
 
 @dataclass(frozen=True)
@@ -67,8 +80,8 @@ class Sample:
         return [p.seq for p in self.spans]
 
     def stored(self, material_sha256: str) -> list[dict[str, object]]:
-        """What the report stores: span ids and pages only (FR-FRESH-2)."""
-        return [{"span": p.id_in(material_sha256), "page": p.page} for p in self.spans]
+        """What the report stores: span ids (with a locator's quote hash) and pages only (FR-FRESH-2)."""
+        return [{**p.ref(material_sha256), "page": p.page} for p in self.spans]
 
     @property
     def non_front_texts(self) -> list[str]:
@@ -118,7 +131,7 @@ def build(spans: Sequence[SpanRow], outline: Sequence[OutlineRow], page_count: i
             continue
         if used + len(piece) > params.FRONT_CHARS_MAX:
             break
-        picked.append(Picked(span.seq, span.page, span.kind, piece, True, span.span_id))
+        picked.append(Picked(span.seq, span.page, span.kind, piece, True, span.span_id, span.quote_sha256))
         used += len(piece)
     front = {p.seq for p in picked}
     others = [s for s in ordered if s.seq not in front and s.kind in BODY_KINDS and s.text.strip()]
@@ -137,7 +150,9 @@ def build(spans: Sequence[SpanRow], outline: Sequence[OutlineRow], page_count: i
             if used + len(piece) > params.SAMPLE_CHARS_MAX:
                 full = True
                 break
-            picked.append(Picked(span.seq, span.page, span.kind, piece, False, span.span_id))
+            picked.append(
+                Picked(span.seq, span.page, span.kind, piece, False, span.span_id, span.quote_sha256)
+            )
             used += len(piece)
         rank += 1
     return Sample(tuple(sorted(picked, key=lambda p: p.seq)))

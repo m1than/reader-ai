@@ -2303,7 +2303,11 @@ tasks:
         output_invalid on a locator without one; a model-written reference hash is dropped and to_compact hides
         hashes; INV-PIPELINE-3 checked over a legacy and a locator source; VEC-PIPELINE-6 gains 3 locator cases.
         Unit h (WEB-NOTEBOOK) done: citations.ts materialOf takes a locator's 64-hex material (the Ask panel shares
-        it), which also fixes the live 'source spn:…' entry per cited page in the tutor's Ask panel.
+        it), which also fixes the live 'source spn:…' entry per cited page in the tutor's Ask panel. Unit fresh
+        (SRV-FRESH) done: SpanRow/Picked carry quote_sha256; Picked.ref asserts a locator's hash (plain assert);
+        sample[] and claims[] store it beside a locator only; scan_inputs_sha256 and the read shape (_CLAIM_KEYS)
+        unchanged. Left for the bump task: CONVERTER_VERSION r3 once gate (g) (V.kl-tutor-find) is Green on
+        V/slice-integration.
         CONVERTER_VERSION stays docling-2.151.1+r2 (the bump waits for gate (g)).",
       what: "spec revisions for FR-INGEST-40 gates (e), (f), (h), (i) and the final CONVERTER_VERSION r3 step" }
   - { id: V.kl-live, stage: V, kind: live, status: todo, needs: [V.kl-pipeline-checks, V.kl-tutor-find],
