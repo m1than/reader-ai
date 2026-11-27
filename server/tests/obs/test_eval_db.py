@@ -364,6 +364,142 @@ async def test_a_refused_dataset_input_falls_back_to_both_experiments(pg: Any, p
         await engine.dispose()
 
 
+class FallbackWorld:
+    """An MLflow that refuses a bench-only dataset as an eval Run input (400) and accepts the fallback one;
+    datasets are kept by experiment, and the Run's completeness is remembered."""
+
+    def __init__(self) -> None:
+        from .test_phase2_unit import Mlflow
+
+        self.datasets: list[dict[str, Any]] = []
+        self.complete = False
+
+        def search(request: httpx.Request) -> tuple[int, dict[str, Any]]:
+            wanted = set(json.loads(request.content)["experiment_ids"])
+            return 200, {"datasets": [d for d in self.datasets if wanted & set(d["experiment_ids"])]}
+
+        def create(request: httpx.Request) -> tuple[int, dict[str, Any]]:
+            body = json.loads(request.content)
+            made = {"dataset_id": f"d{len(self.datasets) + 1}", "experiment_ids": body["experiment_ids"]}
+            self.datasets.append(made)
+            return 200, {"dataset": made}
+
+        def log_inputs(request: httpx.Request) -> tuple[int, dict[str, Any]]:
+            used = json.loads(json.loads(request.content)["datasets"][0]["dataset"]["source"])["dataset_id"]
+            ok = any(d["dataset_id"] == used and "0" in d["experiment_ids"] for d in self.datasets)
+            return (200, {}) if ok else (400, {})
+
+        def runs_search(request: httpx.Request) -> tuple[int, dict[str, Any]]:
+            if not self.complete:
+                return 200, {"runs": []}
+            tags = [{"key": "reader.complete", "value": "true"}, {"key": "reader.ends", "value": "1"}]
+            return 200, {"runs": [{"info": {"run_id": "r1"}, "data": {"params": [], "tags": tags}}]}
+
+        def set_tag(request: httpx.Request) -> tuple[int, dict[str, Any]]:
+            if json.loads(request.content).get("key") == "reader.complete":
+                self.complete = True
+            return 200, {}
+
+        self.mlflow = Mlflow({**RUN_REPLIES, ("POST", "/api/3.0/mlflow/datasets/search"): search,
+                              ("POST", "/api/3.0/mlflow/datasets/create"): create,
+                              ("POST", "/api/2.0/mlflow/runs/log-inputs"): log_inputs,
+                              ("POST", "/api/2.0/mlflow/runs/search"): runs_search,
+                              ("POST", "/api/2.0/mlflow/runs/set-tag"): set_tag})
+
+
+async def test_two_executions_in_the_fallback_world_make_one_fallback_dataset(pg: Any, pinned: None,
+                                                                             monkeypatch: Any) -> None:
+    """Code review round 2: check 0 closes the run and check 1 runs later; the fallback dataset is made once,
+    and a job that finds the Run complete writes nothing more."""
+    ev = require("reader.obs.eval")
+    engine = await engine_for(pg)
+    try:
+        eval_id = await _closable(engine, monkeypatch)
+        world = FallbackWorld()
+        monkeypatch.setattr(ev, "tracing_on", lambda: True)
+        monkeypatch.setattr(ev, "client_factory", world.mlflow.client)
+        await _run(engine, eval_id)
+        world.complete = False  # a retry before the Run was marked complete: the fallback dataset is reused
+        await _run(engine, eval_id)
+        fallbacks = [d for d in world.datasets if "0" in d["experiment_ids"]]
+        assert len(fallbacks) == 1 and len(world.datasets) == 2
+        writes_before = len(world.mlflow.writes())
+        await _run(engine, eval_id)  # the Run is complete now: no write at all
+        assert len(world.mlflow.writes()) == writes_before
+    finally:
+        await engine.dispose()
+
+
+async def test_a_5xx_on_the_dataset_input_does_not_fall_back(pg: Any, pinned: None, monkeypatch: Any) -> None:
+    ev = require("reader.obs.eval")
+    engine = await engine_for(pg)
+    try:
+        eval_id = await _closable(engine, monkeypatch)
+        world = FallbackWorld()
+        world.mlflow.replies[("POST", "/api/2.0/mlflow/runs/log-inputs")] = (503, {})
+        monkeypatch.setattr(ev, "tracing_on", lambda: True)
+        monkeypatch.setattr(ev, "client_factory", world.mlflow.client)
+        with pytest.raises(httpx.HTTPStatusError):
+            await _run(engine, eval_id)
+        assert [d["experiment_ids"] for d in world.datasets] == [["7"]]  # no fallback dataset
+    finally:
+        await engine.dispose()
+
+
+async def test_a_provider_failure_is_not_an_invalid_output(pg: Any, pinned: None, monkeypatch: Any) -> None:
+    ev = require("reader.obs.eval")
+    engine = await engine_for(pg)
+    try:
+        owner = await user(engine, "owner")
+        ports = Ports()
+
+        async def failing(*args: Any) -> str:
+            raise RuntimeError("provider down")
+
+        monkeypatch.setattr(ports, "judge", failing)
+        monkeypatch.setattr(ev, "PORTS", ports)
+        eval_id = await _start(engine, owner)
+        await _record(engine, eval_id, 0)
+        async with engine.connect() as conn:
+            rec = (await conn.execute(text("SELECT * FROM obs_eval_records WHERE record_id = 'e01'"))).one()
+            assert (await conn.execute(text("SELECT count(*) FROM obs_eval_scores"))).scalar_one() == 0
+        assert rec.invalid_outputs == 0 and rec.state == "done"
+    finally:
+        await engine.dispose()
+
+
+async def test_the_sampler_skips_scored_and_queued_inputs(pg: Any, monkeypatch: Any) -> None:
+    ev = require("reader.obs.eval")
+    ji = require("reader.obs.judge_inputs")
+    engine = await engine_for(pg)
+    try:
+        owner = await user(engine, "owner")
+        request = Request(owner, "owner q", CARDS)
+        output = {"keep": [CARDS[0][0]], "sufficiency": 0.5}
+        async with engine.begin() as conn:
+            await record_output(conn, request, output)
+            await ji.SINK.copy(conn, request, output)
+        monkeypatch.setattr(ev, "SAMPLE_POLICY", ev.SamplePolicy(
+            judges=SLOTS, cap_usd=Decimal(5), floors={s: Decimal("0.01") for s in SLOTS}))
+        args = ev.SampleArgs(slot="2026-11-26T12:00")
+        for _ in range(2):  # the second pass finds the input already queued in a sample run
+            async with engine.begin() as conn:
+                await ev.handle_sample(args, conn, Ctx(400, "obs.eval_sample:x"))
+        async with engine.connect() as conn:
+            assert (await conn.execute(text("SELECT count(*) FROM obs_eval_runs"))).scalar_one() == 1
+        monkeypatch.setattr(ev, "PORTS", Ports())
+        async with engine.connect() as conn:
+            eval_id = (await conn.execute(text("SELECT id FROM obs_eval_runs"))).scalar_one()
+        await _record(engine, eval_id, 0)  # scored now
+        async with engine.begin() as conn:
+            await conn.execute(text("DELETE FROM obs_eval_records"))  # not queued any more, but scored
+            await ev.handle_sample(args, conn, Ctx(401, "obs.eval_sample:y"))
+        async with engine.connect() as conn:
+            assert (await conn.execute(text("SELECT count(*) FROM obs_eval_runs"))).scalar_one() == 1
+    finally:
+        await engine.dispose()
+
+
 @pytest.mark.parametrize("status", [400, 503])
 async def test_an_mlflow_failure_leaves_the_run_closed(pg: Any, pinned: None, monkeypatch: Any,
                                                        status: int) -> None:

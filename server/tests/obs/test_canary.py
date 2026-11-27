@@ -154,7 +154,7 @@ def test_fr_obs_7_every_kind_and_route_is_a_listed_span_name() -> None:
 # --- INV-OBS-6 (ADR-0039, code review round 1): judge text confinement, end to end in one process ---
 
 KL_CANARIES = ("QCANARY", "NOTECANARY", "FACTCANARY", "CANDCANARY", "RATIONALECANARY", "CARDTEXTCANARY",
-               "QUERYCANARY", "HOSTILECANARY")
+               "QUERYCANARY", "HOSTILECANARY", "FACT-CANARY")  # FACT-CANARY: test_eval_db.SET's expected fact
 
 
 @pytest.mark.anyio
@@ -254,9 +254,14 @@ async def test_judge_text_never_leaves_its_stores(pg: Any, receiver: str, monkey
             top.done(cards=1, tokens=10, judged_tokens=0, unjudged_tokens=10, judge=find.Judge(ran=False,
                                                                                                 skip="gate"))
         handle.force_flush()
+        async with engine.connect() as conn:  # every job's args and key row
+            keys = json.dumps([tuple(map(str, r)) for r in (await conn.execute(text(
+                "SELECT kind, key, args FROM job_keys"))).all()])
     finally:
         handle.shutdown()
         await engine.dispose()
+    for canary in KL_CANARIES:
+        assert canary not in keys, canary
     assert _Receiver.bodies, "the exporter sent nothing"
     exported = b"".join(_Receiver.bodies)
     sent = json.dumps(mlflow_bodies)

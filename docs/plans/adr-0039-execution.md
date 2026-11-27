@@ -239,6 +239,17 @@ Every spend is a `budget.ledger` row with the task, the amount and the line. `in
 4. Restore the pack → the same cards.
 5. Stop MLflow → search still works.
 6. The Haiku evaluation meets the `brain/v1` targets.
+7. Moved here from V.kl-obs-spans (code review round 1), once SRV-SEARCH's `find` produces the spans:
+   - [image] FR-OBS-36: `find.route` is stored as ROUTER; RETRIEVER and RERANKER spans show their documents; the
+     `judge.find` job trace is linked from `find.judge_wait`; `?q=<policy_version>` finds the trace; the stored
+     size of one `find` is recorded.
+   - [image] FR-OBS-37: a `pack.build` span with an `agent.call` child; MLflow's span cost sum equals the ledger
+     amount only.
+   - [image] FR-OBS-39: LLM_JUDGE assessments show on the Quality dashboard; the eval Run lists its record traces;
+     the cross-experiment dataset input is pinned, or its declared fallback is exercised.
+   - [image] FR-OBS-16: Evaluation runs lists the eval Run; the saved view `?q=<policy_version>` works.
+   - [live] FR-OBS-36: a zero-credit owner-channel `find` gives a find subtree with documents and no text canary
+     in the trace JSON.
 
 ## Stage 7
 

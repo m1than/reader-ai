@@ -550,6 +550,10 @@ async def handle_run(args: RunArgs, conn: Any, ctx: Any) -> None:
 
     try:
         async with client_factory() as client:
+            found = await runs._find(client, snap)
+            tags = runs._kv(((found or {}).get("data") or {}).get("tags"))
+            if tags.get("reader.complete") == "true":
+                return  # a later check (or a retry) after the Run is complete writes nothing more
             run_id = await runs.sync(snap, client)
             if run.set_name and run.set_doc:
                 await _log_dataset(client, run_id, run)
@@ -580,8 +584,9 @@ async def _log_dataset(client: httpx.AsyncClient, run_id: str, run: Any) -> None
         if refused.status != 400:
             raise
         # FR-OBS-39 (c)'s declared fallback: MLflow refused a `bench` dataset as an input of a Run in
-        # experiment 0, so the dataset is made in both experiments and logged again.
-        dataset_id = await _dataset(client, run, ["0", experiment], search=False)
+        # experiment 0, so the dataset found by name in experiment 0 is used, else one is made in both
+        # experiments; found first, so a second execution reuses it instead of making another.
+        dataset_id = await _dataset(client, run, ["0", experiment], search_in=["0"])
         await _log_input(client, run_id, run, dataset_id)
 
 
@@ -599,12 +604,15 @@ def dataset_records(set_doc: Any) -> list[dict[str, Any]]:
     return out
 
 
-async def _dataset(client: httpx.AsyncClient, run: Any, experiments: list[str], search: bool = True) -> str:
-    listed: list[dict[str, Any]] = []
-    if search:
-        _, found = await request(client, "POST", "/api/3.0/mlflow/datasets/search",
-                                 {"experiment_ids": experiments, "filter_string": f"name = '{run.set_name}'"})
-        listed = [d for d in found.get("datasets") or [] if isinstance(d, dict)]
+async def _dataset(
+    client: httpx.AsyncClient, run: Any, experiments: list[str], search_in: list[str] | None = None
+) -> str:
+    """The dataset named after the set, found in `search_in` (default `experiments`), else created in
+    `experiments`; its records upserted."""
+    _, found = await request(client, "POST", "/api/3.0/mlflow/datasets/search",
+                             {"experiment_ids": search_in or experiments,
+                              "filter_string": f"name = '{run.set_name}'"})
+    listed = [d for d in found.get("datasets") or [] if isinstance(d, dict)]
     if listed:
         dataset = listed[0]
     else:
@@ -701,6 +709,7 @@ class SampleArgs(BaseModel):
 SAMPLE_SQL: Final = (
     "SELECT ji.id FROM judge_inputs ji WHERE ji.labelable AND ji.created_at > now() - interval '1 day'"
     " AND NOT EXISTS (SELECT 1 FROM obs_eval_scores s WHERE s.judge_input_id = ji.id)"
+    " AND NOT EXISTS (SELECT 1 FROM obs_eval_records e WHERE e.judge_input_id = ji.id)"
     " ORDER BY ji.created_at DESC LIMIT :n"
 )
 OWNER_SQL: Final = "SELECT id FROM users WHERE role = 'owner' ORDER BY created_at LIMIT 1"

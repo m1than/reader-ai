@@ -1965,7 +1965,16 @@ tasks:
         legitimate in substance, and it is not to be repeated: a test change goes with its own spec change in the
         same commit. Code review round 1 fixes: obs.eval_run closes in its own transaction before MLflow, the
         [0, bench] dataset fallback, tests with the in-test MLflow (bodies, 400/503, retry), the sampler, the
-        INV-OBS-6 end-to-end canary; image levels of FR-OBS-36/-37/-39 moved to V.kl-live",
+        INV-OBS-6 end-to-end canary; image levels of FR-OBS-36/-37/-39 and FR-OBS-16's image check, and
+        FR-OBS-36's live check, moved to V.kl-live (listed in its `what`). Code review round 2 fixes: the fallback
+        dataset is reused (found by name in experiment 0) and a job that finds the Run complete writes nothing.
+        For the brain-eval-v1 pin task: spec/fixtures/eval/pilot-eval-v1.yaml (accepted 2026-11-26) names its
+        fields `type` (eval.py reads `question_type`), uses `fact-check`-style values to check against
+        VEC-OBS-5's `fact_check`, and gives `gold_pages` as strings and ranges (\"33-35\"), which eval.py does
+        not send (it sends integers only, never invented); the pin needs a mapping or a set rewrite, decided
+        there. Pre-existing flake seen in local CI: tests/obs/test_tracing_db.py::
+        test_worker_start_rows_and_their_pruning compares the database clock with the host clock (passed on
+        rerun); to fix later by reading the time from the database, with its spec",
       what: "SRV-OBS and WEB-MANAGE revision (~500–800 lines): TOOL/ROUTER/RETRIEVER spans with ids, counts, brain_version,
         policy_version and hashes only (INV-OBS-1/2 kept; question-derived filters as concept ids or hashes); the
         judge.find job as its own linked trace; a local judge-evaluation job kind obs.eval writing scores only
@@ -2016,7 +2025,15 @@ tasks:
   - { id: V.kl-live, stage: V, kind: live, status: todo, needs: [V.kl-pipeline-checks, V.kl-tutor-find],
       what: "upload -> one manifest entry; a BIP-32 question -> cards with locators; remove the pack -> search no longer
         sees it; restore -> the same cards; MLflow stopped -> search still answers; Haiku evaluation meets the brain/v1
-        targets (90% sufficiency, median <= 3 calls, <= 2,000 tokens, find p95 < 2.5 s)" }
+        targets (90% sufficiency, median <= 3 calls, <= 2,000 tokens, find p95 < 2.5 s); moved here from
+        V.kl-obs-spans (code review round 1), in server/tests/obs/test_images_kl.py (opt-in READER_TEST_IMAGE_BUILD=1)
+        and e2e/live/lib/obs_live.py: [image] FR-OBS-36 (find.route stored as ROUTER, RETRIEVER/RERANKER documents
+        rendered, the judge.find job trace linked from find.judge_wait, ?q=<policy_version>, the stored size of one
+        find), [image] FR-OBS-37 (a pack.build span with an agent.call child: MLflow's span cost sum equals the
+        ledger amount only), [image] FR-OBS-39 (LLM_JUDGE assessments on the Quality dashboard, the eval Run lists
+        its record traces, the cross-experiment dataset input pinned or its fallback exercised), [image] FR-OBS-16
+        (Evaluation runs lists the eval Run; the saved view ?q=<policy_version>), and [live] FR-OBS-36 (a
+        zero-credit owner-channel find gives a find subtree with documents and no text canary in the trace JSON)" }
 
   # Stage 3 — ingestion and search
   - { id: S3.SRV-INGEST, stage: 3, kind: module, track: engineering, status: todo, needs: [S2.live, S0.spike.ingest-docling] }

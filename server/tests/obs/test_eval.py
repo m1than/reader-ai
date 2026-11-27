@@ -100,3 +100,20 @@ def test_the_run_snapshot_passes_vec_obs_5() -> None:
     with pytest.raises(ValueError):
         runs._validate(ev.snapshot(eval_id=snap.key, state="done", start_ms=1, end_ms=2,
                                    params={"free_text": "x"}, metrics={}, snapshot_at=snap.snapshot_at))
+
+
+def test_dataset_records_never_invent_a_chapter_or_gold_pages() -> None:
+    ev = require("reader.obs.eval")
+    doc = {"questions": [
+        {"id": "e01", "question": "q one", "question_type": "exact", "chapter": 3, "gold_pages": [10, 11],
+         "expected_facts": ["FACT-CANARY"]},
+        {"id": "e02", "question": "q two", "question_type": "thematic"},  # no chapter, no pages
+        {"id": "e03", "question": "q three", "question_type": "fact_check", "chapter": "3",
+         "gold_pages": ["10"]},  # strings (the pilot set's form): not numbers, so not sent
+    ]}
+    got = ev.dataset_records(doc)
+    assert got[0] == {"inputs": {"question_id": "e01", "question": "q one", "question_type": "exact",
+                                 "chapter": 3}, "expectations": {"gold_pages": [10, 11]}}
+    assert got[1] == {"inputs": {"question_id": "e02", "question": "q two", "question_type": "thematic"}}
+    assert got[2] == {"inputs": {"question_id": "e03", "question": "q three", "question_type": "fact_check"}}
+    assert "FACT-CANARY" not in repr(got)
