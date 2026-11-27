@@ -9,7 +9,7 @@ from __future__ import annotations
 import hashlib
 import json
 import uuid
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from typing import Any, Final
 
 from sqlalchemy import text
@@ -100,3 +100,22 @@ async def profile_values(conn: AsyncConnection, owner_id: uuid.UUID, oid: str) -
     values = dict(zip(PROFILE_FIELDS, row, strict=True))
     values["as_of"] = None if values["as_of"] is None else values["as_of"].isoformat()
     return values
+
+
+async def write_tags(
+    conn: AsyncConnection, owner_id: uuid.UUID, oid: str, pack_id: str, loaded: Any,
+    tags: Sequence[tuple[str, str, str, str, float, str]],
+) -> int:
+    """FR-INGEST-37: (locator, facet, value, by, confidence, tagger_version) rows into a building tags
+    overlay; every tag is checked against the facets file first, so a refusal writes nothing."""
+    from reader.ingest import facets
+
+    for _, facet, value, *_ in tags:
+        facets.check_tag(loaded, facet, value)
+    for locator, facet, value, by, confidence, tagger in tags:
+        await conn.execute(text(
+            "INSERT INTO span_tags (owner_id, overlay_id, pack_id, locator, facet, value, by, confidence,"
+            " tagger_version) VALUES (:o, :i, :p, :l, :f, :v, :b, :c, :t)"),
+            {"o": owner_id, "i": oid, "p": pack_id, "l": locator, "f": facet, "v": value, "b": by,
+             "c": confidence, "t": tagger})
+    return len(tags)

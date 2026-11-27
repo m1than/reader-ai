@@ -33,6 +33,7 @@ ArtifactInvalid = import_error("artifact_invalid")
 NoOwner = import_error("no_owner")
 ArtifactMismatch = import_error("artifact_mismatch")
 UploadMissing = import_error("upload_missing")
+FacetsInvalid = import_error("facets_invalid")
 
 
 class ImportArgs(BaseModel):
@@ -212,6 +213,12 @@ async def _deleted(conn: AsyncConnection, material_sha256: str) -> bool:
 def make_kinds(blobs_root: Path) -> tuple[JobKind, ...]:
     async def handle(args: ImportArgs, conn: AsyncConnection, ctx: JobContext) -> None:
         del ctx
+        from reader.ingest import facets
+
+        try:  # FR-INGEST-37: the facets file is valid before any row (no tags are written: none enabled)
+            facets.load()
+        except facets.FacetsError:
+            raise FacetsInvalid() from None
         if await _deleted(conn, args.material_sha256):  # FR-INGEST-15 amendment: an import never clears it
             store.log.info("ingest material_deleted %s", args.material_id)
             return
