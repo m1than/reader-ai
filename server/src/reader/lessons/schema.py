@@ -12,12 +12,15 @@ import json
 import math
 import re
 import warnings
+from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Final
 
 import jsonschema
 import nbformat
+
+from reader.ingest import locator
 
 # Structural bounds of the spec (`bounds`), each with its reason there.
 INPUT_MAX_BYTES: Final = 16 * 1024 * 1024
@@ -151,6 +154,13 @@ def _check_cells(doc: dict[str, Any]) -> None:
             raise LessonWriteError("not_nbformat") from None
         if not valid:
             raise LessonWriteError("cell_schema")
+        # Step 7b: what the pattern cannot check (start <= end; `#n` present iff the span is empty).
+        for span, _ in _span_refs(meta):
+            if span.startswith("spn:"):
+                try:
+                    locator.parse(span)
+                except locator.LocatorError:
+                    raise LessonWriteError("cell_schema") from None
     for cell, meta in zip(doc["cells"], metas, strict=True):
         if meta is None or CELL_TYPES[meta["kind"]] != cell.get("cell_type"):
             raise LessonWriteError("cell_type_mismatch")
@@ -177,6 +187,25 @@ def validate(data: bytes) -> Validated:
     # The notebook as stored: parsed from the canonical bytes, so keys nbformat drops on write are gone too.
     stored: dict[str, Any] = json.loads(canonical)
     return Validated(stored, canonical, hashlib.sha256(canonical).hexdigest(), len(doc["cells"]))
+
+
+def _span_refs(value: object) -> Iterator[tuple[str, str | None]]:
+    """(span, quote_sha256 or None) of every object holding a `span` under a validated `metadata.reader`."""
+    if isinstance(value, dict):
+        span, quote = value.get("span"), value.get("quote_sha256")
+        if isinstance(span, str):
+            yield span, quote if isinstance(quote, str) else None
+        for child in value.values():
+            yield from _span_refs(child)
+    elif isinstance(value, list):
+        for child in value:
+            yield from _span_refs(child)
+
+
+def span_refs(notebook: dict[str, Any]) -> list[tuple[str, str | None]]:
+    """The notebook's distinct span references in order: citations, source refs, lab refs (FR-LESSON-32)."""
+    found = (ref for cell in notebook["cells"] for ref in _span_refs(_reader(cell.get("metadata"))))
+    return list(dict.fromkeys(found))
 
 
 def notes_ids(notebook: dict[str, Any]) -> set[str]:

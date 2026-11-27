@@ -19,8 +19,9 @@ from sqlalchemy.ext.asyncio import AsyncConnection
 
 from reader import blobs
 from reader.config import Secret
+from reader.ingest import views
 from reader.lessons.access import lesson_uuid
-from reader.lessons.schema import STAGES, LessonWriteError, notes_ids, validate
+from reader.lessons.schema import STAGES, LessonWriteError, notes_ids, span_refs, validate
 
 __all__ = [
     "LessonWriteError",
@@ -344,6 +345,16 @@ async def write_revision(
                 "c": validated.cell_count,
             },
         )
+        # FR-LESSON-32: the packs this revision cites, read through the active view (INV-INGEST-16).
+        cited = await views.citing_packs(conn, owner_id, span_refs(validated.notebook))
+        if cited:
+            await conn.execute(
+                text(
+                    "INSERT INTO revision_packs (owner_id, lesson_id, sha256, pack_id)"
+                    " SELECT :o, :l, :s, unnest(CAST(:p AS text[]))"
+                ),
+                {"o": owner_id, "l": lesson, "s": validated.sha256, "p": sorted(cited)},
+            )
     await conn.execute(text("UPDATE lessons SET updated_at = now() WHERE id = :l"), {"l": lesson})
     await conn.execute(
         text(

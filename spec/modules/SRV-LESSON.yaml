@@ -476,7 +476,9 @@ requirements:
       no row; written in the revision's transaction (a rollback after write_revision leaves none); rewriting the
       same bytes adds none; F01 (synthetic material, no pack) writes its revision with no row; a locator whose hash
       differs from the stored span's adds no row. The migration test: lessons_0003 is the branch head; its
-      downgrade drops only revision_packs; the test downgrades `lessons@-1` three times.
+      downgrade drops only revision_packs; the test downgrades `lessons@-1` three times. FR-LESSON-20's migration
+      test (test_manage_courses_db.py) downgrades to `lessons_0001` by id instead of `lessons@-1`, since
+      lessons_0003 now sits above lessons_0002 (its oracle unchanged).
 
 invariants:
   - id: INV-LESSON-1

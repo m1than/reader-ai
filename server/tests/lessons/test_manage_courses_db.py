@@ -43,7 +43,7 @@ async def test_migration_ranks_existing_courses_and_new_courses_go_first(pg: Pg,
     def down(connection: Any) -> None:
         config = alembic_config()
         config.attributes["connection"] = connection
-        command.downgrade(config, "lessons@-1")
+        command.downgrade(config, "lessons_0001")  # below FR-LESSON-20 (lessons_0003 sits above it now)
 
     async with w.engine.connect() as conn:
         await conn.run_sync(down)

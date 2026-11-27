@@ -2288,8 +2288,16 @@ tasks:
         tests list every r2/r3-pinning test file as change or keeps r2. Decisions written in: gate (i)'s residual is
         covered by owner step (3)'s check; quote_sha256 beside a legacy id is refused (tutor too); state labels go
         to WEB-NOTEBOOK defers; a locator without hash fails closed. Real cost of skipping step (3)'s check: still
-        one dark window, but up to one embed longer, and the legacy embed's work is wasted. Not approved: awaiting
-        the coordinator's next review round.",
+        one dark window, but up to one embed longer, and the legacy embed's work is wasted.
+        Round 2 on ac97a5b: changes, 2 blocking (owner step's compile check via GET /api/compiles; SRV-FRESH read
+        shape unchanged), fixed in 637af3a. Round 3 on 637af3a: VERDICT approve. Approved by agent 2026-11-28
+        (r3_gates_revision block in SRV-LESSON, SRV-PIPELINE, WEB-NOTEBOOK, SRV-FRESH, SRV-INGEST; b7a7db9).
+        Phase 2 (implementation, one module per unit, Red then Green): unit e (SRV-LESSON + SRV-INGEST FR-INGEST-49)
+        done: cell.schema.json span_ref takes the PDF locator with a required quote_sha256 (refused beside a legacy
+        id; step 7b locator.parse), lessons_0003 revision_packs (append-only triggers) written in write_revision
+        through views.citing_packs (head read + one DISTINCT ON query: active pack first, else the lowest pack id);
+        gc.Seams.cited stays unbound; test_manage_courses_db.py's FR-LESSON-20 migration test now downgrades to
+        lessons_0001 by id. CONVERTER_VERSION stays docling-2.151.1+r2 (the bump waits for gate (g)).",
       what: "spec revisions for FR-INGEST-40 gates (e), (f), (h), (i) and the final CONVERTER_VERSION r3 step" }
   - { id: V.kl-live, stage: V, kind: live, status: todo, needs: [V.kl-pipeline-checks, V.kl-tutor-find],
       what: "upload -> one manifest entry; a BIP-32 question -> cards with locators; remove the pack -> search no longer

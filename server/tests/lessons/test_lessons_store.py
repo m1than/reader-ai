@@ -385,15 +385,12 @@ async def test_migration_creates_and_drops_the_tables(pg: Pg, tmp_path: Path) ->
 
     packs = "SELECT count(*) FROM pg_tables WHERE tablename = 'revision_packs'"
     assert await scalar(w.engine, packs) == 1
-    # r3_gates_revision: lessons_0003 (FR-LESSON-32) is the branch head; its downgrade drops only revision_packs.
+    # r3_gates_revision: lessons_0003 (FR-LESSON-32) is the head; its downgrade drops only revision_packs.
     async with w.engine.connect() as conn:
         await conn.run_sync(downgrade)
         await conn.commit()
-    assert (await scalar(w.engine, packs), await scalar(w.engine, learner), await scalar(w.engine, TABLES)) == (
-        0,
-        3,
-        4,
-    )
+    counts = (await scalar(w.engine, packs), await scalar(w.engine, learner), await scalar(w.engine, TABLES))
+    assert counts == (0, 3, 4)
     # Amendment V/manage: lessons_0002 (FR-LESSON-20); its downgrade drops only its tables.
     async with w.engine.connect() as conn:
         await conn.run_sync(downgrade)
@@ -407,9 +404,9 @@ async def test_migration_creates_and_drops_the_tables(pg: Pg, tmp_path: Path) ->
     await w.engine.dispose()
 
 
-# FR-LESSON-32: the packs a revision cites (r3_gates_revision). Synthetic material and span texts, no book text.
+# FR-LESSON-32: the packs a revision cites (r3_gates_revision). Synthetic material and spans, no book text.
 MATERIAL = hashlib.sha256(b"lessons r3 gates").hexdigest()
-SPANS = [(1, "text", "Synthetic span one."), (1, "text", "Synthetic span two."), (2, "text", "Synthetic span three.")]
+SPANS = [(1, "text", "Synthetic one."), (1, "text", "Synthetic two."), (2, "text", "Synthetic three.")]
 
 
 async def _material(w: Any, legacy_active: bool, with_r3: bool) -> tuple[str, str | None]:
@@ -447,7 +444,8 @@ async def _rows(w: Any, sql: str, **params: Any) -> list[Any]:
 
 
 async def _cited(w: Any, lesson: uuid.UUID, sha: str) -> list[str]:
-    rows = await _rows(w, "SELECT pack_id FROM revision_packs WHERE lesson_id = :l AND sha256 = :s", l=lesson, s=sha)
+    sql = "SELECT pack_id FROM revision_packs WHERE lesson_id = :l AND sha256 = :s"
+    rows = await _rows(w, sql, l=lesson, s=sha)
     return sorted(str(r[0]) for r in rows)
 
 
@@ -500,7 +498,7 @@ async def test_a_revision_records_the_active_pack_it_cites(pg: Pg, tmp_path: Pat
     assert created
     assert await _cited(w, lesson, sha) == [r3]  # one row, r3 only; the legacy id adds none
 
-    again, created = await write(w, "ivan", lesson, two, stage="review")
+    again, created = await write(w, "ivan", lesson, two, stage="rules")
     assert (again, created) == (sha, False)
     assert await _cited(w, lesson, sha) == [r3]  # rewriting the same bytes adds none
 
@@ -516,12 +514,18 @@ async def test_a_revision_records_the_active_pack_it_cites(pg: Pg, tmp_path: Pat
     f01, _ = await write(w, "ivan", lesson, F01)
     assert await _cited(w, lesson, f01) == []  # the fixture's synthetic material has no pack
 
+    from sqlalchemy import text as text_
+
     store = need("reader.lessons.store")
     late = _citing("claim", locs[2])
-    with pytest.raises(RuntimeError, match="rollback"):
-        async with w.engine.begin() as conn:
-            rolled, _ = await store.write_revision(conn, w.blobs, w.users["ivan"], lesson, late, "draft", {})
-            raise RuntimeError("rollback")
+    async with w.engine.connect() as conn:
+        owner = w.users["ivan"]
+        rolled, created = await store.write_revision(conn, w.blobs, owner, lesson, late, "draft", {})
+        assert created
+        count = text_("SELECT count(*) FROM revision_packs WHERE sha256 = :s")
+        inside = await conn.execute(count, {"s": rolled})
+        assert inside.scalar() == 1
+        await conn.rollback()
     assert await _cited(w, lesson, rolled) == []  # written in the revision's transaction
     await w.engine.dispose()
 

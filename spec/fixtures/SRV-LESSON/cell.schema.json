@@ -207,9 +207,11 @@
       "oneOf": [
         {
           "type": "object", "required": ["kind", "expected"], "additionalProperties": false,
+          "$ref": "#/$defs/quote_rule",
           "properties": {
             "kind": { "const": "test_vector" },
             "span": { "$ref": "#/$defs/span_ref" },
+            "quote_sha256": { "$ref": "#/$defs/sha256" },
             "expected": { "type": "array", "minItems": 1, "maxItems": 20, "items": { "$ref": "#/$defs/text" } }
           }
         },
@@ -227,10 +229,16 @@
       ]
     },
     "span_ref": {
-      "description": "Span id issued by SRV-INGEST: `<material_sha256>:<seq>` (the material's lowercase hex sha256, a colon, the span's decimal sequence number within that material; ADR-0008 spans). SRV-LESSON checks the form only; resolving it to source text is SRV-PIPELINE's (stage 4).",
+      "description": "Span id issued by SRV-INGEST, in one of two forms: the legacy `<material_sha256>:<seq>` (the material's lowercase hex sha256, a colon, the span's decimal sequence number within that material; ADR-0008 spans), or the PDF locator `spn:<material_sha256>:p<page>:<start>-<end>[#<n>]` (SRV-INGEST FR-INGEST-33; FR-LESSON-1 step 7b parses it). The non-PDF form is refused until a non-PDF converter exists. SRV-LESSON checks the form only; resolving it to source text is SRV-INGEST's resolver (FR-INGEST-42).",
       "type": "string",
-      "pattern": "^[0-9a-f]{64}:(0|[1-9][0-9]{0,11})$",
+      "pattern": "^([0-9a-f]{64}:(0|[1-9][0-9]{0,11})|spn:[0-9a-f]{64}:p[1-9][0-9]{0,4}:(0|[1-9][0-9]{0,9})-(0|[1-9][0-9]{0,9})(#(0|[1-9][0-9]{0,5}))?)$",
       "$ref": "#/$defs/single_line"
+    },
+    "quote_rule": {
+      "description": "An object holding a `span`: `quote_sha256` (the cited span's quote hash, SRV-INGEST FR-INGEST-34) is required when the span is a locator and absent otherwise (a legacy id resolves through the seq map). `required: [span]` in `if` keeps a span-less object valid.",
+      "if": { "required": ["span"], "properties": { "span": { "pattern": "^spn:" } } },
+      "then": { "required": ["quote_sha256"] },
+      "else": { "not": { "required": ["quote_sha256"] } }
     },
     "page": { "type": "integer", "minimum": 1, "maximum": 100000 },
     "material_title": { "type": "string", "minLength": 1, "maxLength": 200, "$ref": "#/$defs/single_line" },
@@ -238,10 +246,12 @@
       "type": "object",
       "required": ["material_sha256"],
       "additionalProperties": false,
+      "$ref": "#/$defs/quote_rule",
       "properties": {
         "material_sha256": { "$ref": "#/$defs/sha256" },
         "page": { "$ref": "#/$defs/page" },
-        "span": { "$ref": "#/$defs/span_ref" }
+        "span": { "$ref": "#/$defs/span_ref" },
+        "quote_sha256": { "$ref": "#/$defs/sha256" }
       }
     },
     "citation": {
@@ -251,8 +261,10 @@
           "type": "object",
           "required": ["span"],
           "additionalProperties": false,
+          "$ref": "#/$defs/quote_rule",
           "properties": {
             "span": { "$ref": "#/$defs/span_ref" },
+            "quote_sha256": { "$ref": "#/$defs/sha256" },
             "page": { "$ref": "#/$defs/page" },
             "material_title": { "$ref": "#/$defs/material_title" }
           }

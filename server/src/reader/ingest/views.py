@@ -177,6 +177,41 @@ async def ingest_facts(conn: AsyncConnection, ingest_id: uuid.UUID | str) -> Ing
     return IngestFacts(row[0], str(row[1]), str(row[2]), int(row[3] or 0), row[4], int(row[5] or 0))
 
 
+_CITING: Final = text(
+    "SELECT DISTINCT ON (r.l, r.h) b.pack_id"
+    " FROM unnest(CAST(:l AS text[]), CAST(:h AS text[])) AS r(l, h)"
+    " JOIN base_packs b ON b.owner_id = :o AND b.state = 'sealed'"
+    " AND b.collected_at IS NULL AND b.purged_at IS NULL"
+    " JOIN material_spans s ON s.ingest_id = b.ingest_id AND s.owner_id = b.owner_id"
+    " AND s.locator = r.l AND s.quote_sha256 = r.h"
+    " ORDER BY r.l, r.h, b.pack_id = ANY(CAST(:a AS text[])) DESC, b.pack_id"
+)
+
+
+async def citing_packs(
+    conn: AsyncConnection, owner_id: uuid.UUID, refs: Sequence[tuple[str, str | None]]
+) -> set[str]:
+    """FR-INGEST-49: per locator reference with its hash, the one pack the resolver reads it from (the active
+    pack when it holds the span, else the lowest pack id among the owner's live sealed packs holding it).
+    A legacy id, a malformed id or a locator without a hash names no pack. Two statements at most."""
+    wanted: dict[tuple[str, str], None] = {}
+    for span_id, quote in refs:
+        if quote is None or locator.is_legacy_id(span_id):
+            continue
+        try:
+            locator.parse(span_id)
+        except locator.LocatorError:
+            continue
+        wanted[(span_id, quote)] = None
+    if not wanted:
+        return set()
+    _, entry = await manifest.head(conn, owner_id)
+    rows = await conn.execute(_CITING, {
+        "o": owner_id, "l": [r[0] for r in wanted], "h": [r[1] for r in wanted],
+        "a": [e["pack_id"] for e in entry["packs"]]})
+    return {str(r[0]) for r in rows}
+
+
 async def active_span_texts(
     conn: AsyncConnection, owner_id: uuid.UUID, ids: Sequence[str]
 ) -> dict[str, tuple[int, str]]:
