@@ -635,7 +635,7 @@ owner_notes:
 # `finished_at` still null. FR-LESSON-25 gains the empty-target sentence (same wording as SRV-INGEST FR-INGEST-31
 # and WEB-MANAGE FR-MANAGE-2); [unit] tests/lessons/test_manage_confirm_unit.py.
 
-# ---- Proposed revision (2026-11-28, V/kl-r3-gates; DRAFT, not approved): SRV-INGEST FR-INGEST-40 gate (e), locator
+# ---- Proposed revision (2026-11-28, V/kl-r3-gates; approved by agent 2026-11-28, r3_gates_revision): SRV-INGEST FR-INGEST-40 gate (e), locator
 # span ids in lessons (ADR-0039 P2, owner decision 20). Paired: SRV-INGEST FR-INGEST-49 (`views.citing_packs`),
 # SRV-PIPELINE FR-PIPELINE-7 (the only writer of locator citations), WEB-NOTEBOOK FR-NOTEBOOK-2 (grouping).
 # Nothing here changes a stored revision: every revision stored today holds `<sha>:<seq>` ids, which stay valid
@@ -727,3 +727,19 @@ proposed_revisions:
 proposed_decisions:  # the round-1 open questions, answered by the coordinator (deep-reviewer round 1, 340bc02)
   - "Backfill of revision_packs: none needed (FR-LESSON-32: pre-revision revisions hold legacy ids only, which need no row)."
   - "quote_sha256 beside a legacy id is refused (one meaning per form); SRV-TUTOR's citations follow the same rule."
+
+r3_gates_revision:  # the review record of V/kl-r3-gates' revision, the same block in each spec it touches
+  task: V.kl-r3-gates
+  scope: "SRV-INGEST FR-INGEST-40's gates: (e) SRV-LESSON VEC-LESSON-1, -3, FR-LESSON-1, -4, -32, INV-LESSON-6 with SRV-INGEST FR-INGEST-49 (views.citing_packs); (f) SRV-PIPELINE FR-PIPELINE-7, -27, INV-PIPELINE-3; (h) WEB-NOTEBOOK FR-NOTEBOOK-2; SRV-FRESH FR-FRESH-2, -3, -10 (the bump's precondition); SRV-INGEST FR-INGEST-40-r3-bump (the held bump step)"
+  round_1: "deep-reviewer (Fable) on 340bc02: changes, 5 blocking, all applied in ac97a5b: (1) VEC-LESSON-1's `if` needs `required: [span]`, so a span-less source_ref or lab reference stays valid (3 new VEC-LESSON-3 cases); (2) FR-INGEST-49 names one pack per locator (the active pack when it holds the span, else the lowest pack id; FR-INGEST-42 steps 2, 4) and none for a legacy id, so no backfill and the r2 pack is never pinned; (3) compile runs in flight across the r3 activation: option (a), the owner step forbids compiles from the re-conversion until `appended`, INV-PIPELINE-3 stated per step, a unit test over a legacy-id notebook with r3 aliases; (4) SRV-FRESH's revision (FR-FRESH-2, -3, -10) added to the bump's precondition; (5) the bump's tests list every r2/r3-pinning test file as change or keeps r2. Decisions written in: gate (i)'s residual is covered by owner step (3)'s check; quote_sha256 beside a legacy id is refused; the citation state labels go to WEB-NOTEBOOK's defers; a locator span without a hash fails closed"
+  round_2: "deep-reviewer (Fable) on ac97a5b: changes, 2 blocking, applied in 637af3a: (1) the owner step's no-compile check named `reader status`, which lists no compile runs: it now reads `GET /api/compiles` (its `open_runs` predicate, reader/pipeline/routes.py); (2) SRV-FRESH FR-FRESH-10 widened the read shape and left WEB-FRESH unconfirmed: the read shape is unchanged (`_CLAIM_KEYS`, reader/freshness/check.py). Nits applied: FR-FRESH-2's fail-closed is a plain assertion (the scan has no output_invalid), VEC-PIPELINE-6's placeholder note"
+  round_3: "deep-reviewer (Fable) on 637af3a: VERDICT approve"
+  status: approved
+  approved_by: agent
+  approved_at: 2026-11-28
+  promotion: >-
+    The revision is approved as text. Its items move from proposed_* into requirements / invariants / vectors
+    (replacing the revised ids' approved text, which stays in proposed_revisions verbatim as reviewed) only together
+    with their Red tests, one module per unit (the SRV-SEARCH pattern; T5). FR-INGEST-40-r3-bump stays proposed:
+    `CONVERTER_VERSION` stays `docling-2.151.1+r2` until gate (g) (V.kl-tutor-find, SRV-TUTOR FR-TUTOR-8) is Green
+    on V/slice-integration too.
