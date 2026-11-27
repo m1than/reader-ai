@@ -569,7 +569,8 @@ async def handle_run(args: RunArgs, conn: Any, ctx: Any) -> None:
 def _has_input(found: Mapping[str, Any], set_name: str) -> bool:
     """Whether the runs/search result lists the set's dataset among the Run's `inputs.dataset_inputs`."""
     listed = ((found.get("inputs") or {}).get("dataset_inputs")) or []
-    return any(((d or {}).get("dataset") or {}).get("name") == set_name for d in listed if isinstance(d, dict))
+    names = [((d or {}).get("dataset") or {}).get("name") for d in listed if isinstance(d, dict)]
+    return set_name in names
 
 
 async def _again(args: RunArgs, seconds: float) -> None:
