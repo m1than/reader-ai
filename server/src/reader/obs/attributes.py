@@ -105,7 +105,9 @@ _LISTED: Final[Mapping[str, Mapping[str, Any]]] = {
     "reader.judge_source": {"type": "string", "enum": ("live", "recorded")},
     "reader.judge_skip": {
         "type": "string",
-        "enum": ("gate", "timeout", "error", "budget", "saturated", "quota_refused", "no_provider"),
+        "enum": (
+            "gate", "slice_empty", "timeout", "error", "budget", "saturated", "quota_refused", "no_provider",
+        ),
     },
     "reader.find.route": {"type": "string", "enum_from": "find_routes"},
     "reader.find.filter.role": {"type": "string", "enum_from": "facet_values.role"},

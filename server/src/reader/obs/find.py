@@ -35,7 +35,9 @@ ModelId = NewType("ModelId", str)  # a pricing table model id
 Channel = Literal["mcp", "tutor", "pipeline", "owner"]
 QuestionType = Literal["exact", "thematic", "current_state", "fact_check"]
 JudgeSource = Literal["live", "recorded"]
-JudgeSkip = Literal["gate", "timeout", "error", "budget", "saturated", "quota_refused", "no_provider"]
+JudgeSkip = Literal[
+    "gate", "slice_empty", "timeout", "error", "budget", "saturated", "quota_refused", "no_provider"
+]
 Layer = Literal["L1", "L2", "L3", "L4"]
 Method = Literal["dense", "dense_fts_rrf", "outline", "registry"]
 Gate = Literal["separated", "not_separated"]

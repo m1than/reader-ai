@@ -1,4 +1,5 @@
-"""SRV-SEARCH FR-SEARCH-22, -30: the brain/v1 card shape, its cost, text cuts and channel eligibility."""
+"""SRV-SEARCH FR-SEARCH-22, -30, -33: the brain/v1 card shape, its cost, text cuts, channel eligibility and
+the in-memory card reader for SRV-OBS."""
 
 from __future__ import annotations
 
@@ -7,6 +8,8 @@ import math
 from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Final
+
+from sqlalchemy.ext.asyncio import AsyncConnection
 
 from reader.agent.ledger import CHARS_PER_TOKEN_FLOOR
 from reader.search.policy import Policy, estimate
@@ -169,3 +172,35 @@ def allowance(
             counted.add(span)
         granted.append(node_id)
     return frozenset(granted)
+
+
+async def read(conn: AsyncConnection, caller: Any, ids: Sequence[str]) -> dict[str, str]:
+    """FR-SEARCH-33: each card's text as `caller` may read it on the owner channel (the MCP row for a pack the
+    caller is not entitled to), in memory, for SRV-OBS FR-OBS-39/40. Ids that do not resolve in the caller's
+    active packs, or that the row does not serve, are left out."""
+    from reader.ingest import views
+    from reader.search import opening
+    from reader.search import policy as policy_mod
+    from reader.search.find import FindError
+
+    loaded = policy_mod.policy()
+    books: dict[str, Any] = {}
+    out: dict[str, str] = {}
+    for card_id in ids:
+        try:
+            sha = opening.material_of(card_id)
+        except FindError:
+            continue
+        if sha not in books:
+            pack = await views.active_pack(conn, caller.user_id, sha)
+            books[sha] = None if pack is None else (
+                await opening.load_book(conn, pack, loaded),
+                await opening.entitled(conn, caller.user_id, pack),
+            )
+        if books[sha] is None:
+            continue
+        book, allowed = books[sha]
+        card = book.card(card_id, "owner", allowed)
+        if card is not None:
+            out[card_id] = card.text
+    return out

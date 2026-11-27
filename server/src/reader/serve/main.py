@@ -85,6 +85,17 @@ def _settings(env: Env) -> Settings:
         raise Failure(error.code) from None
 
 
+def bind_policy(config: Path | None = None) -> None:
+    """SRV-SEARCH FR-SEARCH-34 (paired): the retrieval policy loads once per process before serving; a bad
+    policy file stops the api and every worker lane with `policy_invalid`."""
+    from reader.search.policy import PolicyError, bind
+
+    try:
+        bind(config)
+    except PolicyError as error:
+        raise Failure(error.code) from None
+
+
 def start_obs(role: str, env: Env) -> Any:
     """FR-AUTH-33: SRV-OBS tracing for this role from the configuration's `observability` section."""
     from reader.obs.setup import setup
@@ -160,6 +171,7 @@ def _serve_api(bind: str, env: Env) -> None:
 
     host, port = _bind(bind)
     settings = _settings(env)
+    bind_policy(env.config)
     target = _target(env)
 
     async def run() -> None:
@@ -210,6 +222,7 @@ def _serve_api(bind: str, env: Env) -> None:
 
 def _run_worker(env: Env, lane: str = "main") -> None:
     _settings(env)
+    bind_policy(env.config)
     target = _target(env)
     last_report = [-WORKER_ERROR_EVERY_S]
 

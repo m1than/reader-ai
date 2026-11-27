@@ -2,21 +2,20 @@
 
 `policy/policy.json` is validated by `policy/policy.schema.json` (Draft 2020-12) plus the checks a schema
 cannot state: budgets against `budget_min`, filter values against SRV-INGEST's facets file, `l5_boost` on
-tutor routes only, a route for every channel and question type, and the regex time bound of every question
-rule. Any failure is `policy_invalid`; there is no partial policy. Code reads values from here only.
+tutor routes only, a route for every channel and question type, and no nested repeat (star height > 1) in a
+question rule; the 50 ms time bound of every shipped rule is a unit test, not a start-time clock check. Any
+failure is `policy_invalid`; there is no partial policy. Code reads values from here only.
 """
 
 from __future__ import annotations
 
 import functools
 import hashlib
-import importlib
 import json
 import math
 import re
-import time
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Final
 
@@ -30,12 +29,8 @@ SCHEMA_FILE: Final = HERE / "policy.schema.json"
 PROMPTS_DIR: Final = Path(__file__).resolve().parents[1] / "agent" / "prompts"
 CHANNELS: Final = ("mcp", "owner", "tutor", "pipeline")
 QUESTION_TYPES: Final = ("exact", "thematic", "current_state", "fact_check")
-REGEX_BUDGET_S: Final = 0.05  # proposed_bounds regex_time: 50 ms on a 1,000-character adversarial input
-_ADVERSARIAL: Final = (
-    "a" * 1000, "a" * 999 + "!", "1" * 999 + "!", "BIP-" * 250, "OP_" * 333, "0x" + "f" * 998, " -_:" * 250,
-    "б" * 999 + "!", ("текущ" + " ") * 166, "\\" * 1000,  # noqa: RUF001
-)
 _FILTER_FACETS: Final = {"role": "role", "form": "form", "reliability_min": "reliability"}
+_BRACES: Final = re.compile(r"\{(\d*)(,?)(\d*)\}")
 
 
 class PolicyError(Exception):
@@ -48,6 +43,7 @@ class PolicyError(Exception):
 class Policy:
     data: Mapping[str, Any]
     facets_sha256: str
+    facets: Any = field(default=None, compare=False)  # SRV-INGEST's loaded facets, read once with the policy
 
     def route(self, channel: str, question_type: str) -> Mapping[str, Any]:
         route: Mapping[str, Any] = self.data["routes"][f"{channel}.{question_type}"]
@@ -68,43 +64,68 @@ def estimate(text: str) -> int:
     return math.ceil(len(text) / float(CHARS_PER_TOKEN_FLOOR))
 
 
-def _repeats(tree: Any) -> list[tuple[int, Any]]:
-    """Every (max, body) repeat of a parsed pattern, nested groups, branches and assertions walked."""
-    found: list[tuple[int, Any]] = []
-    for op, arg in tree:
-        name = str(op)
-        if name in ("MAX_REPEAT", "MIN_REPEAT", "POSSESSIVE_REPEAT"):
-            found.append((int(arg[1]), arg[2]))
-            found.extend(_repeats(arg[2]))
-        elif name in ("SUBPATTERN", "ASSERT", "ASSERT_NOT"):
-            found.extend(_repeats(arg[-1]))
-        elif name == "ATOMIC_GROUP":
-            found.extend(_repeats(arg))
-        elif name == "BRANCH":
-            for branch in arg[1]:
-                found.extend(_repeats(branch))
-    return found
+def _quantifier(pattern: str, i: int) -> tuple[int, bool]:
+    """The quantifier at `i`, if any: (the index after it and its lazy or possessive suffix, whether it allows
+    more than one repetition). A `{` that is not a quantifier is a literal and is not consumed."""
+    many = False
+    if i < len(pattern) and pattern[i] in "*+":
+        i, many = i + 1, True
+    elif i < len(pattern) and pattern[i] == "?":
+        i += 1
+    elif (braces := _BRACES.match(pattern, i)) is not None and (braces.group(1) or braces.group(3)):
+        low, comma, high = braces.groups()
+        many = (not high or int(high) > 1) if comma else int(low) > 1
+        i = braces.end()
+    else:
+        return i, False
+    if i < len(pattern) and pattern[i] in "?+":
+        i += 1
+    return i, many
+
+
+def _class_end(pattern: str, i: int) -> int:
+    """The index after the character class opening at `i` (a leading `^` and a leading `]` are literal)."""
+    j = i + 1
+    j += pattern.startswith("^", j)
+    j += pattern.startswith("]", j)
+    while j < len(pattern) and pattern[j] != "]":
+        j += 2 if pattern[j] == "\\" else 1
+    return j + 1
 
 
 def _nested_repeat(pattern: str) -> bool:
-    """A repeat of more than one inside another (star height > 1) can backtrack super-linearly."""
-    tree = importlib.import_module("re._parser").parse(pattern)
-    return any(top > 1 and any(inner > 1 for inner, _ in _repeats(body)) for top, body in _repeats(tree))
+    """A repeat of more than one inside another (star height > 1) can backtrack super-linearly. Scans the
+    pattern text, tracking per open group whether it holds such a repeat: a group that holds one and is itself
+    repeated more than once is nested."""
+    holds = [False]  # per open group; the outermost entry is the whole pattern
+    i = 0
+    while i < len(pattern):
+        char, inner = pattern[i], False
+        if char == "(":
+            holds.append(False)
+            i += 1
+            continue
+        if char == ")" and len(holds) > 1:
+            inner, i = holds.pop(), i + 1
+        elif char == "\\":
+            i += 2
+        elif char == "[":
+            i = _class_end(pattern, i)
+        else:
+            i += 1
+        i, many = _quantifier(pattern, i)
+        if many and inner:
+            return True
+        holds[-1] = holds[-1] or many or inner
+    return False
 
 
 def _regex_ok(pattern: str) -> bool:
     try:
-        compiled = re.compile(pattern)
+        re.compile(pattern)
     except re.error:
         return False
-    if _nested_repeat(pattern):
-        return False
-    for text in _ADVERSARIAL:
-        start = time.perf_counter()
-        compiled.search(text)
-        if time.perf_counter() - start > REGEX_BUDGET_S:
-            return False
-    return True
+    return not _nested_repeat(pattern)
 
 
 def _check(data: Mapping[str, Any], facets: Any) -> None:
@@ -140,7 +161,7 @@ def load(path: Path | None = None, facets_path: Path | None = None) -> Policy:
     except (OSError, ValueError, jsonschema.ValidationError, ingest_facets.FacetsError) as error:
         raise PolicyError("policy_invalid", type(error).__name__) from None
     _check(data, loaded_facets)
-    return Policy(data, loaded_facets.sha256)
+    return Policy(data, loaded_facets.sha256, loaded_facets)
 
 
 @functools.cache
@@ -160,14 +181,16 @@ def _prompts(directory: Path) -> dict[str, str]:
     }
 
 
-def effective_slots() -> dict[str, str]:
-    """The judge slots' model bindings from the effective config (the lane's READER_CONFIG)."""
+def effective_slots(config_path: Path | None = None) -> dict[str, str]:
+    """The judge slots' model bindings from the effective config (the given file, else the lane's
+    READER_CONFIG)."""
     from reader.agent import judges
     from reader.agent.lane import _config
     from reader.agent.pricing import resolve_model
+    from reader.config import load_config
 
     try:
-        tasks = _config().tasks
+        tasks = (load_config(config_path) if config_path is not None else _config()).tasks
     except Exception as error:  # an unreadable config: the caller answers config_unavailable
         raise PolicyError("config_unavailable", type(error).__name__) from None
     return {s: resolve_model(tasks[s].model) for s in sorted(judges.JUDGE_SLOTS) if s in tasks}
@@ -201,3 +224,28 @@ def policy_version(loaded: Policy | None = None, **kw: Any) -> str:
     from reader.obs.versions import policy_version as version_of
 
     return version_of(declared(loaded, **kw))
+
+
+_BOUND: list[tuple[Policy, str] | None] = [None]
+
+
+def bind(config_path: Path | None = None) -> tuple[Policy, str]:
+    """At api and worker start: load the policy, compute its version once (slots from `config_path`, else the
+    lane's config) and bind SRV-OBS's `POLICY` to its declared inputs. A `PolicyError` stops the start."""
+    from reader.obs import versions
+
+    loaded = policy()
+    found = declared(loaded, slots=effective_slots() if config_path is None else effective_slots(config_path))
+    bound = (loaded, versions.policy_version(found))
+    versions.POLICY = lambda: found
+    _BOUND[0] = bound
+    return bound
+
+
+def current() -> tuple[Policy, str]:
+    """The process's bound policy and version; computed per call where nothing bound them (tests, CLIs)."""
+    bound = _BOUND[0]
+    if bound is not None:
+        return bound
+    loaded = policy()
+    return loaded, policy_version(loaded)

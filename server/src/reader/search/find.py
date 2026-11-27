@@ -3,19 +3,24 @@
 Step 1 routes by rules, step 2 asks the `Corpus` for candidates, step 3 merges `Links` by pivot, step 4 gates,
 step 5 expands one hop and preselects under `preselect_factor` times the cards' budget, step 6 makes at most
 one `Judge` call on the top slice, step 7 selects under the cards' budget. Steps 1-5 and 7 make no model call.
+Each call opens SRV-OBS FR-OBS-36's text-free subtree (FR-SEARCH-33): ids, enums, counts and hashes only.
 """
 
 from __future__ import annotations
 
 import hashlib
+import math
 import re
 import unicodedata
 import uuid
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, replace
-from typing import Any, Final, Protocol
+from typing import Any, Final, Protocol, cast
 
-from reader.agent.judges import render_find_input
+from reader.agent.judges import find_input_sha256, render_find_input
+from reader.obs import find as obs
+from reader.obs.attributes import DOC_CAP
+from reader.obs.spans import Hex64
 from reader.search import cards as card_shape
 from reader.search import greedy
 from reader.search import policy as policy_mod
@@ -137,10 +142,12 @@ def normalise_query(query: str) -> str:
     return unicodedata.normalize("NFC", query).strip()
 
 
-def _filters_ok(filters: Mapping[str, Any]) -> bool:
+def _filters_ok(policy: Policy, filters: Mapping[str, Any]) -> bool:
     from reader.ingest import facets as ingest_facets
 
-    loaded = ingest_facets.load()
+    if not filters:
+        return True
+    loaded = policy.facets if policy.facets is not None else ingest_facets.load()
     for key, value in filters.items():
         facet = loaded.facets.get(key)
         if facet is None or not isinstance(value, str):
@@ -165,7 +172,7 @@ def validate(
     if not 1 <= len(text) <= QUERY_MAX:
         raise FindError("query_invalid")
     found = dict(filters or {})
-    if not _filters_ok(found):
+    if not _filters_ok(policy, found):
         raise FindError("filter_invalid")
     data = policy.data
     if k is not None and (isinstance(k, bool) or not isinstance(k, int) or not 1 <= k <= data["k_max"]):
@@ -287,7 +294,7 @@ def step7(
     first = greedy.budgeted(kept, f.value, cost, budget, score, order=kept, k=k)
     chosen = set(first)
     pass1 = [c for c in kept if c in chosen]
-    left = budget - sum(cost[c] for c in pass1)
+    left = budget - math.fsum(cost[c] for c in pass1)
     rest_k = None if k is None else k - len(pass1)
     remainder = [c for c in preselection if c not in set(judged_slice)]
     pass2: list[str] = []
@@ -341,17 +348,75 @@ async def find(
     judge_ctx: Mapping[str, Any] | None = None,
     question_type: str | None = None,
 ) -> dict[str, Any]:
-    policy = deps.policy or policy_mod.policy()
+    policy, version = _versions(deps)
     request = validate(policy, channel, query, filters, k, budget, question_type)
     kind, identifiers = classify(policy, request.query, question_type, channel)
     route = route_for(policy, channel, kind, findings=deps.findings is not None)
-    found = await deps.corpus.candidates(caller, channel, route, request.query, request.filters, identifiers)
-    eligible = [c for c in found.cards if card_shape.eligible(c, channel)]
-    pool = _by_score(eligible)[: policy.data["candidates_max"]]  # B6 step 2: at most candidates_max
-    if "L4" in route.layers and deps.findings is not None:
-        pool += [x.card for x in await deps.findings.for_query(caller, channel, request.query) if x.reviewed]
-    pool = [_served(c, policy, channel) for c in pool]
-    version = (deps.policy_version or (lambda: policy_mod.policy_version(policy)))()
+    with obs.find(
+        channel=cast(obs.Channel, channel), question_type=cast(obs.QuestionType, kind), entitled=True,
+        k=request.k or 0, budget_tokens=request.budget, brain_version=cast(Hex64, None),
+        policy_version=Hex64(version),
+    ) as span:
+        with obs.route() as part:
+            role, form = request.filters.get("role"), request.filters.get("form")
+            part.done(route=obs.RouteId(route.id), role=obs.FacetValue(role) if role else None,
+                      form=obs.FacetValue(form) if form else None, identifiers=len(identifiers),
+                      identifiers_sha256=obs.identifiers_sha256(identifiers) if identifiers else None)
+        response, judged = await _cascade(caller, channel, deps, policy, version, request, route,
+                                          identifiers, judge_ctx)
+        # The brain version is known only once the candidates return; the span opened before routing.
+        span._set({"brain_version": response["brain_version"],
+                   "entitled": all(entitled for _, entitled in judged.values())})
+        sizes = [(estimate(card_shape.text_of(c)), j) for c, (j, _) in zip(response["cards"], judged.values(),
+                                                                             strict=True)]
+        span.done(cards=len(sizes), tokens=estimate(card_shape.text_of(response)),
+                  judged_tokens=sum(t for t, j in sizes if j),
+                  unjudged_tokens=sum(t for t, j in sizes if not j),
+                  judge=_judge_attrs(response))
+    return response
+
+
+def _versions(deps: Deps) -> tuple[Policy, str]:
+    """The policy and its version: the port's, else the process's bound pair; a PolicyError is a FindError."""
+    try:
+        loaded = deps.policy
+        if loaded is None:
+            return policy_mod.current()
+        made = deps.policy_version
+        return loaded, made() if made is not None else policy_mod.policy_version(loaded)
+    except policy_mod.PolicyError as error:
+        raise FindError(error.code) from None
+
+
+def _doc(body: Mapping[str, Any], judged: bool | None = None) -> obs.Doc:
+    """A card as a trace document: its id's uri, the sha256 of its canonical JSON and its estimate."""
+    raw = card_shape.text_of(body)
+    digest = Hex64(hashlib.sha256(raw.encode("utf-8", "surrogatepass")).hexdigest())
+    return obs.doc(obs.CardId(str(body["id"])), digest, estimate(raw), judged)
+
+
+def _judge_attrs(response: Mapping[str, Any]) -> obs.Judge:
+    if response["judge_ran"]:
+        return obs.Judge(True, source=cast(obs.JudgeSource, response["judge_source"]))
+    return obs.Judge(False, skip=cast(obs.JudgeSkip, response["judge_skip"]))
+
+
+async def _cascade(
+    caller: Caller, channel: str, deps: Deps, policy: Policy, version: str, request: Request, route: Route,
+    identifiers: Sequence[str], judge_ctx: Mapping[str, Any] | None,
+) -> tuple[dict[str, Any], dict[str, tuple[bool, bool]]]:
+    """Steps 2-7 inside the find span; returns the response and, per returned card, (judged, entitled)."""
+    with obs.retrieve(layer="L1", method="dense_fts_rrf" if route.rrf else "dense") as part:
+        found = await deps.corpus.candidates(caller, channel, route, request.query, request.filters,
+                                             identifiers)
+        eligible = [c for c in found.cards if card_shape.eligible(c, channel)]
+        pool = _by_score(eligible)[: policy.data["candidates_max"]]  # B6 step 2: at most candidates_max
+        if "L4" in route.layers and deps.findings is not None:
+            pool += [x.card for x in await deps.findings.for_query(caller, channel, request.query)
+                     if x.reviewed]
+        pool = [_served(c, policy, channel) for c in pool]
+        part.done(candidates=len(found.cards), hits=len(pool),
+                  docs=[_doc(card_shape.to_json(c, False)) for c in pool[:DOC_CAP]])
     digest = request_hash(
         user_id=str(caller.user_id), roles=sorted(caller.roles), channel=channel, query=request.query,
         filters=request.filters, k=request.k, budget=request.budget, brain_version=found.brain_version,
@@ -359,30 +424,37 @@ async def find(
     )
     envelope = _envelope(found.brain_version, version, policy.channel(channel)["budget_max"])
     cards_budget = request.budget - estimate(card_shape.text_of(envelope))
-    merged = merge(pool, deps.links, digest)
-    s_top = merged[0].score if merged else 0.0
     kept: Sequence[str] | None = None
     source: str | None = None
     skip: str | None = None
     preselection: list[str] = []
     judged_slice: list[str] = []
-    if separated(policy, [c.score for c in merged]):
-        considered, skip = merged, "gate"
-    else:
-        near = await deps.corpus.neighbours(caller, channel, merged)
-        eligible_near = {
-            key: [_served(c, policy, channel) for c in group if card_shape.eligible(c, channel)]
-            for key, group in near.items()
-        }
-        considered = expand(merged, eligible_near, policy, route.layers)
-    by_id = {c.id: c for c in considered}
-    cost = {c.id: card_shape.cost(c) for c in considered}
-    score = {c.id: c.score for c in considered}
-    f = _objective(policy, found.lexemes, identifiers, considered, s_top)
-    if skip is None:
+    with obs.preselect() as part:
+        merged = merge(pool, deps.links, digest)
+        s_top = merged[0].score if merged else 0.0
+        if separated(policy, [c.score for c in merged]):
+            considered, skip = merged, "gate"
+        else:
+            near = await deps.corpus.neighbours(caller, channel, merged)
+            eligible_near = {
+                key: [_served(c, policy, channel) for c in group if card_shape.eligible(c, channel)]
+                for key, group in near.items()
+            }
+            considered = expand(merged, eligible_near, policy, route.layers)
+        by_id = {c.id: c for c in considered}
+        cost = {c.id: card_shape.cost(c) for c in considered}
+        score = {c.id: c.score for c in considered}
+        f = _objective(policy, found.lexemes, identifiers, considered, s_top)
         factor = policy.data["preselect_factor"]
-        chosen = greedy.budgeted(list(by_id), f.value, cost, factor * cards_budget, score)
-        preselection = sorted(chosen, key=lambda c: (-score[c], c))
+        if skip is None:
+            chosen = greedy.budgeted(list(by_id), f.value, cost, factor * cards_budget, score)
+            preselection = sorted(chosen, key=lambda c: (-score[c], c))
+        part.done(merged=len(merged), gate="separated" if skip == "gate" else "not_separated",
+                  expanded=skip is None, candidates_in=len(considered), cards=len(preselection),
+                  tokens=math.ceil(math.fsum(cost[c] for c in preselection)),
+                  budget_tokens=math.floor(factor * cards_budget),
+                  docs=[_doc(card_shape.to_json(by_id[c], False)) for c in preselection[:DOC_CAP]])
+    if skip is None:
         l1 = policy.data["card_budgets"]["L1"]
         inputs = [(c, card_shape.cut(by_id[c].text, l1) if by_id[c].layer == "L1" else by_id[c].text)
                   for c in preselection]
@@ -394,24 +466,37 @@ async def find(
             skip = "error"
         else:
             sliced = set(judged_slice)
-            outcome = await deps.judge(JudgeCall(
-                caller=caller, channel=channel, query=request.query,
-                cards=tuple(x for x in inputs if x[0] in sliced), request_hash=digest, judge_ctx=judge_ctx,
-                pack_ids=tuple(sorted({by_id[c].pack_id for c in judged_slice})), cards_budget=cards_budget,
-                preselection_cost=sum(cost[c] for c in preselection),
-            ))
-            if outcome.kept is None or outcome.source not in SOURCES:
-                skip = outcome.skip if outcome.kept is None and outcome.skip in SKIPS else "error"
-            else:
-                kept = list(dict.fromkeys(c for c in outcome.kept if c in sliced))
-                source = outcome.source
-    picked = step7(f, cost, score, cards_budget, request.k, pool=list(by_id), preselection=preselection,
-                   judged_slice=judged_slice, kept=kept)
+            sent = tuple(x for x in inputs if x[0] in sliced)
+            with obs.judge_wait(input_sha256=Hex64(find_input_sha256(caller.user_id, request.query, sent)),
+                                input_tokens=estimate(render_find_input(request.query, sent))) as wait:
+                outcome = await deps.judge(JudgeCall(
+                    caller=caller, channel=channel, query=request.query, cards=sent, request_hash=digest,
+                    judge_ctx=judge_ctx, pack_ids=tuple(sorted({by_id[c].pack_id for c in judged_slice})),
+                    cards_budget=cards_budget, preselection_cost=math.fsum(cost[c] for c in preselection),
+                ))
+                if outcome.kept is None or outcome.source not in SOURCES:
+                    skip = outcome.skip if outcome.kept is None and outcome.skip in SKIPS else "error"
+                else:
+                    kept = list(dict.fromkeys(c for c in outcome.kept if c in sliced))
+                    source = outcome.source
+                ran = kept is not None
+                wait.done(kept=len(kept or ()), dropped=len(judged_slice) - len(kept or ()),
+                          judge=obs.Judge(ran, source=cast(obs.JudgeSource, source) if ran else None,
+                                          skip=None if ran else cast(obs.JudgeSkip, skip)))
+    with obs.select() as part:
+        picked = step7(f, cost, score, cards_budget, request.k, pool=list(by_id), preselection=preselection,
+                       judged_slice=judged_slice, kept=kept)
+        bodies = [(card_shape.to_json(by_id[c], judged), judged) for c, judged in picked]
+        tokens = [(estimate(card_shape.text_of(body)), judged) for body, judged in bodies]
+        part.done(cards=len(bodies), tokens=sum(t for t, _ in tokens),
+                  judged_tokens=sum(t for t, j in tokens if j),
+                  unjudged_tokens=sum(t for t, j in tokens if not j),
+                  budget_tokens=math.floor(cards_budget), docs=[_doc(b, j) for b, j in bodies[:DOC_CAP]])
     response: dict[str, Any] = {
         "brain_version": found.brain_version,
         "policy_version": version,
         "budget": request.budget,
-        "cards": [card_shape.to_json(by_id[c], judged) for c, judged in picked],
+        "cards": [body for body, _ in bodies],
         "judge_ran": kept is not None,
         "degraded": found.degraded or skip in DEGRADING,
     }
@@ -419,4 +504,4 @@ async def find(
         response["judge_source"] = source
     else:
         response["judge_skip"] = skip
-    return response
+    return response, {c: (judged, by_id[c].entitled) for c, judged in picked}

@@ -1,7 +1,9 @@
-"""`POST /api/search` (SRV-SEARCH FR-SEARCH-8), declared as data for SRV-AUTH's ROUTERS.
+"""`POST /api/search`, `/api/find` and `/api/open` (SRV-SEARCH FR-SEARCH-8), declared as data for SRV-AUTH's
+ROUTERS.
 
 Owner only (a learner gets 404, like a missing route). The query arrives in the JSON body, never in a URL; the
-route logs lengths and counts, never the query.
+routes log lengths, counts and codes, never the query or a card. find and open run on the owner channel, set
+here; the client cannot name a channel, a question type or a judge context.
 """
 
 from __future__ import annotations
@@ -12,9 +14,16 @@ from typing import Any, Final
 
 from starlette.responses import JSONResponse, Response
 
+from reader.agent.lane import _config
 from reader.api.http import Ctx, Route, error
 from reader.config import ConfigError
 from reader.search import params
+from reader.search import policy as policy_mod
+from reader.search.corpus import StoreCorpus
+from reader.search.find import Caller, Deps, FindError, find
+from reader.search.judge_wait import Waiter
+from reader.search.opening import open_
+from reader.search.policy import PolicyError
 from reader.search.store import material_active, search
 
 log = logging.getLogger("reader.search")
@@ -54,4 +63,77 @@ async def post_search(ctx: Ctx) -> Response:
     return JSONResponse({"results": [h.to_json() for h in result.results], "degraded": result.degraded})
 
 
-ROUTES: tuple[Route, ...] = (Route("POST", "/api/search", "session", post_search),)
+# ---- FR-SEARCH-8 revised: find and open on the owner channel, set here, never taken from the client ----
+
+CHANNEL: Final = "owner"
+FIND_KEYS: Final = frozenset({"q", "k", "budget", "filters"})
+OPEN_KEYS: Final = frozenset({"id", "depth", "budget"})
+
+
+def _has_provider(handle: str) -> bool:
+    try:
+        users = _config().users
+    except Exception:  # an unreadable config: no provider handle, the judge degrades no_provider
+        return False
+    return any(u.handle == handle and u.providers for u in users)
+
+
+def _caller(ctx: Ctx) -> Caller:
+    user = ctx.signed_in
+    return Caller(user.id, (user.role,), _has_provider(user.handle))
+
+
+def _refused(route: str, code: str) -> Response:
+    log.info("%s refused: %s", route, code)
+    if code in ("policy_invalid", "config_unavailable"):
+        return error(503, "config_unavailable")
+    return error(404 if code == "not_found" else 400, code)
+
+
+async def post_find(ctx: Ctx) -> Response:
+    if ctx.signed_in.role != "owner":
+        return error(404, "not_found")
+    body = await ctx.json()
+    if not isinstance(body, dict) or not set(body) <= FIND_KEYS or not isinstance(body.get("q"), str):
+        return _refused("find", "query_invalid")
+    filters = body.get("filters", {})
+    if not isinstance(filters, dict):
+        return _refused("find", "filter_invalid")
+    try:
+        policy, version = policy_mod.current()
+        jobs = getattr(ctx.request.app.state, "jobs", None)
+        judge = None if jobs is None else Waiter(engine=ctx.engine, enqueue=jobs.enqueue, policy=policy)
+        async with ctx.engine.connect() as conn:
+            deps = Deps(corpus=StoreCorpus(conn, policy), judge=judge, policy=policy,
+                        policy_version=lambda: version)
+            result = await find(_caller(ctx), CHANNEL, body["q"], deps=deps, filters=filters,
+                                k=body.get("k"), budget=body.get("budget"))
+    except (FindError, PolicyError) as refused:
+        return _refused("find", refused.code)
+    log.info("find q_len=%d cards=%d judge=%s degraded=%s", len(body["q"]), len(result["cards"]),
+             result.get("judge_source") or result.get("judge_skip"), result["degraded"])
+    return JSONResponse(result)
+
+
+async def post_open(ctx: Ctx) -> Response:
+    if ctx.signed_in.role != "owner":
+        return error(404, "not_found")
+    body = await ctx.json()
+    if not isinstance(body, dict) or not set(body) <= OPEN_KEYS or "id" not in body:
+        return _refused("open", "id_invalid")
+    try:
+        policy, version = policy_mod.current()
+        async with ctx.engine.connect() as conn:
+            result = await open_(conn, _caller(ctx), CHANNEL, body["id"], depth=body.get("depth", 1),
+                                 budget=body.get("budget"), policy=policy, policy_version=version)
+    except (FindError, PolicyError) as refused:
+        return _refused("open", refused.code)
+    log.info("open cards=%d", len(result["cards"]))
+    return JSONResponse(result)
+
+
+ROUTES: tuple[Route, ...] = (
+    Route("POST", "/api/search", "session", post_search),
+    Route("POST", "/api/find", "session", post_find),
+    Route("POST", "/api/open", "session", post_open),
+)

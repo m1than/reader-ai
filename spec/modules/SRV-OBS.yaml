@@ -1406,8 +1406,9 @@ requirements:
           {exact, thematic, current_state, fact_check}; `reader.find.entitled` (bool, B8); `reader.find.k`,
           `reader.find.budget_tokens`, `reader.find.cards`, `reader.find.tokens`, `reader.find.judged_tokens`,
           `reader.find.unjudged_tokens` (ints); `reader.judge_ran` (bool); `reader.judge_source` ∈ {live,
-          recorded} only when `judge_ran` is true; `reader.judge_skip` ∈ {gate, timeout, error, budget,
-          saturated, quota_refused, no_provider} only when it is false. The code version is FR-OBS-1's resource
+          recorded} only when `judge_ran` is true; `reader.judge_skip` ∈ {gate, slice_empty, timeout, error,
+          budget, saturated, quota_refused, no_provider} only when it is false (`slice_empty`: paired SRV-SEARCH
+          FR-SEARCH-29, V.kl-search-find unit 5; VEC-OBS-1's enum and `reader.obs.find.JudgeSkip` gain it). The code version is FR-OBS-1's resource
           key `service.version`; no new key repeats it.
       (b) `find.route` (custom MLflow type ROUTER): `reader.find.route` (enum_from find_routes, the route ids
           of SRV-SEARCH's declared route table); single-valued facet filters `reader.find.filter.role`,

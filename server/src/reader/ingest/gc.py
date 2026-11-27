@@ -47,8 +47,9 @@ async def _judges_forget_overlay(conn: AsyncConnection, owner_id: uuid.UUID, ove
 
 
 async def _unbound(conn: AsyncConnection, owner_id: uuid.UUID, value: Any) -> None:
-    """A text-holding seam whose owning module has not bound it yet (SRV-SEARCH forget_overlay, paired).
-    It is never called: a delete that needs it raises `seam_unbound` and rolls back (FR-INGEST-44, -45)."""
+    """A text-holding seam left unbound. No production seam uses it any more (SRV-SEARCH's forget_overlay is
+    bound); tests put it in a seam to check that a delete needing it raises `seam_unbound` and rolls back
+    (FR-INGEST-44, -45)."""
     del conn, owner_id, value
     raise SeamUnbound
 
