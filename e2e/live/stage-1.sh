@@ -3,6 +3,10 @@
 #
 # Precondition: the owner ran `reader up --config <path>` and the stack is up. The owner's reader.yaml declares the
 # learner `live-check` (deploy/reader.example.yaml shows it).
+# Judge lane (ADR-0039 B7b, OPS-DEPLOY FR-DEPLOY-16): the owner's reader.yaml binds the judge slots, at least
+# `tasks: { judge.find: { model: haiku } }` (v1 bindings in deploy/reader.example.yaml), else `reader doctor` fails
+# judge_slots. A stack first started before FR-DEPLOY-16 has an `agentnet` without ipam, which Compose does not change in
+# place: run `reader down` (volumes are kept) and then `reader up` once, so agentnet is recreated with 10.230.7.0/24.
 #
 #   bash e2e/live/stage-1.sh --config ~/path/to/reader.yaml           # non-destructive checks (≈ 5 min)
 #   bash e2e/live/stage-1.sh --config ~/path/to/reader.yaml --drill   # plus the backup-restore drill (DESTRUCTIVE)
@@ -41,7 +45,7 @@ CACERT="$WORK/caddy-root.crt"   # public root certificate, not a secret
 PROJECT="$(reader status --config "$CONFIG" --json 2>/dev/null | jq -r '.project // empty' || true)"
 PROJECT="${PROJECT:-reader}"
 dc() { docker compose -p "$PROJECT" "$@"; }
-CONSUMERS="postgres api worker"   # secret consumers in the default profile (mcp, agent-proxy: later stages)
+CONSUMERS="postgres api worker worker-judge"   # default-profile secret consumers (mcp, agent-proxy: later stages)
 PY() { (cd "$ROOT/server" && uv run --quiet python -I "$@"); }
 
 # Runs a helper that prints `PASS name` / `FAIL name` lines and folds them into lib.sh's counters.
@@ -77,7 +81,7 @@ four_healthy_and_watcher() {
   reader status --config "$CONFIG" --json | jq -e '
     .watcher == "running"
     and all(.services[]; .state == "running" and .health == "healthy")
-    and ([.services[].name] | contains(["api","caddy","postgres","worker"]))'
+    and ([.services[].name] | contains(["api","caddy","postgres","worker","worker-judge"]))'
 }
 doctor_ok() { reader doctor --config "$CONFIG" --json | jq -e 'all(.[]; .ok)'; }
 check "all services healthy (four default plus kernels), watcher running" four_healthy_and_watcher
@@ -103,10 +107,28 @@ check "POST without Origin is refused (403)" test "$("${CURL[@]}" -o /dev/null -
 section "Hardening and secrets (ADR-0026)"
 check "postgres runs as 999 with a read-only root" \
   test "$(docker inspect -f '{{.Config.User}} {{.HostConfig.ReadonlyRootfs}}' "$(dc ps -q postgres)")" = "999:999 true"
-servers_hardened() { local s; for s in api worker; do
+servers_hardened() { local s; for s in api worker worker-judge; do
   [[ "$(docker inspect -f '{{.Config.User}} {{.HostConfig.ReadonlyRootfs}} {{.HostConfig.CapDrop}}' "$(dc ps -q "$s")")" == "10001:10001 true [ALL]" ]] || return 1
   done; }
-check "api and worker run as 10001, read-only, cap-drop ALL" servers_hardened
+check "api, worker and worker-judge run as 10001, read-only, cap-drop ALL" servers_hardened
+
+# --- Judge lane (ADR-0039 B7b, OPS-DEPLOY FR-DEPLOY-16, INV-DEPLOY-11) ---------------------------------------------
+lane_healthy() { [[ "$(health_of worker-judge)" == healthy ]]; }
+check "worker-judge healthy" lane_healthy
+lane_secrets_only_db_password() { [[ "$(dc exec -T worker-judge sh -c 'ls -A /run/secrets')" == db-password ]]; }
+check "worker-judge /run/secrets holds only db-password" lane_secrets_only_db_password
+# agentnet's IPAM and fixed addresses (FR-DEPLOY-16 c); an older ipam-less agentnet fails here: see the header note.
+agentnet_ok() { local net; net="$(docker network inspect "${PROJECT}_agentnet")" || return 1
+  jq -e '.[0].IPAM.Config[0].Subnet == "10.230.7.0/24" and .[0].IPAM.Config[0].IPRange == "10.230.7.128/25"' <<<"$net" >/dev/null || return 1
+  local s want; for s in worker:10.230.7.10 worker-judge:10.230.7.11; do want="${s#*:}"
+    [[ "$(docker inspect -f '{{(index .NetworkSettings.Networks "'"${PROJECT}_agentnet"'").IPAddress}}' "$(dc ps -q "${s%%:*}")")" == "$want" ]] || return 1
+  done; }
+check "agentnet 10.230.7.0/24 with worker .10 and worker-judge .11" agentnet_ok
+proxy_on_agentnet_only() { dc ps -q agent-proxy | grep -q . || return 0   # agents off: nothing to check
+  [[ "$(docker inspect -f '{{(index .NetworkSettings.Networks "'"${PROJECT}_agentnet"'").IPAddress}}' "$(dc ps -q agent-proxy)")" == 10.230.7.2 ]] || return 1
+  # Inside agent-proxy, loopback 8080 refuses: it listens on its agentnet address only (FR-DEPLOY-16 d).
+  ! dc exec -T agent-proxy python -I -c "import socket; socket.create_connection(('127.0.0.1', 8080), 2).close()" 2>/dev/null; }
+check "agent-proxy at 10.230.7.2, nothing on 127.0.0.1:8080" proxy_on_agentnet_only
 secret_files_ok() { local s uid; for s in $CONSUMERS; do
   uid="$(dc exec -T "$s" id -u)" || return 1
   [[ "$(dc exec -T "$s" stat -c '%a %u' /run/secrets/db-password)" == "600 $uid" ]] || return 1

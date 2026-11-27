@@ -1974,8 +1974,10 @@ tasks:
         ipam-less agentnet upgrade (needs `reader up`, the owner's run); the memory limit from judge-gate",
       ask: "Before the live check runs `reader doctor`: the owner adds the judge slots to his reader.yaml
         (`tasks.judge.find: {model: haiku}` at least; v1 bindings in deploy/reader.example.yaml); FR-CLI-25 fails
-        while judge.find is unbound with agents on. After pulling this change, `reader down` then `reader up` may be
-        needed once so Compose recreates agentnet with its subnet",
+        while judge.find is unbound with agents on. After pulling this change, `reader down` (volumes kept) then
+        `reader up` once, so Compose recreates agentnet with its subnet. The first jobs.judge_gc deletes the weeks of
+        old succeeded sweep-queue rows in one statement (expected, a one-off). e2e/live/stage-1.sh has the lane checks
+        (code review round 1); the owner runs it",
       what: "OPS-DEPLOY, SRV-EVENTS, OPS-SANDBOX, OPS-CLI and SRV-CONFIG revision (~340–600 lines): the worker-judge
         Compose service from the worker image with the worker's hardening and DB DSN delivery (ADR-0026), on agentnet,
         core and otel only, with an initial memory limit; a judge.find queue keyed by request id, consumed only by

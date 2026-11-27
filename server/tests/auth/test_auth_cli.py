@@ -88,6 +88,40 @@ def test_lane_defaults_to_main_and_reaches_the_worker(monkeypatch: pytest.Monkey
     assert seen == ["main", "judge"]
 
 
+@pytest.mark.parametrize(("args", "lane"), [((), "main"), (("judge",), "judge")])
+def test_run_worker_hands_its_lane_to_the_job_runner(
+    monkeypatch: pytest.MonkeyPatch, args: tuple[str, ...], lane: str
+) -> None:
+    """FR-AUTH-2 (paired SRV-EVENTS FR-EVENTS-9): `_run_worker` passes its lane to `reader.jobs.worker.run`."""
+    import reader.jobs.worker
+    from reader.config import Secret
+    from reader.db import DbTarget
+    from reader.serve import main
+
+    received: list[str] = []
+
+    async def fake_run(*_a: Any, lane: str = "unset", **_kw: Any) -> int:
+        received.append(lane)
+        return 0
+
+    async def heads(*_a: Any, **_kw: Any) -> bool:
+        return True
+
+    class Engine:
+        async def dispose(self) -> None:
+            return None
+
+    monkeypatch.setattr(reader.jobs.worker, "run", fake_run)
+    monkeypatch.setattr(main, "wait_for_heads", heads)
+    monkeypatch.setattr(main, "start_obs", lambda role, env: None)
+    monkeypatch.setattr(main, "serving_logs", lambda: None)
+    monkeypatch.setattr(main, "_settings", lambda env: None)
+    monkeypatch.setattr(main, "_target", lambda env: DbTarget("h", 5432, "u", "d", Secret("pw")))
+    monkeypatch.setattr(main, "make_engine", lambda target: Engine())
+    main._run_worker(None, *args)  # type: ignore[arg-type]
+    assert received == [lane]
+
+
 @pytest.mark.parametrize("role", ["api", "worker"])
 def test_config_error_exits_1_before_connecting(tmp_path: Path, role: str) -> None:
     env = _closed_db_env(tmp_path, users=(("a", "learner"),))

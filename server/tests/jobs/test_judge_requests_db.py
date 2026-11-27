@@ -94,6 +94,9 @@ async def test_put_get_delete_round_trip(pg: Pg) -> None:
         ({"cards": (("a", 1),)}, "cards"),
         ({"pack_ids": (1,)}, "pack_ids"),
         ({"input_sha256": "ABC"}, "input_sha256"),
+        ({"query": "a\x00b"}, "query"),
+        ({"cards": (("a", "t\x00"),)}, "cards"),
+        ({"run_cap_usd": Decimal("0")}, "run_cap_usd"),
         ({"deadline_s": 9.0}, "deadline"),  # factor 3 x 9 s = 27 s > 30 - 5
         ({"deadline_s": -1.0}, "deadline"),
     ],
@@ -248,6 +251,17 @@ async def test_reap_deletes_only_rows_a_minute_past_their_deadline(pg: Pg) -> No
         await _raw_expired(env, owner, 30)
         await env.jobs.judge_reap()
         assert await env.scalar("SELECT count(*) FROM judge_requests") == 1
+
+
+async def test_reap_leaves_a_stalled_main_queue_job_alone(pg: Pg) -> None:
+    """FR-EVENTS-34: the reaper's stalled-job rule covers the judge queue only."""
+    async with jobs_env(pg, kinds=[effect_kind(), judge_stub_kind()]) as env:
+        await env.jobs.enqueue("test.effect", {"name": "main-stalled"})
+        job = await env.stall_next()  # a main-queue job under a dead worker
+        await env.jobs.judge_reap(stalled_after_s=0)
+        rows = await env.rows("SELECT status::text FROM procrastinate_jobs WHERE id = :i", i=job.id)
+        assert rows == [("doing",)]
+        assert (await env.key_row("main-stalled")).attempts == 0
 
 
 async def _finished_job(env: Env, name: str, queue: str, status: Any, hours_ago: float) -> int:

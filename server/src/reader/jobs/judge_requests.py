@@ -72,8 +72,12 @@ def _check(new: NewJudgeRequest) -> None:
         raise _invalid("pack_ids")
     if not isinstance(new.input_sha256, str) or not _HEX64.fullmatch(new.input_sha256):
         raise _invalid("input_sha256")
-    if not isinstance(new.query, str):
+    if not isinstance(new.query, str) or "\x00" in new.query:  # Postgres text holds no NUL
         raise _invalid("query")
+    if any("\x00" in part for card in new.cards for part in card):
+        raise _invalid("cards")
+    if not new.run_cap_usd > 0:
+        raise _invalid("run_cap_usd")
 
 
 class Store:

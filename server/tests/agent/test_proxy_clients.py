@@ -57,7 +57,8 @@ def test_clients_table_matches_the_bounds_and_the_deploy_addresses() -> None:
     assert (lane.quota, lane.ttl_s, lane.tools, lane.evict) == (
         b["client_quota"]["worker-judge"], b["lane_token_ttl_s"], False, False
     )
-    assert worker.quota + lane.quota == b["run_tokens_max"]
+    assert worker.quota + lane.quota == b["run_tokens_max"] == proxy.RUN_TOKENS_MAX
+    assert proxy.LANE_TOKEN_TTL_S == need("reader.agent.lane").LANE_TOKEN_TTL_S  # one TTL, two modules
     assert proxy.ProxySettings().clients == proxy.CLIENTS
 
 

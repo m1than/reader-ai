@@ -756,5 +756,7 @@ audit_actions:
 # Red tests (2026-11-26): test_jobs_unit.py (KIND_MODULES, start hooks, reserved names, key retention),
 # test_lanes.py, test_lanes_db.py, test_judge_requests_db.py, test_judge_canary_db.py; the migration-head checks
 # name jobs_0004. Green: lanes.py, judge_requests.py, jobs_0004, the collectors and the sweep exemption in queue.py,
-# worker.run(lane=); tests reformatted for ruff (line length, assertions split), no oracle changed.
+# worker.run(lane=); tests reformatted for ruff (line length, assertions split), no oracle changed. Code review
+# round 1 (non-blocking, applied): `put` also refuses run_cap_usd <= 0 (`run_cap_usd`) and a NUL byte in the query
+# or a card (`query`, `cards`) before the insert; a test shows judge_reap leaves a stalled main-queue job alone.
 
