@@ -2243,8 +2243,11 @@ invariants:
       entry's pack, as `Pack(owner_id, pack_id, ingest_id, material_sha256, converter_version)`), `pack_of_ingest`
       (any state; a stored ingest id may name a superseded pack), `live_packs`, `material_has_pack`, `pack_spans`
       (optionally a page range), `span_ids`, `page_stats`, `span_chars`, `pack_outline`, `ingest_facts` and
-      `active_span_texts` (span id → page and text from active packs only; a legacy id in a non-legacy active pack
-      goes through FR-INGEST-42's resolver). **Span ids minted from a pack** are its locators (FR-INGEST-33), except
+      `active_span_rows` (span id → (page, text, quote_sha256) from active packs only; a legacy id in a non-legacy
+      active pack goes through FR-INGEST-42's resolver, `active` or `reanchored` only, taking the mapped span's
+      hash; the stored hash, or where it is null `locator.quote_sha256` of the stored text, FR-INGEST-34's
+      formula; promoted by V.kl-tutor-find, paired with SRV-TUTOR FR-TUTOR-5/-8; test_span_rows_db.py [db]) and its
+      (page, text) projection `active_span_texts`. **Span ids minted from a pack** are its locators (FR-INGEST-33), except
       for a pack of a `LEGACY_VERSIONS` converter, whose spans keep `<material_sha256>:<seq>` (the form its
       published citations and the seq map hold). Foreign-key declarations in other modules' migrations
       (`REFERENCES ingests`) are the only exception, listed by file in the test. Other modules read `base_packs`
@@ -2868,8 +2871,8 @@ proposed_owner_notes:
 #   5. Outline ids use sibling-ordinal paths (`sec:<sha>:3/2/1`), not title slugs (ADR-0039 B8's example).
 #   6. The test-vector rule is measured on the pilot span dump before promotion.
 
-# ---- Paired with SRV-TUTOR's ADR-0039 revision (V.kl-tutor-find), DRAFT, not approved; lands with that revision's
-# Red tests (FR-TUTOR-8, FR-INGEST-40 gate (g)).
+# ---- Paired with SRV-TUTOR's ADR-0039 revision (V.kl-tutor-find), approved with it (2026-11-28). span_rows is
+# promoted into INV-INGEST-16 with test_span_rows_db.py; gate (g) lands with FR-TUTOR-8's Red tests.
 kl_tutor_find:
   span_rows:
     text: >-
