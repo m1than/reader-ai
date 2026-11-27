@@ -1,0 +1,36 @@
+# VEC-SEARCH-7 (FR-SEARCH-24, -27 b, c). Pivot: cards ordered by sha256(seed ‖ id) (hex, then id); the first
+# unassigned card takes its unassigned + neighbours (in that order); clusters in creation order.
+#   seed s1 → order d, c, e, b, a: d takes e; c takes b; a alone.
+#   seed s2 → order d, a, e, b, c: d takes e; a takes b; c alone.
+# Set cover: lowest cost per newly covered weight first, ties by id; stops when every coverable element is covered.
+pivot:
+  - cards: [a, b, c, d, e]
+    plus: [[a, b], [b, c], [d, e]]
+    seed: s1
+    expect: [[d, e], [c, b], [a]]
+  - cards: [a, b, c, d, e]
+    plus: [[a, b], [b, c], [d, e]]
+    seed: s2
+    expect: [[d, e], [a, b], [c]]
+  - cards: [x]
+    plus: []
+    seed: s1
+    expect: [[x]]
+set_cover:
+  - name: ties by id
+    # S2, S3, S4 all cost 0.5 per weight at first: S2 (id). Then S3 (1 / 2) and S4 (0.5 / 1) tie: S3; done.
+    universe: {u1: 1, u2: 1, u3: 1, u4: 1}
+    sets:
+      S1: {covers: [u1, u2, u3], cost: 3}
+      S2: {covers: [u1, u2], cost: 1}
+      S3: {covers: [u3, u4], cost: 1}
+      S4: {covers: [u4], cost: 0.5}
+    expect: [S2, S3]
+  - name: weighted elements
+    # C 0.5 per weight first; then A (2 / 2 = 1) before B (4 / 2 = 2, only u1 is new).
+    universe: {u1: 2, u2: 1}
+    sets:
+      A: {covers: [u1], cost: 2}
+      B: {covers: [u1, u2], cost: 4}
+      C: {covers: [u2], cost: 0.5}
+    expect: [C, A]

@@ -1,0 +1,80 @@
+# VEC-SEARCH-6 (FR-SEARCH-27 a): hand-computed budgeted greedy cases. f is a weighted coverage: the weight of the
+# elements the chosen cards cover. `order` is the fill order (absent: by score desc, then id). `base` is pass 1's
+# fixed output for a pass-2 case: f becomes f(. ∪ base) − f(base). `expect` is the returned list in selection
+# order (greedy picks, or the best single card, then the fill).
+cases:
+  - name: ratio pick
+    # Y and Z gain 1 per cost 1, X 2 per cost 4; Y before Z by score; X does not fit B 2. f(G) 2 ≥ f({Y}) 1.
+    elements: {a: 1, b: 1, c: 1}
+    cards:
+      X: {covers: [a, b], cost: 4, score: 0.7}
+      Y: {covers: [a], cost: 1, score: 0.9}
+      Z: {covers: [c], cost: 1, score: 0.8}
+    budget: 2
+    expect: [Y, Z]
+  - name: best single card wins
+    # S (ratio 1) is taken first, then L (cost 9.5) no longer fits; f({S}) 1 < f({L}) 5, so T = {L}.
+    elements: {a: 1, b: 1, c: 1, d: 1, e: 1, f: 1}
+    cards:
+      S: {covers: [a], cost: 1, score: 0.9}
+      L: {covers: [b, c, d, e, f], cost: 9.5, score: 0.5}
+    budget: 10
+    expect: [L]
+  - name: fill after the greedy branch adds a zero-gain card
+    # As "ratio pick" with B 3 and W covering nothing: the greedy never takes W (gain 0), the fill does.
+    elements: {a: 1, b: 1, c: 1}
+    cards:
+      X: {covers: [a, b], cost: 4, score: 0.7}
+      Y: {covers: [a], cost: 1, score: 0.9}
+      Z: {covers: [c], cost: 1, score: 0.8}
+      W: {covers: [], cost: 1, score: 0.6}
+    budget: 3
+    expect: [Y, Z, W]
+  - name: fill after the best-single branch
+    # T = {L} (cost 9.5); the fill walks S (no longer fits), L (taken), V (cost 0.5 fits: 10).
+    elements: {a: 1, b: 1, c: 1, d: 1, e: 1, f: 1}
+    cards:
+      S: {covers: [a], cost: 1, score: 0.9}
+      L: {covers: [b, c, d, e, f], cost: 9.5, score: 0.5}
+      V: {covers: [b], cost: 0.5, score: 0.4}
+    budget: 10
+    expect: [L, V]
+  - name: k stops the greedy
+    # The costliest card (X, 4) does not fit B 2, so the budget binds: ratio greedy, stopped at k 1.
+    elements: {a: 1, b: 1, c: 1}
+    cards:
+      X: {covers: [a, b], cost: 4, score: 0.7}
+      Y: {covers: [a], cost: 1, score: 0.9}
+      Z: {covers: [c], cost: 1, score: 0.8}
+    budget: 2
+    k: 1
+    expect: [Y]
+  - name: k costliest fit switches to gain order
+    # The k (1) costliest cards (X, 2) fit B 10: pick by gain, X (2) over Y (1), although the ratio ties (1 = 1)
+    # and Y has the higher score.
+    elements: {a: 1, b: 1}
+    cards:
+      X: {covers: [a, b], cost: 2, score: 0.5}
+      Y: {covers: [a], cost: 1, score: 0.9}
+    budget: 10
+    k: 1
+    expect: [X]
+  - name: ties by score then id
+    # Equal ratio and gain: the higher score first; at equal score the smaller id.
+    elements: {a: 1, b: 1, c: 1}
+    cards:
+      q: {covers: [a], cost: 1, score: 0.5}
+      p: {covers: [b], cost: 1, score: 0.5}
+      r: {covers: [c], cost: 1, score: 0.6}
+    budget: 2
+    expect: [r, p]
+  - name: pass 2 on the marginal objective
+    # Pass 1 kept A (covers a). B adds nothing over it, C adds b: C is chosen; B is not filled (no room).
+    elements: {a: 1, b: 1}
+    base: [A]
+    cards:
+      B: {covers: [a], cost: 1, score: 0.9}
+      C: {covers: [b], cost: 1, score: 0.1}
+    covers_base: {A: [a]}
+    budget: 1
+    expect: [C]

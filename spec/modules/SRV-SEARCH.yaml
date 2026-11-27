@@ -414,6 +414,49 @@ requirements:
       repeat of more than one nested in another (star height > 1) is refused outright, then each pattern must answer
       a fixed set of 1,000-character adversarial inputs within 50 ms. [unit] test_policy_unit.py (Green: lint-only
       test edits, no oracle changed).
+  - id: FR-SEARCH-25   # ADR-0039 revision, promoted in phase 2 (unit 2)
+    text: >-
+      **The coverage objective (B5).** Query elements E = the lexemes of `to_tsvector(cfg, query)` for each fts_config
+      of the eligible packs ∪ the identifiers of step 1 (lowercased); weights: identifier `objective.identifier_weight`,
+      lexeme `objective.lexeme_weight`, normalised to sum 1 when E is non-empty. A card covers e when e is among the
+      lexemes of its window `fts` values (L1) or of `to_tsvector(cfg, title || summary)` (L2), or, for an identifier,
+      when it occurs case-insensitively in the card text. Each card c also covers a private element of weight λ ·
+      rel(c), rel(c) = max(0, score(c)) / s_top with s_top the top merged score of the request (fixed for the
+      request), and rel(c) = 0 for every card when s_top ≤ 0 (no division by zero or a negative scale). f(S) = the
+      weight of the elements covered by S: a weighted coverage, monotone submodular with non-negative weights, so the
+      bounds of FR-SEARCH-27 apply. License and supersession enter only as filters before selection. Element keys:
+      `l:<lexeme>` and `i:<identifier>`, so a lexeme and an identifier of the same spelling are two elements. [unit]
+      test_greedy_unit.py (the lexeme extraction over VEC-SEARCH-5 runs with the [db] candidates).
+  - id: FR-SEARCH-26   # ADR-0039 revision, promoted in phase 2 (unit 2)
+    text: >-
+      **Bounded work.** Every selection over the graph and the embeddings is FR-SEARCH-27's greedy over at most
+      `candidates_max` (step 2) or `expand_cap` (step 5) cards; nothing enumerates subsets, calls a solver or
+      recomputes globally (ADR-0039 invariant 3). Each budgeted pass evaluates at most n(n+1)/2 marginal gains in its
+      greedy loop plus n singleton values for the best-single branch, for n ≤ 50. [unit] test_greedy_unit.py.
+  - id: FR-SEARCH-27   # ADR-0039 revision, promoted in phase 2 (unit 2)
+    text: >-
+      **The B5 greedy algorithms (`reader.search.greedy`, pure).** (a) **Budgeted max coverage** `budgeted(cards, f,
+      cost, B, score, order=None, k=None)` (order unset: score desc, then id): G starts empty; repeatedly add, among
+      the cards not in G that fit (cost(G) + cost(c) ≤
+      B) and have Δ(c | G) > 0, the one with the largest Δ/cost (ties: higher score, then smaller id), stopping at k
+      cards when k is set; c* = the fitting single card of largest f({c}) (same ties); T = G if f(G) ≥ f({c*}) else
+      {c*}; then **fill**: walk `order` and add each card that still fits (and k allows). Bound, stated per pass over
+      its own input and budget: f(T) ≥ (1 − 1/e)/2 · OPT ≈ 0.316 · OPT (Khuller, Moss and Naor 1999), for unset k; the
+      fill only adds cards, so by monotonicity it never lowers f. This answers B6 step 7's two choices: a fitting
+      zero-gain card is returned through the fill, and a fill after the best-single-card branch is allowed. **k:**
+      when k is set and the k costliest input cards together fit in B, the budget cannot bind, so the pass picks by
+      largest Δ instead of Δ/cost, which is the cardinality greedy with f(T) ≥ (1 − 1/e) · OPT over sets of ≤ k cards
+      (Nemhauser, Wolsey and Fisher 1978); otherwise, when k binds together with the budget, no bound is claimed
+      (declared). (b) **Weighted set cover** `set_cover(universe, sets, cost)`: a pure function, lowest cost per newly
+      covered weight first, ties by id; bound H(d) ≤ 1 + ln d, d the largest set size, for unit element weights
+      (Chvátal 1979; Feige 1998 threshold; with unequal element weights the order is still by cost per weight and no
+      H(d) bound is claimed, phase-2 clarification). Stage V ships it only with its bound test; its caller (atlas
+      gaps, purchase proposals) is deferred to
+      SRV-KB (proposed_defers). (c) **Pivot** `pivot(cards, plus, seed)`: order the cards by sha256(seed ‖ id) (hex,
+      then id); take the first unassigned card, attach its unassigned + neighbours in that order, repeat; seed = the
+      request hash; `pivot_in_order(order, plus)` is the same over a given order. Bound: expected
+      disagreements ≤ 3 · OPT over uniformly random orders (Ailon, Charikar and Newman 2005). [unit]
+      test_greedy_unit.py.
 
 invariants:
   - id: INV-SEARCH-1
@@ -454,6 +497,16 @@ invariants:
       a batch is in progress is answered after that batch and before the next one, within T plus its own encode; and
       under overlapping requests the encoder is never entered by more than one call at a time (it counts concurrent
       entries; the maximum is 1). [unit]
+  - id: INV-SEARCH-10   # ADR-0039 revision, promoted in phase 2 (unit 2)
+    text: >-
+      **Greedy bounds against exhaustive search, per pass.** On random instances with n ≤ 12 cards: the step-5
+      preselection, step-7 pass 1 and step-7 pass 2 (on its marginal objective with pass 1's output fixed) each reach
+      ≥ (1 − 1/e)/2 of the optimum over all subsets within that pass's budget (k unset); `set_cover` costs ≤ H(d) ×
+      the optimum (unit element weights, FR-SEARCH-27 b); the pivot's exact expected disagreements, averaged over all
+      n! orders (n ≤ 6), ≤ 3 × the optimum
+      clustering over all partitions; with k set and the k costliest cards fitting, the pass reaches ≥ (1 − 1/e) of the
+      optimum over sets of ≤ k cards. No bound over the union of the two step-7 passes is asserted (ADR-0039 B5).
+      Enumeration exists only in the tests. [unit] test_greedy_props.py.
 
 nfr:
   - id: NFR-SEARCH-1
@@ -507,6 +560,12 @@ vectors:
   - id: VEC-SEARCH-5
     source: synthetic English chunks and queries with partial term overlap (OR semantics, operator characters)
     file: spec/fixtures/SRV-SEARCH/fts-or.yaml
+  - id: VEC-SEARCH-6
+    source: hand-computed budgeted greedy cases (ratio choice, best-single branch, fill, zero-gain fill, k stop, the k-costliest-fit gain order, ties, pass 2 on a marginal objective)
+    file: spec/fixtures/SRV-SEARCH/greedy.yaml
+  - id: VEC-SEARCH-7
+    source: hand-computed pivot clusterings for fixed seeds, and set-cover cases
+    file: spec/fixtures/SRV-SEARCH/pivot-cover.yaml
 
 # Test levels: [unit] pure functions and the service protocol with a fake encoder; [db] Postgres via testcontainers on
 # the reader-postgres image with pgvector, with a fake embed service returning deterministic hash-derived unit vectors;
@@ -964,48 +1023,7 @@ proposed_requirements:
     tests_planned:
       - "add server/tests/search/test_find_unit.py [unit]: gate modes and the margin rule at the boundary; expansion score rule (only-by-expansion, both, two parents); cap 50 by (score, id); the preselection's cost ≤ 1.5 × budget; Links fake with edges merges as VEC-SEARCH-7; an L2 target is not added on an L1-only route"
       - "add server/tests/search/test_find_db.py [db]: expansion over real next links of an active pack; an ineligible L1 target is not added"
-  - id: FR-SEARCH-25
-    text: >-
-      **The coverage objective (B5).** Query elements E = the lexemes of `to_tsvector(cfg, query)` for each fts_config
-      of the eligible packs ∪ the identifiers of step 1 (lowercased); weights: identifier `objective.identifier_weight`,
-      lexeme `objective.lexeme_weight`, normalised to sum 1 when E is non-empty. A card covers e when e is among the
-      lexemes of its window `fts` values (L1) or of `to_tsvector(cfg, title || summary)` (L2), or, for an identifier,
-      when it occurs case-insensitively in the card text. Each card c also covers a private element of weight λ ·
-      rel(c), rel(c) = max(0, score(c)) / s_top with s_top the top merged score of the request (fixed for the
-      request), and rel(c) = 0 for every card when s_top ≤ 0 (no division by zero or a negative scale). f(S) = the
-      weight of the elements covered by S: a weighted coverage, monotone submodular with non-negative weights, so the
-      bounds of FR-SEARCH-27 apply. License and supersession enter only as filters before selection. [unit]
-    tests_planned:
-      - "add server/tests/search/test_greedy_unit.py [unit]: elements and weights over VEC-SEARCH-5 (revised); f is monotone and submodular on random instances (Hypothesis); rel normalisation fixed per request; s_top ≤ 0 → every rel 0"
-  - id: FR-SEARCH-26
-    text: >-
-      **Bounded work.** Every selection over the graph and the embeddings is FR-SEARCH-27's greedy over at most
-      `candidates_max` (step 2) or `expand_cap` (step 5) cards; nothing enumerates subsets, calls a solver or
-      recomputes globally (ADR-0039 invariant 3). Each budgeted pass evaluates at most n(n+1)/2 marginal gains in its
-      greedy loop plus n singleton values for the best-single branch, for n ≤ 50. [unit]
-    tests_planned:
-      - "add server/tests/search/test_greedy_unit.py [unit]: gain and value evaluations counted ≤ n(n+1)/2 + n on n = 50"
-  - id: FR-SEARCH-27
-    text: >-
-      **The B5 greedy algorithms (`reader.search.greedy`, pure).** (a) **Budgeted max coverage** `budgeted(cards, f,
-      cost, B, order, k=None)`: G starts empty; repeatedly add, among the cards not in G that fit (cost(G) + cost(c) ≤
-      B) and have Δ(c | G) > 0, the one with the largest Δ/cost (ties: higher score, then smaller id), stopping at k
-      cards when k is set; c* = the fitting single card of largest f({c}) (same ties); T = G if f(G) ≥ f({c*}) else
-      {c*}; then **fill**: walk `order` and add each card that still fits (and k allows). Bound, stated per pass over
-      its own input and budget: f(T) ≥ (1 − 1/e)/2 · OPT ≈ 0.316 · OPT (Khuller, Moss and Naor 1999), for unset k; the
-      fill only adds cards, so by monotonicity it never lowers f. This answers B6 step 7's two choices: a fitting
-      zero-gain card is returned through the fill, and a fill after the best-single-card branch is allowed. **k:**
-      when k is set and the k costliest input cards together fit in B, the budget cannot bind, so the pass picks by
-      largest Δ instead of Δ/cost, which is the cardinality greedy with f(T) ≥ (1 − 1/e) · OPT over sets of ≤ k cards
-      (Nemhauser, Wolsey and Fisher 1978); otherwise, when k binds together with the budget, no bound is claimed
-      (declared). (b) **Weighted set cover** `set_cover(universe, sets, cost)`: a pure function, lowest cost per newly
-      covered weight first, ties by id; bound H(d) ≤ 1 + ln d, d the largest set size (Chvátal 1979; Feige 1998
-      threshold). Stage V ships it only with its bound test; its caller (atlas gaps, purchase proposals) is deferred to
-      SRV-KB (proposed_defers). (c) **Pivot** `pivot(cards, plus, seed)`: order the cards by sha256(seed ‖ id); take
-      the first unassigned card, attach its unassigned + neighbours, repeat; seed = the request hash. Bound: expected
-      disagreements ≤ 3 · OPT over uniformly random orders (Ailon, Charikar and Newman 2005). [unit]
-    tests_planned:
-      - "add server/tests/search/test_greedy_unit.py [unit]: VEC-SEARCH-6 hand-computed cases (ratio pick, best-single branch wins, fill after each branch, zero-gain fitting card filled, k stop, the k-costliest-fit switch to gain order, ties); pivot over VEC-SEARCH-7; set_cover hand cases"
+  # FR-SEARCH-25, -26, -27 promoted to `requirements` with test_greedy_unit.py (phase 2, unit 2).
   - id: FR-SEARCH-28
     text: >-
       **Step 6, the `judge.find` waiter (B6, B7b).** Runs only when step 4 is not separated. (1) **Slice:** the
@@ -1124,17 +1142,7 @@ proposed_invariants:
       caller). Property test. [unit]
     tests_planned:
       - "add server/tests/search/test_find_props.py [unit] (Hypothesis): estimate(canonical JSON of the returned response) ≤ effective budget for every judge outcome (judged, each judge_skip value, embed degraded), budgets from budget_min to above the maximum, k set and unset; card count ≤ k; text budgets per layer"
-  - id: INV-SEARCH-10
-    text: >-
-      **Greedy bounds against exhaustive search, per pass.** On random instances with n ≤ 12 cards: the step-5
-      preselection, step-7 pass 1 and step-7 pass 2 (on its marginal objective with pass 1's output fixed) each reach
-      ≥ (1 − 1/e)/2 of the optimum over all subsets within that pass's budget (k unset); `set_cover` costs ≤ H(d) ×
-      the optimum; the pivot's exact expected disagreements, averaged over all n! orders (n ≤ 6), ≤ 3 × the optimum
-      clustering over all partitions; with k set and the k costliest cards fitting, the pass reaches ≥ (1 − 1/e) of the
-      optimum over sets of ≤ k cards. No bound over the union of the two step-7 passes is asserted (ADR-0039 B5). Enumeration exists only
-      in the tests. [unit]
-    tests_planned:
-      - "add server/tests/search/test_greedy_props.py [unit] (Hypothesis, exhaustive oracles)"
+  # INV-SEARCH-10 promoted to `invariants` with test_greedy_props.py (phase 2, unit 2).
   - id: INV-SEARCH-11
     text: >-
       **One judge call at most, last, on the slice only.** For any `find`: no model call before step 6; at most one
@@ -1203,16 +1211,7 @@ proposed_nfr:
       - "change server/tests/search/test_search_local.py: find latency per call against the live stack, p95 reported"
 
 proposed_vectors:
-  - id: VEC-SEARCH-6
-    source: hand-computed budgeted greedy cases (ratio choice, best-single branch, fill, zero-gain fill, k stop, the k-costliest-fit gain order, ties, pass 2 on a marginal objective)
-    file: spec/fixtures/SRV-SEARCH/greedy.yaml
-    tests_planned:
-      - "test_greedy_unit.py reads it (FR-SEARCH-27)"
-  - id: VEC-SEARCH-7
-    source: hand-computed pivot clusterings for fixed seeds, and set-cover cases
-    file: spec/fixtures/SRV-SEARCH/pivot-cover.yaml
-    tests_planned:
-      - "test_greedy_unit.py reads it (FR-SEARCH-24, -27)"
+  # VEC-SEARCH-6, -7 promoted to `vectors` with test_greedy_unit.py (phase 2, unit 2).
   - id: VEC-SEARCH-8
     source: synthetic questions (agent's wording, no book text) → question type and route per channel
     file: spec/fixtures/SRV-SEARCH/routes.yaml
