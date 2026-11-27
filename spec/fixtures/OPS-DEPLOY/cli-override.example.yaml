@@ -4,7 +4,7 @@
 # services (the base's static ones and this one) are equal to each other on every key except `networks`, and that one
 # of them equals FR-DEPLOY-8's literals after size normalisation (Compose renders 2g as 2147483648; tmpfs options are
 # compared as sets). There is no merge step in the test.
-# The override also binds the owner's reader.yaml read-only into api, worker, mcp and agent-proxy, and only those
+# The override also binds the owner's reader.yaml read-only into api, worker, worker-judge, mcp and agent-proxy, and only those
 # (FR-DEPLOY-5); compose.yaml sets READER_CONFIG to the target path on the three server roles. The source path is the test path of OPS-CLI's VEC-CLI-2;
 # at `reader up` OPS-CLI writes the owner's real path.
 # `create_host_path: false`: a missing file fails the start instead of Docker creating a directory in its place.
@@ -41,6 +41,8 @@ services:
       sb-user-ivan: {}
     volumes: [*reader-config]
   worker:
+    volumes: [*reader-config]
+  worker-judge: # FR-DEPLOY-16 (f): the judge lane reads tasks and budgets
     volumes: [*reader-config]
   mcp:
     volumes: [*reader-config]

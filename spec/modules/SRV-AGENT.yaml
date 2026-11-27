@@ -95,15 +95,86 @@
 # Phase 2 code review round 2 (2026-11-24, V/p2-fix3): a provider built without an engine (the freshness agent
 # [image] check, whose ledger is in memory) reads the caps from reader.yaml alone (`file_settings`), since there
 # is no database holding overrides; a [unit] test pins it. No oracle loosened.
+# Revision for ADR-0039 (accepted 2026-11-26; V/kl-agent-judges): judge slots, ledger lines and the index and eval
+# caps, recorded judge outputs, the `judge.find` lane job, the loop-fit check (B7, B7a, B7b; the ADR-0005
+# amendment). deep-reviewer (Fable) round 1 changes, round 2 approve (2026-11-26); the round-2 notes are folded in.
+# Promoted with Red tests: FR-AGENT-6, -9, -10, -12, -17 revised; FR-AGENT-18..23; INV-AGENT-8..10; VEC-AGENT-5.
+# Promoted in V.kl-deploy-judge-lane (2026-11-26, with OPS-DEPLOY FR-DEPLOY-16's agentnet addresses; deep-reviewer
+# (Fable) approve in round 3 of that task's spec review): FR-AGENT-3's client identity (plus `--bind`),
+# INV-AGENT-1 and INV-AGENT-6 as revised for worker-judge, INV-AGENT-7, VEC-AGENT-6, `bounds.client_quota` and the
+# errors `client_unknown`, `client_quota`; `reader.agent.lane` exports `JOB_KINDS` wired to SRV-EVENTS'
+# `judge_requests.STORE` (the seam below gets its production default). Each item keeps its `tests_planned` (H2).
+# `ProxySettings.clients` defaults to `CLIENTS`; the loopback harnesses (SRV-FRESH, conftest `make_proxy`) pass
+# their own table. Red tests (2026-11-26): the in-process harness (conftest `Proxy.client`) sends from the worker's
+# CLIENTS address by default and from the lane's on request; test_proxy_clients.py holds FR-AGENT-3's client cases,
+# the INV-AGENT-7 state machine and VEC-AGENT-6; the INV-AGENT-6 property draws lane requests too. Green: proxy.py
+# (CLIENTS, quotas, TTLs, revoke-all, --bind) and lane.py's JOB_KINDS; tests reformatted for ruff, no oracle changed.
+# Code review round 1 (non-blocking): the client-table test also pins proxy.RUN_TOKENS_MAX to the sum of the quotas
+# and proxy.LANE_TOKEN_TTL_S equal to lane.LANE_TOKEN_TTL_S; `client_unknown` and `client_quota` are PROXY_REFUSALS.
+#
+# Ownership (ADR-0039 B11). SRV-AGENT: the judge slot table, judge versions, the recorded-output table and its
+# replay, the `index` and `eval` ledger lines and their caps, the `judge.find` job handler that runs on the
+# `worker-judge` lane, agent-proxy's client identity and per-client token table (proposed), and the loop-fit check.
+# Not here: the `worker-judge` Compose service, its fixed `agentnet` address and memory (OPS-DEPLOY); the
+# `judge.find` queue, its consumer, the `judge_requests` table, its collector and the no-text-in-args canary
+# (SRV-EVENTS); building the judge input, waiting by LISTEN/NOTIFY and applying the output (SRV-SEARCH); per-pack
+# advisory locks, the active-pack check and the context-prefix batch job of 25 spans (SRV-INGEST); the
+# `judge_inputs` copy and its consent rule (SRV-OBS); the loop order and the resized `budget_usd_per_lesson` values
+# (SRV-PIPELINE); the new settings' schema (SRV-CONFIG); the per-token daily judge cap on MCP (SRV-MCP, stage 7).
+#
+# New files inside the existing `paths`: server/src/reader/agent/judges.py, server/src/reader/agent/lane.py,
+# server/src/reader/agent/prompts/judge_find.md, migration agent_0004, spec/fixtures/SRV-AGENT/judge-find-outputs.yaml.
+#
+# Seams until the owning specs land (each a Protocol with a stated production default):
+#   - `JudgeRequests` (get, delete) over SRV-EVENTS's `judge_requests` table; no production default here: the lane's
+#     kind joins KIND_MODULES only with that table (V.kl-deploy-judge-lane).
+#   - `PackGuard.lock_active(conn, pack_ids)`: production default `always_active` (true) while no purge exists;
+#     SRV-INGEST (V.kl-ingest-packs) switches the default to its per-pack lock check.
+#   - `JudgeInputsSink.copy(conn, request, output)`: production default a no-op; SRV-OBS (V.kl-obs-spans) supplies it.
+#   - The index and eval caps: `judges.line_caps(config)` returns None for `budgets.index_usd_per_pack`,
+#     `budgets.index_usd_per_pair_run` and `budgets.eval_usd_per_run` (so `cap_missing`) until SRV-CONFIG's schema
+#     rows land; its paired change supplies them through `reader.config.effective`, the only module that reads
+#     overridable keys (SRV-CONFIG's test). The provider takes `line_caps=` for tests.
+#
+# Delimiter neutralising, two rules on purpose: SRV-AGENT's `render_find_input` replaces the token only on data
+# lines that contain a delimiter (`<<<READER-INSTRUCTIONS` or `READER-INSTRUCTIONS>>>`), so ordinary text that
+# merely names the token is kept; SRV-OBS neutralises every occurrence of the token (its spec states where). Both
+# are intended, and both keep a raw delimiter out of a prompt.
+#   - SRV-OBS: `reader.obs.attributes.SPEC_CODES` gains the new error codes (its catalogue test reads `errors`).
+#
+# Paired changes (each in its own spec, in V.kl-deploy-judge-lane unless named):
+#   - OPS-DEPLOY: `agentnet` with an explicit subnet and fixed IPv4 addresses for `worker` and `worker-judge`, pinned
+#     equal to `reader.agent.proxy.CLIENTS`; deploy/reader.example.yaml binds the slots and, once measured, the caps.
+#   - SRV-EVENTS: KIND_MODULES gains `reader.agent.lane`; the `judge.find` queue (`judge`) consumed only by
+#     worker-judge; `judge_requests` with the columns FR-AGENT-21 reads; its collector calls `judges.expire`.
+#   - SRV-CONFIG: dotted `tasks` keys are allowed; the override key pattern does not match them, so a slot's task
+#     budget is a file setting; the three caps above as optional positive decimals, file settings only (not in
+#     ADR-0036's UI allow-list unless the owner adds them; then `policy_version` hashes the effective values).
+#   - SRV-PIPELINE (V.kl-pipeline-checks): calls `loop_fits` before each loop and resizes the task budgets.
+#   - SRV-FRESH: once FR-AGENT-3's client identity lands, the loopback harnesses server/tests/freshness/agent_check.py
+#     and server/tests/agent/conftest.py (`make_proxy`) pass `ProxySettings(clients=…)` mapping their loopback
+#     address to `worker`; `ProxySettings.clients` defaults to `CLIENTS`.
+#   - SRV-OBS: `obs.align` may call `judge.find` from the worker through the Provider port with line `eval`, in
+#     memory, with no judge_outputs lookup or record (FR-AGENT-19); `judge_requests` gains no instruction column.
+#   - OPS-SANDBOX (INV-SANDBOX-3 and ADR-0025's `verified_by` tests) and OPS-CLI (`reader doctor` hint for a slot
+#     missing from `tasks`).
+#
+# Clock: every deadline and retention comparison in the lane and judges.py uses the database's `now()`.
+# Prompt shape: a slot call passes the slot's prompt file as `system` and the rendered input as `prompt`;
+# `stage` = the slot name, `attempt` = 1 for `judge.find`, the job attempt for offline slots.
+# Token estimate: FR-AGENT-9's estimator assumes 2.0 chars per token; the Russian pilot measured about 1.9 bytes
+# (≈ 2.5 chars) per token (REF-AGENT-5), so the 3,000-token judge-input cap errs toward fewer real tokens; the
+# lane's latency is measured by `judge-gate`, not assumed here.
 
 id: SRV-AGENT
 title: Agent runtime — credential-injecting agent-proxy, no-tool Agent SDK provider, reservation-based spend ledger and budgets (slice)
 status: approved
 approved_by: agent
 approved_at: 2026-11-22
+review: "deep-reviewer (Fable): rounds 1-2 changes, round 3 approve (2026-11-22); ADR-0030 amendment rounds 1-2 changes, round 3 approve (2026-11-23); ADR-0039 revision round 1 changes, round 2 approve (2026-11-26), approved_by agent; client-identity items promoted with V.kl-deploy-judge-lane after its deep-reviewer (Fable) rounds 1-2 changes, round 3 approve (2026-11-26)"
 layer: server
 track: ai
-adr: [ADR-0005, ADR-0011, ADR-0023, ADR-0025, ADR-0026, ADR-0006, ADR-0017, ADR-0030]
+adr: [ADR-0005, ADR-0011, ADR-0023, ADR-0025, ADR-0026, ADR-0006, ADR-0017, ADR-0030, ADR-0039]
 slice: V.COMPILE-min
 
 paths:
@@ -151,9 +222,25 @@ bounds:
   cli_system_tokens: 6803       # the CLI's own system prompt, measured in every stage (REF-AGENT-5); used only
                                 # when a call sets no system prompt of its own (FR-AGENT-13)
   cli_overhead_tokens: 1000     # the fixed overhead beside a custom system prompt: ≈ 410 measured (REF-AGENT-7), 2.4×
+  # ADR-0039 (FR-AGENT-18..23):
+  judge_kill_factor: 3          # B7b: kill deadline = 3 x the B6 timeout (6.6 s at the initial 2.2 s)
+  lane_token_ttl_s: 30          # B7b initial value; FR-AGENT-21 refuses a request whose kill window exceeds it minus
+  lane_ttl_margin_s: 5          # this margin, unmeasured: between the window check and the token's issue the lane
+                                # makes four database round-trips (now, recorded, handle, reserve) and an issue of up
+                                # to lane_issue_timeout_s (1 s); after a kill come revoke and settle. 5 s covers
+                                # those plus scheduling slack; judge-gate measures the real gap
+  judge_find_output_retention_days: 30   # B7 (ADR-0032 Decision 6's trace retention), initial value
+  judge_find_max_output_tokens: 512      # initial value: ordinals for <= 13 cards and one number; judge-gate measures
+  judge_find_floor_usd: 0.002   # FR-AGENT-9's formula on Haiku at the cap: (1,000 + ceil(7,500 / 2.0)) x $0.20/M
+                                # + 512 x $0.50/M = $0.0012; rounded up
+  judge_find_input_tokens_max: 3000  # B6 step 6 initial cap, by FR-AGENT-9's estimator; re-checked by the lane
+  lane_issue_timeout_s: 1.0     # the lane's agent-proxy client timeout (the worker keeps 10 s)
+  client_quota: { worker: 28, worker-judge: 4 }   # 28 + 4 = run_tokens_max 32. worker: concurrency 1 (FR-EVENTS-9),
+                                   # 28 keeps today's evict-oldest headroom; worker-judge: its concurrency (B7b)
 
 tables:
-  agent_spend: { owner_id: true, columns: "id bigint identity pk, owner_id → users.id, run_id uuid, lesson_id uuid null, stage text, task text, attempt int, kind text (reserve|settle|void), reservation_id bigint null (settle and void → their reserve), model text, usd numeric(12,6), sdk_usd numeric(12,6) null, settled_usd numeric(12,6) null (settle only: the amount counted, FR-AGENT-9), upstream jsonb null (settle only: the run_token's upstream record), input, output, cache_write_5m, cache_write_1h, cache_read (bigint, settle only), thinking bigint null (settle only: output_tokens_details.thinking_tokens, part of output, not priced; agent_0002), created_at; append-only: a trigger refuses UPDATE, DELETE and TRUNCATE" }
+  agent_spend: { owner_id: true, columns: "id bigint identity pk, owner_id → users.id, run_id uuid, lesson_id uuid null, stage text, task text, attempt int, kind text (reserve|settle|void), reservation_id bigint null (settle and void → their reserve), model text, usd numeric(12,6), sdk_usd numeric(12,6) null, settled_usd numeric(12,6) null (settle only: the amount counted, FR-AGENT-9), upstream jsonb null (settle only: the run_token's upstream record), input, output, cache_write_5m, cache_write_1h, cache_read (bigint, settle only), thinking bigint null (settle only: output_tokens_details.thinking_tokens, part of output, not priced; agent_0002), created_at; append-only: a trigger refuses UPDATE, DELETE and TRUNCATE; agent_0004 adds line text null CHECK (line IN (compile, tutor, freshness, mcp, index, eval)), null on rows written before it" }
+  judge_outputs: { owner_id: true, columns: "owner_id → users.id, input_sha256 text, judge text (`<slot>@<version>`), output jsonb (parsed card ids and numbers only, never query, card or model text), pack_ids text[] (judge.find), overlay_id text null (offline slots), request_id uuid null, created_at default now(); PRIMARY KEY (owner_id, input_sha256, judge); a trigger refuses UPDATE and TRUNCATE, and refuses DELETE unless the transaction-local setting `reader.judge_delete` is `on`, which only FR-AGENT-20's expire and forget functions set (agent_0004)" }
 
 # One cost definition: `cost(model, usage) = sum(usage_k * rate_k) / 1e6` over the five fields of VEC-AGENT-1's mapping.
 # `spent(scope) = sum(settle.settled_usd) + sum(reserve.usd for reserves with neither a settle nor a void)`, where
@@ -162,7 +249,9 @@ tables:
 errors: [budget_exhausted, task_budget_exhausted, monthly_budget_exhausted, provider_missing, provider_unavailable,
   rate_limited, run_token_unknown, tools_mismatch, model_mismatch, output_cap, body_not_json, sdk_error, output_invalid, unknown_model,
   usage_unmapped, daily_budget_exhausted, upstream_retry, deadline_exceeded, body_not_utf8, tools_not_allowed,
-  search_cap, request_cap]
+  search_cap, request_cap, lane_saturated, line_invalid, cap_missing, index_budget_exhausted,
+  eval_budget_exhausted, replay_miss, judge_window_too_long, judge_input_too_large,
+  client_unknown, client_quota]   # the last two are agent-proxy's own codes (FR-AGENT-3); FR-AGENT-6 maps them
 
 requirements:
   - id: FR-AGENT-1
@@ -182,18 +271,45 @@ requirements:
       user's token. Tokens are held as `Secret` and never logged, echoed or written.
   - id: FR-AGENT-3
     text: >-
-      Run tokens. `POST /run-tokens {"user": "<handle>", "max_output_tokens": n, "model": "<full id>"}` returns
-      `{"run_token": "<43-char urlsafe base64 of 32 random bytes>"}` bound to that user, that output cap and that
-      model for `bounds.run_token_ttl_s`; `POST
-      /run-tokens/revoke {"run_token": "..."}` revokes it (in the body, never in a path, so it appears in no URL) and
-      returns the token's upstream record `{"requests": k, "statuses": [...], "any_2xx": bool, "refused": [...],
-      "in_flight": n, "failed": m}`: every upstream response status seen for it in order, the codes of the proxy's own
-      refusals (FR-AGENT-4), which never reach upstream, the requests still being relayed at revoke (`in_flight`,
-      code review B2: a request forwarded but not finished may still be billed), and the requests that failed after
-      the connection was made (`failed`: written upstream, outcome unknown). Revoking an unknown token (never issued, already revoked, or evicted) answers 404 `run_token_unknown`
-      and no record. At most `bounds.run_tokens_max` live tokens; the oldest is revoked when
-      exceeded. Only the worker reaches the port (agentnet). A user without a loaded token gets 409 `provider_missing`.
-      Tokens are stored only as sha256 digests and compared in constant time.
+      Run tokens, per client (revised for ADR-0039 B7b; promoted in V.kl-deploy-judge-lane with OPS-DEPLOY's
+      agentnet addresses). agent-proxy establishes the calling client from the connection's source address on
+      `agentnet` and never from a request field or header: `CLIENTS` (data in proxy.py) maps each fixed IPv4
+      address that OPS-DEPLOY declares to a client name with its quota, TTL and full-table rule — `worker`: quota
+      `bounds.client_quota.worker`, TTL `bounds.run_token_ttl_s`, oldest own token revoked when exceeded;
+      `worker-judge`: quota `bounds.client_quota.worker-judge`, TTL `bounds.lane_token_ttl_s`, the issue refused
+      when full and, with `tools: false`, never given a tool allowance: a `web_search` field from worker-judge → 400
+      `tools_not_allowed` whatever its task (only `worker` has `tools: true`). `main()` passes
+      `proxy_headers=False` to `uvicorn.run`, so `X-Forwarded-For` is never read, and takes `--bind <ipv4>:<port>`
+      (default `0.0.0.0:8080`; OPS-DEPLOY FR-DEPLOY-16 (d) passes the agentnet address, so nothing listens on
+      loopback or on the `egress` side; a malformed value exits 2). Any request from an
+      address not in `CLIENTS` (another service, the proxy's `egress` side) gets 403 `client_unknown` on every route,
+      and nothing is issued, revoked or forwarded. `POST /run-tokens {"user": "<handle>", "max_output_tokens": n,
+      "model": "<full id>"}` returns `{"run_token": "<43-char urlsafe base64 of 32 random bytes>"}` bound to that
+      user, output cap, model and client for the client's TTL. Before every issue, revoke and forward the proxy
+      purges every expired entry (age > its TTL), so an expired token never counts against a quota; purge, quota
+      count and insert run with no `await` between them, so concurrent issues cannot both pass a quota. A client at its
+      quota: `worker` revokes its own oldest token; `worker-judge` gets 429 `client_quota` and no token. One client's
+      issue never evicts another client's token. `POST /run-tokens/revoke {"run_token": "..."}` revokes a token of the
+      calling client only and returns its upstream record `{"requests": k, "statuses": [...], "any_2xx": bool,
+      "refused": [...], "in_flight": n, "failed": m}` (upstream statuses in order, the proxy's own refusal codes,
+      requests still relayed at revoke, requests failed after connect; the token travels in the body, never in a
+      path); an unknown, expired, evicted or other client's token answers 404 `run_token_unknown`, returns no record
+      and leaves the other client's token live. `POST /run-tokens/revoke-all {}` revokes every token of the calling
+      client and returns `{"revoked": n}`; records are dropped. A `worker` restart's revoke-all removes tokens the
+      dead worker process held (worker concurrency 1, and the hook runs before the first job); another worker-client
+      caller sharing the address, such as a live check run by `docker exec` in the worker container, may lose its
+      token, and its call then settles at the reserve (unknown record), the safe direction. FR-AGENT-5's route
+      templates gain `/run-tokens/revoke-all`, logged like the other two (no new field). A forwarded request's bearer
+      must name a live token of the calling client (FR-AGENT-4's 401 `run_token_unknown` otherwise). A user without
+      a loaded token gets 409 `provider_missing`. Tokens are stored only as sha256 digests and compared in constant
+      time. FR-AGENT-15's `task` and `web_search` fields are unchanged.
+    tests_planned:
+      - "change server/tests/agent/test_proxy.py: the ASGI transport sends from the worker's CLIENTS address; the eviction test uses the worker quota (28) instead of 32"
+      - "change server/tests/agent/test_websearch.py: the same worker source address in its proxy fixture"
+      - "add server/tests/agent/test_proxy_clients.py [unit]: unknown address 403 on all three routes and on /v1/messages; X-Forwarded-For ignored; fifth worker-judge issue 429 client_quota with 4 live; saturated lane never evicts a worker token; a 29th worker token evicts the worker's oldest only; expired lane token purged (clock) frees its slot and its revoke is 404; worker-judge revoke of a worker token 404 and the worker token still forwards; revoke-all revokes the caller's tokens only; a worker-judge token used from the worker address is 401"
+      - "add the killed-lane case to test_proxy_clients.py: 4 lane tokens issued and never revoked (a crashed lane), revoke-all from the lane address → {revoked: 4}, lane count 0, worker token live"
+      - "add to test_proxy_clients.py: worker-judge issue with web_search (task freshness_web and any other) → 400 tools_not_allowed; 8 concurrent lane issues (asyncio.gather) leave exactly 4 live; the revoke-all route logs its template and nothing else (caplog); main() calls uvicorn.run with proxy_headers=False and the --bind host and port (monkeypatched uvicorn.run); a malformed --bind exits 2"
+      - "add server/tests/agent/test_proxy_network.py [image: build; opt-in with READER_TEST_IMAGE_BUILD=1]: on a throwaway network with OPS-DEPLOY's subnet and fixed addresses, a container at the worker's address issues 200 and a container at another address gets 403 client_unknown"
   - id: FR-AGENT-4
     text: >-
       Forwarding allow-list (REF-AGENT-4). Only `POST /v1/messages` with the query exactly `beta=true` or empty is
@@ -246,7 +362,18 @@ requirements:
       `rate_limit` (measured for 429) to `rate_limited`; `server_error` (measured for 529 and 500) to
       `provider_unavailable`; a proxy refusal (listed in `refused` of the run_token's upstream record) to
       `sdk_error`; any other non-success result or a missing `total_cost_usd` to `sdk_error`. The resolved model id is
-      stored on the ledger rows.
+      stored on the ledger rows. ADR-0039 revision: `StageCall` gains `line: str | None = None` (FR-AGENT-19) and its
+      `task` may be a judge slot name (FR-AGENT-18), resolved through `reader.yaml` `tasks` like any task. The issue
+      maps agent-proxy's answers: 200 → the token; 409 → `provider_missing`; 429 with `{"error": "client_quota"}` →
+      `lane_saturated`; any 403 or 400 (`client_unknown`, `bad_request`, `tools_not_allowed`) → `sdk_error`;
+      anything else or a transport error → `provider_unavailable`. A refused or failed issue settles at $0
+      (FR-AGENT-9 e). `HttpProxyClient(base_url, transport, timeout_s=10.0)` gains `revoke_all() -> int | None`
+      (`POST /run-tokens/revoke-all`; None on any failure, including the 404 of a proxy without that route). `run`
+      checks the line (FR-AGENT-19) and the presence of its line cap (`cap_missing`) before the reservation and before
+      FR-AGENT-14's span, like FR-AGENT-15's `tools_mismatch`. The reserve is one public numeric function,
+      `ledger.reserve_for(model, prompt_chars, max_output_tokens, floor, custom_system=False, searches_max=0)` =
+      max(floor, worst case + searches_max × `web_search_usd`), used by `run` (prompt_chars = len(system) +
+      len(prompt); searches_max from the call's allowance, else 0) and by `loop_fits` (FR-AGENT-23).
   - id: FR-AGENT-7
     text: >-
       Init check (ADR-0025 rule 2). The init `SystemMessage` arrives before any assistant message (REF-AGENT-4). If its
@@ -283,7 +410,17 @@ requirements:
       worker died) keeps counting at its reserve, so overshoot of any cap is bounded by the call in flight; the owner can
       void it with `python -I -m reader.agent.void <reservation_id>`, which appends a logged `void` row that removes it
       from spent and is refused for a reservation that has a settlement. `max_budget_usd` passed to the SDK is a second,
-      untested guard.
+      untested guard. ADR-0039 revision: (a) the reserve is `reserve_for` (FR-AGENT-6), unchanged in value. (b) Each
+      reserve row stores the call's line and its settle or void row copies it. (c) For a call whose line cap applies
+      (FR-AGENT-19) the run cap is min(the call's `run_cap_usd`, that cap), refused with `index_budget_exhausted` (index
+      line) or `eval_budget_exhausted` (eval line, including obs.align's `judge.find` calls) instead of `budget_exhausted`. The monthly cap applies to every
+      line, since every line spends the same subscription credit. (d) `task_budget_exhausted` keeps its scope,
+      spent(run, task), one compile run for the compile tasks; a `judge.find` call on the `compile` line is in the
+      compile run's scope through its `run_id`, so it counts in `budget.compile_cap_usd` and in the loop rule
+      (FR-AGENT-23); the resized values for the four checks are SRV-PIPELINE's. (e) Before the record rules: a run_token
+      issue refused or failed (no token reached the CLI) settles at $0 with an empty record, also for
+      `lane_saturated`. Reservations of calls whose process died (a killed lane) stay unsettled and count at their
+      reserve.
   - id: FR-AGENT-10
     text: >-
       Job contract for agent stages (used by SRV-PIPELINE's `pipeline.stage` kind): transient (retried within
@@ -291,11 +428,22 @@ requirements:
       `upstream_retry`, `deadline_exceeded`; permanent: `sdk_error`, `tools_mismatch`, `unknown_model`, `provider_missing`, `usage_unmapped`; budget refusals are
       not failures but a stage outcome (SRV-PIPELINE FR-PIPELINE-5). Because the CLI already retries 429/529/5xx for
       about 3 minutes inside one attempt (REF-AGENT-4), one stage attempt can take up to that long before it fails.
+      ADR-0039 revision (`reader.agent.errors.ERROR_CLASSES`, one class per code): budget outcomes `budget_exhausted`,
+      `task_budget_exhausted`, `monthly_budget_exhausted`, `daily_budget_exhausted`, `index_budget_exhausted`,
+      `eval_budget_exhausted` (for the index and eval lines the calling job stops with an event); permanent as above
+      plus `cap_missing`, `line_invalid`, `replay_miss`, `judge_window_too_long`, `judge_input_too_large`; transient as
+      above plus `lane_saturated`. A `judge.find` job has max attempts 1, so on the lane every code ends the job and
+      `find` degrades. agent-proxy's own codes reach callers only through FR-AGENT-6's mapping: `client_quota` →
+      `lane_saturated`; `client_unknown`, `tools_not_allowed`, `bad_request` → `sdk_error`.
   - id: FR-AGENT-12
     text: >-
-      Daily scope (SRV-TUTOR amendment, 2026-11-22). A call with `daily_budget_usd` set is refused with
-      `daily_budget_exhausted` when spent(user, task, UTC calendar day) + reserve > that budget, checked with the other
-      caps under the same per-user lock before the reserve row (FR-AGENT-9), so two concurrent calls cannot both pass.
+      Daily scope (SRV-TUTOR amendment, 2026-11-22; ADR-0039 revision). A call with `daily_budget_usd` set is refused
+      with `daily_budget_exhausted` when spent(user, key, UTC calendar day) + reserve > that budget, where the key is
+      the call's task, except that a `judge.find` call and row count in the scope of their line: a tutor-channel judge
+      (line `tutor`) counts in the `tutor` scope, so the tutor's daily cap covers its judges.
+      `ledger.spent(owner_id=…, task=k, day=True)` returns that scope (rows of other tasks with task k, plus
+      `judge.find` rows with line k), so SRV-TUTOR's pre-check needs no change. Checked with the other caps under the same per-user lock
+      before the reserve row (FR-AGENT-9), so two concurrent calls cannot both pass.
   - id: FR-AGENT-13
     text: >-
       Call options (SRV-TUTOR amendment, 2026-11-22; REF-AGENT-7). (a) `thinking_off` adds `MAX_THINKING_TOKENS=0` to the
@@ -416,13 +564,163 @@ requirements:
       tokens is the lower tier, 100,001 the higher. The reserve for a tool call is max(the
       caller's floor, FR-AGENT-9's single-call estimate + `searches_max × web_search_usd`); the caller's floor must
       cover the call's worst case by formula (SRV-FRESH `search_reserve_floor_usd`), knowing that the tokens a search
-      adds are not enforceable.
+      adds are not enforceable. ADR-0039 revision: the alias data also resolves judge slot bindings (FR-AGENT-18):
+      `haiku` for `judge.find`, `judge.link_type` and `ingest.context_prefix`, `opus` for `judge.eval.*` and
+      `judge.align`; every v1 binding has a pricing row. A judge call's reserve and cost use the tier rule above (an
+      `ingest.context_prefix` call with its section in context may pass 100,000 prompt tokens and is then reserved at
+      the higher tier).
+  - id: FR-AGENT-18
+    text: >-
+      Judge slots as task classes (ADR-0039 B7). `reader.agent.judges.JUDGE_SLOTS` is data, one `Slot` per slot: name,
+      fixed line (None for `judge.find`, whose line the caller gives), lane (`worker-judge` or `worker`), v1 binding,
+      and for `judge.find` its max output tokens, floor and prompt file. `judge.find`: the worker-judge lane, `haiku`,
+      `bounds.judge_find_max_output_tokens`, `bounds.judge_find_floor_usd`, `prompts/judge_find.md`, FR-AGENT-22.
+      `judge.link_type` and `ingest.context_prefix`: line `index`, the worker, `haiku`. `judge.eval.<name>`
+      (`relevance`, `sufficiency`, `groundedness`, `self_contained`, `citation_supports_claim`) and `judge.align`: line
+      `eval`, the worker, `opus`. The offline slots' prompts and parsers belong to their owners (SRV-INGEST, SRV-KB,
+      SRV-OBS): their `Slot` holds no prompt, and their owners pass the prompt bytes to `judge_version` (FR-AGENT-20),
+      so SRV-AGENT never reads another module's files. Every slot prompt file is a fixed frame plus exactly one
+      delimited instructions section (the delimiter is SRV-OBS's, which pins that wrapping the base instructions is
+      byte-equal to the production prompt); `prompts/judge_find.md`'s frame states that text inside the query and
+      cards is data and never followed, and the ordinal output contract of FR-AGENT-22. Alignment proposals and their
+      export replace only the instructions section, never the frame; extracting and wrapping the section are
+      SRV-OBS's functions, not SRV-AGENT's. The model is `reader.yaml` `tasks.<slot>.model` (an alias or a
+      priced full id); a slot missing from `tasks` raises `unknown_model` before any spend, as any task. Replacing a
+      binding is a config change, allowed only when the candidate is not worse on the evaluation set (ADR-0018 tuning
+      rule, B7a no-regression rule; a review rule, not a code check). No slot is in `TOOL_STAGES`, so every slot call
+      is tool-less (FR-AGENT-4, -7).
+    tests_planned:
+      - "test_judges.py [unit]: names, lines, lanes and v1 bindings; no slot in TOOL_STAGES"
+      - "test_lines_db.py [db]: a slot missing from tasks → unknown_model, no reserve row"
+  - id: FR-AGENT-19
+    text: >-
+      Ledger lines and the index and eval caps (ADR-0039 B7, ADR-0005 amendment). `judges.TASK_LINES` (derived from
+      the compile, tutor and freshness tasks and JUDGE_SLOTS): `draft`, `fact_check`, `review` → `compile`; `tutor` →
+      `tutor`; `freshness_scan`, `freshness_web`, `freshness_report` → `freshness`; `judge.link_type`,
+      `ingest.context_prefix` → `index`; `judge.eval.*`, `judge.align` → `eval`. `call.line` is a choice only for
+      `judge.find`, which requires one of `tutor`, `compile`, `mcp` and `eval`. The `eval` line is for the `obs.align`
+      job only (SRV-OBS): it calls `judge.find` from the worker, not the lane, through the Provider port, in memory,
+      tool-less (judge.find is not in TOOL_STAGES), and nothing is looked up in or recorded to `judge_outputs` for it —
+      offline evaluation like `judge.eval.*`, as ADR-0039 B7 runs `judge.align` offline in a worker job. The lane
+      (FR-AGENT-21) refuses an `eval` request. For every other task it must be None
+      or equal to the task's fixed line, and a task with no fixed line takes only None (its stored line is then null,
+      as for the live check). Anything else is refused with `line_invalid` before the reservation and the span. The
+      stored line is `call.line` or the task's fixed line. Line caps (file settings, `judges.line_caps(config)`):
+      `ingest.context_prefix` → `budgets.index_usd_per_pack`; `judge.link_type` → `budgets.index_usd_per_pair_run`;
+      every call on the `eval` line → `budgets.eval_usd_per_run`. A missing cap refuses with `cap_missing` before any
+      spend. Their run scopes are owner-unique: `judges.scope_run_id(owner_id, kind, version_id)` = uuid5 over
+      (kind, owner id, version id), with kind `overlay` (the prefix overlay's version id, which SRV-INGEST derives
+      from the pack and the prompt version, so retries, re-enqueued batches and rebuilds share the cap), `pair_run`
+      or `eval_run` (version id = one evaluation run's id; for `judge.align` and its alignment re-runs = the
+      proposal id, so `budgets.eval_usd_per_run` spans the whole proposal). Contract on the callers (SRV-INGEST,
+      SRV-KB, SRV-OBS): a line-capped call must pass `scope_run_id(...)` as its `run_id`; the ledger scopes the cap by
+      `run_id` and cannot tell a fresh uuid from a legitimate scope, so a caller that passes another id gets a fresh
+      cap per call. The refusals of FR-AGENT-9 (c) are budget outcomes: the calling job
+      stops with an event and the pack stays usable. `ledger.spent(owner_id=…, line=…)` gives per-line totals.
+    tests_planned:
+      - "test_lines_db.py [db]: the stored line per TASK_LINES; judge.find with no line, line index → line_invalid, nothing reserved; judge.find on lines tutor, compile, mcp, eval → reserved; a draft call with line tutor and a live call with line index → line_invalid; cap_missing for each of the three caps; per-pack cap across two calls of one overlay refuses the second (index_budget_exhausted); pair-run cap refusal; eval cap over two calls of one run refuses the second (eval_budget_exhausted); two owners with the same overlay version id get different run ids and independent caps; a judge.find call with line eval through the Provider port runs under the eval cap and leaves judge_outputs empty; spent(line=...); a reserve row with a line outside the CHECK set is refused by the database"
+      - "test_judges.py [unit]: scope_run_id differs by owner, kind and version id and is stable"
+  - id: FR-AGENT-20
+    text: >-
+      Judge versions and recorded outputs (ADR-0039 B7, B7a). `judges.judge_version(prompt_bytes, model,
+      schema_version)` = the first 12 hex of sha256 over the prompt bytes, the resolved model id and the schema
+      version; `judges.judge_name(slot, prompt_bytes, model, schema_version)` = `<slot>@<version>`.
+      `judges.find_input_sha256(owner_id, query, cards)` = FR-AGENT-15's `canonical_sha256` of `{"owner": <uuid text>,
+      "query": <text>, "cards": [[id, text], ...]}` in judge order; SRV-SEARCH computes it, the lane recomputes it.
+      Recorded outputs are owner-scoped, keyed (owner_id, input hash, judge): one user's output never serves another,
+      even for identical input. `judges.record(conn, owner_id, input_sha256, judge, output, pack_ids=(),
+      overlay_id=None, request_id=None)` inserts with ON CONFLICT DO NOTHING and returns whether
+      it inserted; `judges.recorded(conn, owner_id, input_sha256, judge)` returns the parsed output or None. Rows hold
+      card ids and numbers, never text. `judges.ReplayProvider(engine, owner_id, input_sha256)` (tests and rebuilds)
+      returns, from `run(judge)`, that owner's parsed output for that input and judge, and raises `replay_miss` with no
+      model call when there is none. `judges.expire(conn)` deletes `judge.find` rows older than
+      `bounds.judge_find_output_retention_days` (database `now()`; SRV-EVENTS's collector calls it);
+      `judges.forget_pack(conn, owner_id, pack_id)` deletes that owner's `judge.find` rows citing the pack, and
+      `judges.forget_overlay(conn, owner_id, overlay_id)` the owner's offline rows of an overlay (SRV-INGEST and SRV-KB
+      call them under their locks). The spend of a call stays in `agent_spend` (its reservation id is not exposed by
+      the Provider port, so the output row carries none). These three set `reader.judge_delete` for the statement
+      and reset it after it succeeds (a failed DELETE aborts the transaction, which ends the setting; its own error is
+      the one raised); any other
+      DELETE, every UPDATE and TRUNCATE are refused by the trigger. A new judge version sits next to the old one.
+    tests_planned:
+      - "test_judges.py [unit]: judge_version changes with the prompt bytes, the model id and the schema version only; find_input_sha256 changes with owner, query, card order, card id and card text"
+      - "test_judges_db.py [db]: record twice → one row, the second False; UPDATE, a plain DELETE and TRUNCATE refused; recorded after record; two owners with one input and judge → two rows, each sees only its own (recorded, ReplayProvider), forget for owner A leaves B's rows; ReplayProvider miss → replay_miss; expire deletes only judge.find rows past 30 days; forget_pack deletes only rows citing the pack; forget_overlay"
+  - id: FR-AGENT-21
+    text: >-
+      The `judge.find` job (ADR-0039 B6, B7b). `reader.agent.lane.make_kind(deps)` declares the kind `judge.find`
+      (queue `judge`, max attempts 1, keyed by the request id, args exactly `{"request_id", "input_sha256"}`), which
+      SRV-EVENTS routes to the worker-judge lane only. `Deps` holds the provider factory, the config, the
+      `JudgeRequests` store, the `PackGuard` and the `JudgeInputsSink`. The handler: (1) reads the request (owner_id,
+      line, run_id, run_cap_usd, lesson_id, daily_budget_usd, created_at, deadline, query, cards, pack_ids); none →
+      done, no call. A request whose line is not `tutor`, `compile` or `mcp` (the `eval` line never comes through the
+      lane, FR-AGENT-19) → log `line_invalid`, no call, nothing recorded. (2) database now ≥ deadline → no reserve,
+      no call. (3) the recomputed `find_input_sha256` differs
+      from the arg → log `judge_input_mismatch`, no call. (4) the kill window `judge_kill_factor` × (deadline −
+      created_at) exceeds `lane_token_ttl_s` − `lane_ttl_margin_s` → `judge_window_too_long`, no call. (5) the
+      rendered input's estimate (FR-AGENT-9's estimator) over `bounds.judge_find_input_tokens_max` →
+      `judge_input_too_large`, no call. (6) a recorded output for (owner, input hash, current judge) → no call.
+      (7) the provider handle is read from `users` by the owner_id (as the tutor job does), never from the request;
+      no user → no call. (8) otherwise exactly one `Provider.run` of task and stage `judge.find`, attempt 1, the
+      request's line, run_id, run cap and daily budget, the prompt file as `system`, `thinking_off`,
+      `abort_on_retry`, max output and floor from the slot, and `deadline_s` = created_at + kill window − now
+      (always positive: (2) passed, so now < deadline < created_at + kill window): today's per-call path, no
+      pre-spawned process; the token is issued only after the reservation (FR-AGENT-6). (9) on an output that parses (FR-AGENT-22): one
+      transaction takes `PackGuard.lock_active(pack_ids)`; false → nothing written; else `judges.record(...)` and,
+      only when it inserted, `JudgeInputsSink.copy(...)`; a late output is written the same way. (10) in a `finally`,
+      in its own transaction: the request is deleted and `pg_notify('judge_done', <request id>)` sent (payload the id
+      only, delivered at commit). Every `AgentError` from the call or the parse ends the job without an output row and
+      without retry (logged by code); (4) and (5) raise. `lane.on_worker_start(engine)` calls `revoke_all()` once
+      and never raises; stale lane tokens expire within `lane_token_ttl_s` either way. The lane's proxy client uses
+      `bounds.lane_issue_timeout_s`. Nothing in this module logs or writes a query or card text outside the request.
+    tests_planned:
+      - "test_lane_db.py [db] (fake CLI, fake proxy, in-memory JudgeRequests, fake guard and sink): no request → no call; a request with line eval → no call, no output row; deadline passed → no reserve; hash mismatch → no call; window over the TTL → judge_window_too_long; input over 3,000 estimated tokens → judge_input_too_large; recorded hit → no call; one call → one reserve, one settle, one output row, request deleted, one notify whose payload is the id; the StageCall fields (task, stage, attempt 1, line, system = prompt file, thinking_off, abort_on_retry, deadline_s ≈ created + 3 × (deadline − created) − now, max output 512, floor 0.002); the token issued after the reservation row exists; handle from users; an owner with no users row → no call; late output recorded; two jobs with one input → one row, one sink copy; guard false → nothing written; output_invalid, a budget refusal and lane_saturated → no output row, request deleted; an unexpected error after the call still deletes the request; the kind's max_attempts, queue, key and args"
+      - "test_lane_db.py [unit]: on_worker_start calls revoke_all once and swallows a failing proxy; the lane proxy client's timeout"
+  - id: FR-AGENT-22
+    text: >-
+      `judge.find` output (VEC-AGENT-5). The prompt labels the n input cards with ordinals 1..n in judge order (card ids
+      never reach the model). The model's text, stripped, is one JSON object, optionally inside a single fence that
+      opens with ```json and closes with ```, with the keys `keep` (required: ordinals in relevance order), `drop`
+      (optional: ordinals) and `sufficiency` (required: a finite number in [0, 1]) and no others. Ordinals are JSON
+      integers, not booleans or floats, in 1..n, with no duplicates; `drop`, when present, equals the complement of
+      `keep` exactly, and when absent is that complement. `NaN`, `Infinity` and `-Infinity` are refused, as are
+      booleans and strings for numbers, a sufficiency outside [0, 1] of any size (an integer of 400 digits is
+      range-checked before any float conversion, so it is `output_invalid`, never an OverflowError), and an object
+      with a duplicate key. Anything else is `output_invalid` (no output row, the waiter degrades).
+      The system prompt is exactly the prompt file (frame plus instructions section); all data, the query and the
+      cards, travels in the user message (`judges.render_find_input`), never in the system prompt, and the renderer
+      neutralises every data line that contains `<<<READER-INSTRUCTIONS` or `READER-INSTRUCTIONS>>>` (SRV-OBS's
+      delimiter) by replacing the token `READER-INSTRUCTIONS` with `READER_INSTRUCTIONS_DATA`.
+      `judges.parse_find_output(text, card_ids)` maps ordinals back to card ids: `{"keep": [ids], "drop": [ids],
+      "sufficiency": x}` is what is recorded and returned, never the model text.
+    tests_planned:
+      - "test_judges.py [unit]: the parser over VEC-AGENT-5 and the mapping back to card ids; a query and a card carrying both delimiter lines leave the system prompt bytes unchanged and put no raw delimiter in the rendered user message"
+  - id: FR-AGENT-23
+    text: >-
+      Loop fit for the compile loop rule (ADR-0005 amendment, ADR-0039 decision 22). `AgentProvider.loop_fits(owner_id,
+      run_id, run_cap_usd, planned)` takes the planned calls of one loop, each a `PlannedCall(task, prompt_chars,
+      max_output_tokens, floor_usd, custom_system=False, searches_max=0)` (the arguments of `reserve_for` after model
+      resolution; searches_max is 0 for every compile call today), and returns true iff, at the time of the check,
+      spent(run) + the sum of their reserves ≤ `run_cap_usd`, for each task spent(run, task) + that task's summed
+      reserves ≤ its effective `budget_usd_per_lesson` (when set), and the user's month spend + the sum ≤ the effective
+      `budgets.monthly_usd` (when set). It writes nothing and takes no lock; each call still reserves under FR-AGENT-9.
+      A `judge.find` call the fact-check route will make is a planned call of the loop. Revision (asked by
+      SRV-PIPELINE's V.kl-pipeline-checks, D3): `AgentProvider.loop_fits_limit(owner_id, run_id, run_cap_usd,
+      planned)` makes the same checks with the same arithmetic and returns None when the loop fits, else the first
+      refusing limit in the fixed order `run` (the run cap, `budget.compile_cap_usd`), `task` (a planned task's
+      `budget_usd_per_lesson`, tasks checked in their first-planned order), `month` (`budgets.monthly_usd`);
+      `loop_fits(...)` is `loop_fits_limit(...) is None`.
+    tests_planned:
+      - "test_loop_fits_db.py [db]: true when the sum fits exactly; false when the run cap, one task budget or the monthly cap would be crossed by the sum though each call alone fits; open reservations count; nothing is written"
+      - "test_loop_fits_db.py [db]: loop_fits_limit over VEC-AGENT-1's `loop_limits` cases — None, `run`, `task`, `month`, and `run` before `task` before `month` when several refuse; loop_fits agrees with it on every case"
 
 invariants:
   - id: INV-AGENT-1
     text: >-
-      No provider token in the worker or any kernel service: absent from env, `/proc/*/environ`, `/run/secrets`,
-      `~/.claude`, `docker inspect` and logs (ADR-0025 verified_by). [live]
+      No provider token in the worker, worker-judge or any kernel service: absent from env, `/proc/*/environ`,
+      `/run/secrets`, `~/.claude`, `docker inspect` and logs, and a request from either service without a live
+      run_token gets no credential (ADR-0025 verified_by, amended by ADR-0039 B7b). [live]
+    tests_planned:
+      - "change server/tests/agent/test_live.py: the INV-AGENT-1 checks parametrised over worker and worker-judge; OPS-SANDBOX's no-valid-handle test (INV-SANDBOX-7) runs against both"
   - id: INV-AGENT-2
     text: >-
       A run_token maps to exactly one user's token: user A's run_token never yields user B's token, a revoked or expired
@@ -445,7 +743,36 @@ invariants:
       forwarded only on a token with a `web_search` allowance and only in one of FR-AGENT-15's two shapes; on such a
       token every forwarded `max_uses` ≤ `searches_per_request_max`, their sum ≤ `searches_max`, and at most
       `requests_max` requests are forwarded; `mcp_servers` is never forwarded non-empty (property test against a stub
-      upstream).
+      upstream). Amended (ADR-0039 B7b): no token issued to `worker-judge` ever carries a `web_search` allowance, so
+      no body with non-empty `tools` is ever forwarded for worker-judge.
+    tests_planned:
+      - "change server/tests/agent/test_websearch.py's INV-AGENT-6 property test: requests drawn from both client addresses; worker-judge never gets an allowance and never forwards tools"
+  - id: INV-AGENT-7
+    text: >-
+      For any sequence of issue, revoke, revoke-all and forward requests from `worker`, `worker-judge` and unknown
+      addresses, with clock advances: each client's live tokens ≤ its quota (worker-judge ≤ 4); no request of one
+      client revokes, evicts or forwards with another client's token; an unknown address is never issued a token and
+      nothing it sends is forwarded; no expired token is forwarded; after a client's revoke-all it holds 0 tokens and
+      the other client's tokens are unchanged; no worker-judge token carries a `web_search` allowance (property test
+      against a stub upstream; extends INV-AGENT-2).
+    tests_planned:
+      - "add a Hypothesis state machine in server/tests/agent/test_proxy_clients.py"
+  - id: INV-AGENT-8
+    text: >-
+      One call, one process, one token: a `judge.find` job makes at most one `Provider.run`; each run starts at most
+      one CLI process, with its own fresh HOME and its own run_token, issued after its reservation; no two jobs share a
+      process, HOME or token (property test over concurrent jobs with a fake CLI that records spawns). That no CLI
+      outlives its `deadline_s` by more than 1 s is FR-AGENT-13 (e)'s kill, pinned by its [image] test.
+  - id: INV-AGENT-9
+    text: >-
+      Recorded outputs: for any interleaving of `record` calls of one or two owners with equal (input hash, judge), at
+      most one `judge_outputs` row exists per owner and none is ever updated; `recorded` and `ReplayProvider` return
+      only the calling owner's output (property test).
+  - id: INV-AGENT-10
+    text: >-
+      Text-free lane: no `judge.find` job's args, `agent_spend` row, `judge_outputs` row or log line of the adapter or
+      the lane contains the query or a card text (canary test with marker strings in the query and every card;
+      SRV-EVENTS's own canary covers `job_keys`).
 
 nfr:
   # Structural bound: a first token takes 1.6–3.9 s on the measured models (spikes/agent-sdk-container), so 50 ms of
@@ -457,7 +784,7 @@ nfr:
 
 vectors:
   - id: VEC-AGENT-1
-    source: All 12 spikes/compile-cost stages (exact token counts, SDK-reported costs), usage-key mapping, edge cases, settlements from the measured error shapes
+    source: All 12 spikes/compile-cost stages (exact token counts, SDK-reported costs), usage-key mapping, edge cases, settlements from the measured error shapes; issue refusals (FR-AGENT-9 e) and loop-limit cases per limit (FR-AGENT-23), hand-built
     file: spec/fixtures/SRV-AGENT/cost-vectors.yaml
   - id: VEC-AGENT-2
     source: Pricing table (Anthropic API rates as cached 2026-11-03; cache multipliers from the prompt-caching economics; Haiku 5.5 tiers and the web search fee from the pricing page fetched 2026-11-23)
@@ -468,8 +795,19 @@ vectors:
   - id: VEC-AGENT-4
     source: Allowance and request-cap sequences (a retried nested request, 429 resends, requests_max reached, a tool-less freshness token), run-token issue cases, and tool-call settlements per FR-AGENT-9/-16 (including an error result with a clean record)
     file: spec/fixtures/SRV-AGENT/websearch-sequences.yaml
+  - id: VEC-AGENT-5
+    source: judge.find outputs over ordinals 1..n (FR-AGENT-22) — valid, fenced, drop absent or given, and refused shapes (sufficiency absent, out-of-range, duplicate, non-complement drop, non-integer ordinals, NaN, Infinity, -Infinity, ±(400-digit integer) and 1e400 sufficiency, boolean or string numbers, unknown key, duplicate key, not an object), with the expected card-id parse or output_invalid
+    file: spec/fixtures/SRV-AGENT/judge-find-outputs.yaml
+  - id: VEC-AGENT-6
+    source: agent-proxy client sequences per FR-AGENT-3 revised — lane quota, purge by clock, revoke-all, cross-client revoke and forward, unknown address, worker-judge issue with web_search (400 tools_not_allowed) — with the expected statuses and live counts
+    file: spec/fixtures/SRV-AGENT/client-sequences.yaml
+    tests_planned:
+      - "test_proxy_clients.py reads it (FR-AGENT-3, INV-AGENT-7)"
 
 defers:
+  - "Shared packs (SRV-SHARE): `judges.forget_pack` deletes one owner's rows; when a pack can be shared across owners, SRV-SHARE states whether a purge forgets every owner's rows citing it."
+  - "The per-token daily judge cap on MCP (SRV-MCP, stage 7): FR-AGENT-12's scope is per user; an atomic per-token scope is specified with SRV-MCP."
+  - "The `index` and `eval` cap values: set from `retrieval-ablation` and `judge-gate` (ADR-0039 B10); until then `cap_missing` refuses those lines."
   - "`anthropic-api` keys, Bedrock and Vertex providers (ADR-0005); the slice serves `anthropic-subscription` only."
   - "`GET /api/spend` and a spend view (SRV-PIPELINE's run route shows the run's spend)."
   - "The separate web-fetch proxy for fact-checking `changed` cells (ADR-0025 rule 5) and agent tools in kernel-agent."

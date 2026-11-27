@@ -20,6 +20,16 @@ tasks:
   freshness_scan:   { model: sonnet }
   freshness_web:    { model: haiku }
   freshness_report: { model: sonnet }
+  # Judge slots (ADR-0039 B7, SRV-AGENT FR-AGENT-18) with their v1 bindings; `reader doctor` names any missing one.
+  judge.find:            { model: haiku }   # the online judge in `find`, on the worker-judge lane
+  judge.link_type:       { model: haiku }
+  ingest.context_prefix: { model: haiku }
+  judge.eval.relevance:               { model: opus }
+  judge.eval.sufficiency:             { model: opus }
+  judge.eval.groundedness:            { model: opus }
+  judge.eval.self_contained:          { model: opus }
+  judge.eval.citation_supports_claim: { model: opus }
+  judge.align:                        { model: opus }
 budgets: { monthly_usd: 200, warn_at: 0.8 }
 kernels: [python3, rust, deno]
 materials:

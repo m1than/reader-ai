@@ -348,8 +348,14 @@ requirements:
       telemetry is off.
       ADR-0039 amendment (V.kl-obs-spans, 2026-11-26): Network `otel` holds exactly api, worker, worker-judge and
       rotel (ADR-0032 Decision 1 as amended by ADR-0039); `worker-judge` is on no other obs network (no `obs`, no
-      route to mlflow). Paired OPS-DEPLOY FR-DEPLOY-3 and VEC-DEPLOY-2 (worker-judge–rotel allowed;
-      worker-judge–mlflow never).
+      route to mlflow). Paired OPS-DEPLOY FR-DEPLOY-3, FR-DEPLOY-16 and VEC-DEPLOY-2 (worker-judge–rotel allowed;
+      worker-judge–mlflow never; V.kl-deploy-judge-lane). Its tracing service name stays the worker's until a
+      SRV-OBS change gives the judge lane its own (open). With the judge lane in SRV-EVENTS' KIND_MODULES,
+      `attributes.JOB_ARGS` lists `judge.find` copying only `input_sha256` (FR-OBS-36 e; a hash, never text), and
+      `SPEC_CODES` gains SRV-AGENT's `client_unknown` and `client_quota` (the catalogue tests read the kinds and
+      the `errors` lists).
+    tests_planned:
+      - "change server/tests/obs/test_deploy_config.py: the otel membership assertion gains worker-judge"
   - id: FR-OBS-9
     text: >-
       Dashboard access (ADR-0032; paired OPS-DEPLOY and OPS-CLI changes). Caddy serves a second site `localhost:8443`

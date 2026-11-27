@@ -68,6 +68,60 @@ def test_mcp_role_exits_2(tmp_path: Path) -> None:
     assert "mcp role arrives with SRV-MCP" in r.stdout + r.stderr
 
 
+@pytest.mark.parametrize(
+    "args", [["--role", "api", "--lane", "judge"], ["--role", "worker", "--lane", "fast"]]
+)
+def test_lane_only_main_or_judge_and_only_for_the_worker(tmp_path: Path, args: list[str]) -> None:
+    """FR-AUTH-2 (paired SRV-EVENTS FR-EVENTS-9): `--lane main|judge` only with `--role worker`."""
+    r = _run(_closed_db_env(tmp_path), *args)
+    assert r.returncode == 2
+
+
+def test_lane_defaults_to_main_and_reaches_the_worker(monkeypatch: pytest.MonkeyPatch) -> None:
+    from reader.serve import main
+
+    seen: list[str] = []
+    monkeypatch.setattr(main, "_run_worker", lambda env, lane="main": seen.append(lane))
+    monkeypatch.setattr(main.Env, "read", classmethod(lambda cls, environ: None))
+    assert main.run(["--role", "worker"], {}) == 0
+    assert main.run(["--role", "worker", "--lane", "judge"], {}) == 0
+    assert seen == ["main", "judge"]
+
+
+@pytest.mark.parametrize(("args", "lane"), [((), "main"), (("judge",), "judge")])
+def test_run_worker_hands_its_lane_to_the_job_runner(
+    monkeypatch: pytest.MonkeyPatch, args: tuple[str, ...], lane: str
+) -> None:
+    """FR-AUTH-2 (paired FR-EVENTS-9): `_run_worker` passes its lane to `reader.jobs.worker.run`."""
+    import reader.jobs.worker
+    from reader.config import Secret
+    from reader.db import DbTarget
+    from reader.serve import main
+
+    received: list[str] = []
+
+    async def fake_run(*_a: Any, lane: str = "unset", **_kw: Any) -> int:
+        received.append(lane)
+        return 0
+
+    async def heads(*_a: Any, **_kw: Any) -> bool:
+        return True
+
+    class Engine:
+        async def dispose(self) -> None:
+            return None
+
+    monkeypatch.setattr(reader.jobs.worker, "run", fake_run)
+    monkeypatch.setattr(main, "wait_for_heads", heads)
+    monkeypatch.setattr(main, "start_obs", lambda role, env: None)
+    monkeypatch.setattr(main, "serving_logs", lambda: None)
+    monkeypatch.setattr(main, "_settings", lambda env: None)
+    monkeypatch.setattr(main, "_target", lambda env: DbTarget("h", 5432, "u", "d", Secret("pw")))
+    monkeypatch.setattr(main, "make_engine", lambda target: Engine())
+    main._run_worker(None, *args)  # type: ignore[arg-type]
+    assert received == [lane]
+
+
 @pytest.mark.parametrize("role", ["api", "worker"])
 def test_config_error_exits_1_before_connecting(tmp_path: Path, role: str) -> None:
     env = _closed_db_env(tmp_path, users=(("a", "learner"),))

@@ -59,6 +59,9 @@ def test_catalog_accepts_declared_kinds_and_lists_queues() -> None:
     ("names", "code"),
     [
         (["jobs.sweep"], "kind_name_reserved"),
+        (["jobs.judge_reap"], "kind_name_reserved"),  # FR-EVENTS-1 (e), ADR-0039 B7b
+        (["jobs.judge_gc"], "kind_name_reserved"),
+        (["obs.health.tick"], "kind_name_reserved"),
         (["Bad"], "kind_name_invalid"),
         (["ab"], "kind_name_invalid"),
         (["dup.kind", "dup.kind"], "kind_name_duplicate"),
@@ -111,6 +114,23 @@ def test_catalog_bounds_priority_below_the_sweep(priority: int, ok: bool) -> Non
     assert caught.value.code == "kind_bounds_invalid"
 
 
+@pytest.mark.parametrize(
+    ("seconds", "ok"), [(None, True), (1, True), (86_400, True), (0, False), (-5, False)]
+)
+def test_catalog_bounds_key_retention(seconds: int | None, ok: bool) -> None:
+    """FR-EVENTS-1 (d): `key_retention_s` is positive or None."""
+    import dataclasses
+
+    jobs = require_jobs()
+    kind = dataclasses.replace(_kind_named("ret.kind"), key_retention_s=seconds)
+    if ok:
+        assert jobs.Catalog([kind])["ret.kind"].key_retention_s == seconds
+        return
+    with pytest.raises(jobs.JobError) as caught:
+        jobs.Catalog([kind])
+    assert caught.value.code == "kind_bounds_invalid"
+
+
 def test_kind_modules_are_a_declared_list() -> None:
     jobs = require_jobs()
     assert isinstance(jobs.KIND_MODULES, tuple)
@@ -123,6 +143,7 @@ def test_kind_modules_are_a_declared_list() -> None:
         "reader.tutor.jobs",
         "reader.obs.jobs",
         "reader.freshness.jobs",
+        "reader.agent.lane",  # FR-EVENTS-9 amended (ADR-0039 B7b)
     )
     assert list(jobs.load_kinds()) == [
         "ingest.import", "search.embed", "pipeline.stage", "pipeline.verify", "tutor.answer",
@@ -131,12 +152,15 @@ def test_kind_modules_are_a_declared_list() -> None:
         # SRV-OBS ADR-0039 (FR-EVENTS-32's paired note, V.kl-obs-spans)
         "obs.eval", "obs.eval_run", "obs.judge_score", "obs.eval_sample", "obs.align",
         "freshness.scan", "freshness.web",
+        "judge.find",
     ]
+    assert jobs.load_kinds()["judge.find"].key_retention_s == 86_400
 
 
 def test_start_hooks_are_the_declared_modules_on_worker_start() -> None:
     """FR-EVENTS-1: `hooks=None` means these, in KIND_MODULES order (ingest and tutor export none)."""
     require_jobs()
+    import reader.agent.lane
     import reader.obs.jobs
     import reader.pipeline.jobs
     import reader.search.jobs
@@ -146,6 +170,7 @@ def test_start_hooks_are_the_declared_modules_on_worker_start() -> None:
         reader.search.jobs.on_worker_start,
         reader.pipeline.jobs.on_worker_start,
         reader.obs.jobs.on_worker_start,
+        reader.agent.lane.on_worker_start,  # the worker revokes its own stale run tokens (FR-AGENT-3)
     ]
     assert start_hooks(()) == []
 

@@ -101,8 +101,35 @@ services:
       - blobs:/var/lib/reader/blobs
       # SRV-OBS FR-OBS-26 (OPS-DEPLOY FR-DEPLOY-15): the declarative MLflow bootstrap, read by obs.setup
       - ./otel/mlflow-setup.yaml:/etc/reader/mlflow-setup.yaml:ro
-    # otel: spans to rotel; obs: the worker's MLflow writes (retention, ADR-0035, ADR-0038) (FR-DEPLOY-13)
-    networks: [core, agentnet, sb-verify, sb-agent, embed, otel, obs]
+    # otel: spans to rotel; obs: the worker's MLflow writes (retention, ADR-0035, ADR-0038) (FR-DEPLOY-13).
+    # agentnet: a fixed address, which agent-proxy maps to the client `worker` (FR-DEPLOY-16 c, SRV-AGENT FR-AGENT-3).
+    networks:
+      core: {}
+      agentnet:
+        ipv4_address: 10.230.7.10
+      sb-verify: {}
+      sb-agent: {}
+      embed: {}
+      otel: {}
+      obs: {}
+    healthcheck:
+      <<: *health
+      test: ["CMD", "reader-server", "--role", "worker", "--healthcheck"]
+
+  worker-judge:
+    # The judge lane (ADR-0039 B7b, OPS-DEPLOY FR-DEPLOY-16): the worker role serving only the `judge` queue at
+    # concurrency 4 (SRV-EVENTS FR-EVENTS-9). It listens nowhere, holds only the database password and reaches
+    # agent-proxy (fixed address = client `worker-judge`), Postgres (judge-db, not core: core holds mcp) and Rotel.
+    # mem_limit 2g is an initial value (4 CLI processes x an assumed 384 MiB + 512 MiB); judge-gate measures it.
+    <<: *server
+    command: ["reader-server", "--role", "worker", "--lane", "judge"]
+    mem_limit: 2g
+    memswap_limit: 2g
+    networks:
+      agentnet:
+        ipv4_address: 10.230.7.11
+      judge-db: {}
+      otel: {}
     healthcheck:
       <<: *health
       test: ["CMD", "reader-server", "--role", "worker", "--healthcheck"]
@@ -134,7 +161,7 @@ services:
     restart: unless-stopped
     volumes:
       - pgdata:/var/lib/postgresql
-    networks: [core]
+    networks: [core, judge-db]  # judge-db: the judge lane's only route to the database (FR-DEPLOY-16 c)
     healthcheck:
       <<: *health
       # TCP on 127.0.0.1: the entrypoint's temporary initdb server listens on the socket only, so it never looks healthy.
@@ -183,9 +210,15 @@ services:
     mem_limit: 256m
     memswap_limit: 256m
     restart: unless-stopped
-    networks: [agentnet, egress]
+    # FR-DEPLOY-16 (d): listen on the agentnet address only (nothing on loopback or the egress side); the image's
+    # entrypoint `python -I -m reader.agent.proxy` takes the flag (SRV-AGENT FR-AGENT-3).
+    command: ["--bind", "10.230.7.2:8080"]
+    networks:
+      agentnet:
+        ipv4_address: 10.230.7.2
+      egress: {}
     healthcheck:
-      test: ["CMD", "/usr/local/bin/reader-agent-proxy-health"]
+      test: ["CMD", "python", "-I", "-c", "import socket; socket.create_connection(('10.230.7.2', 8080), 2).close()"]
 
   kernel-verify:
     <<: *kernel
@@ -328,7 +361,16 @@ networks:
         - subnet: 10.230.1.0/24
           ip_range: 10.230.1.128/25 # dynamic addresses stay away from api's fixed 10.230.1.10
   core: { internal: true }
-  agentnet: { internal: true }
+  # FR-DEPLOY-16 (c): fixed addresses for agent-proxy (.2), worker (.10) and worker-judge (.11), which agent-proxy maps
+  # to client identities (SRV-AGENT FR-AGENT-3, `CLIENTS`); dynamic addresses stay in the ip_range.
+  agentnet:
+    internal: true
+    ipam:
+      config:
+        - subnet: 10.230.7.0/24
+          ip_range: 10.230.7.128/25
+          gateway: 10.230.7.1
+  judge-db: { internal: true, ipam: { config: [{ subnet: 10.230.8.0/24 }] } }  # postgres, worker-judge
   sb-verify: { internal: true }
   sb-agent: { internal: true }
   sb-pair-1: { internal: true }

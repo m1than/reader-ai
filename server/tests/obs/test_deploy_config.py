@@ -153,7 +153,7 @@ def test_networks_and_the_volume() -> None:
     for name, svc in model["services"].items():
         for net in networks_of(svc):
             members.setdefault(net, set()).add(name)
-    assert members["otel"] == {"api", "worker", "rotel"}
+    assert members["otel"] == {"api", "worker", "worker-judge", "rotel"}  # FR-OBS-8 amended (OPS-DEPLOY FR-DEPLOY-16)
     assert members["obs"] == {"rotel", "mlflow", "worker"}
     assert members["obs-ui"] == {"caddy", "mlflow"}
     assert members["jaeger-in"] == {"rotel", "jaeger"}  # FR-OBS-19

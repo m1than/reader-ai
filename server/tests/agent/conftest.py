@@ -143,7 +143,19 @@ class World:
     users: dict[str, uuid.UUID]
 
 
-async def world(pg: Pg, tmp: Path) -> World:
+# ADR-0039 (FR-AGENT-18): the judge slots bound to their v1 models, beside the tasks above.
+JUDGE_TASKS = """\
+  tutor: { model: sonnet }
+  judge.find: { model: haiku }
+  judge.link_type: { model: haiku }
+  ingest.context_prefix: { model: haiku }
+  judge.eval.relevance: { model: opus }
+  judge.align: { model: opus }
+"""
+CONFIG_JUDGES = CONFIG.replace("budgets:", JUDGE_TASKS + "budgets:", 1)
+
+
+async def world(pg: Pg, tmp: Path, config_text: str = CONFIG) -> World:
     """A database migrated to all heads, with the users of CONFIG."""
     from sqlalchemy import text
 
@@ -152,7 +164,7 @@ async def world(pg: Pg, tmp: Path) -> World:
     from reader.config import Secret, load_config
     from reader.db import DbTarget, make_engine, migrate
 
-    config = load_config(write_config(tmp))
+    config = load_config(write_config(tmp, config_text))
     engine = make_engine(DbTarget(pg.host, pg.port, pg.user, pg.database, Secret(pg.password)))
     await migrate(engine)
     await prepare(engine, settings_from_config(config))
@@ -219,6 +231,17 @@ def message_body(**extra: Any) -> bytes:
 _DROP = object()
 DROP: Any = _DROP
 
+# FR-AGENT-3: agent-proxy names its client by the connection's source address (OPS-DEPLOY FR-DEPLOY-16's agentnet).
+WORKER_ADDR = "10.230.7.10"
+LANE_ADDR = "10.230.7.11"
+
+
+def asgi(app: Any, address: str = WORKER_ADDR) -> httpx.AsyncClient:
+    """An in-process client whose requests arrive from `address` (the ASGI scope's `client`)."""
+    return httpx.AsyncClient(
+        transport=httpx.ASGITransport(app=app, client=(address, 50000)), base_url="http://agent-proxy:8080"
+    )
+
 
 @dataclass
 class Proxy:
@@ -227,10 +250,8 @@ class Proxy:
     secrets_root: Path
     clock: list[float]
 
-    def client(self) -> httpx.AsyncClient:
-        return httpx.AsyncClient(
-            transport=httpx.ASGITransport(app=self.app), base_url="http://agent-proxy:8080"
-        )
+    def client(self, address: str = WORKER_ADDR) -> httpx.AsyncClient:
+        return asgi(self.app, address)
 
 
 TOKENS = {"ivan": "sk-ant-oat01-IVAN-" + "i" * 40, "anna": "sk-ant-oat01-ANNA-" + "a" * 40}
@@ -422,11 +443,15 @@ class FakeProxyClient:
     revoked: list[str] = field(default_factory=list)
     missing: set[str] = field(default_factory=set)
     issue_extras: list[dict[str, Any]] = field(default_factory=list)  # task and web_search per issue (FR-AGENT-15)
+    issue_error: str | None = None  # an issue refused with this code (FR-AGENT-6: lane_saturated, sdk_error)
 
     async def issue(self, handle: str, max_output_tokens: int, model: str, **extra: Any) -> str:
         if handle in self.missing:
             errors = need("reader.agent.errors")
             raise errors.agent_error("provider_missing")
+        if self.issue_error is not None:
+            errors = need("reader.agent.errors")
+            raise errors.agent_error(self.issue_error)
         self.issued.append((handle, max_output_tokens, model))
         self.issue_extras.append(dict(extra))
         return "rt-" + secrets.token_urlsafe(8)

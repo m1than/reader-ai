@@ -21,7 +21,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
 from reader.agent.errors import AgentError, agent_error
-from reader.agent.pricing import Usage, micro, rates
+from reader.agent.pricing import Usage, load_pricing, micro, rates
 
 # Bounds (spec `bounds`).
 CHARS_PER_TOKEN_FLOOR: Final = Decimal("2.0")
@@ -29,6 +29,7 @@ CLI_SYSTEM_TOKENS: Final = 6803
 CLI_OVERHEAD_TOKENS: Final = 1000  # beside a custom system prompt (FR-AGENT-13 b)
 # pg_advisory_xact_lock(namespace, hashtext(owner)): serializes check-then-reserve per user ("RAGS").
 LOCK_NAMESPACE: Final = 0x52414753
+JUDGE_FIND: Final = "judge.find"  # FR-AGENT-12: its rows count in the daily scope of their line
 
 log = logging.getLogger("reader.agent")
 _WARNED: set[tuple[uuid.UUID, str]] = set()  # (user, UTC month) already warned (budget_warn)
@@ -42,6 +43,12 @@ class Scope:
     stage: str
     task: str
     attempt: int
+    line: str | None = None  # FR-AGENT-19: the ledger line, stored on every row of the call
+
+    @property
+    def daily_key(self) -> str:
+        """FR-AGENT-12: a judge.find call counts in its line's daily scope, every other call in its task's."""
+        return (self.line or "") if self.task == JUDGE_FIND else self.task
 
 
 @dataclass(frozen=True)
@@ -51,6 +58,7 @@ class Caps:
     monthly_usd: Decimal | None
     warn_at: Decimal | None
     daily_task_usd: Decimal | None = None  # FR-AGENT-12: per user and task, UTC calendar day
+    run_code: str = "budget_exhausted"  # FR-AGENT-9 (c): index_/eval_budget_exhausted under a line cap
 
 
 @dataclass(frozen=True)
@@ -111,7 +119,22 @@ def worst_case(
 def reserve_amount(
     model: str, prompt_chars: int, max_output_tokens: int, floor: Decimal, *, custom_system: bool = False
 ) -> Decimal:
-    return max(floor, worst_case(model, prompt_chars, max_output_tokens, custom_system=custom_system))
+    return reserve_for(model, prompt_chars, max_output_tokens, floor, custom_system=custom_system)
+
+
+def reserve_for(
+    model: str,
+    prompt_chars: int,
+    max_output_tokens: int,
+    floor: Decimal,
+    custom_system: bool = False,
+    searches_max: int = 0,
+) -> Decimal:
+    """The one reserve (FR-AGENT-6): max(floor, worst case + searches_max * the search fee)."""
+    estimate = worst_case(model, prompt_chars, max_output_tokens, custom_system=custom_system)
+    if searches_max:
+        estimate += load_pricing().web_search_usd * searches_max
+    return max(floor, estimate)
 
 
 def settle_amount(
@@ -162,8 +185,8 @@ _SPENT = (
 _MONTH = (
     "s.owner_id = :o AND s.created_at >= (date_trunc('month', now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC')"
 )
-_DAY = (
-    "s.owner_id = :o AND s.task = :t"
+_DAY = (  # FR-AGENT-12: a judge.find row counts in the scope of its line
+    "s.owner_id = :o AND (CASE WHEN s.task = 'judge.find' THEN s.line ELSE s.task END) = :t"
     " AND s.created_at >= (date_trunc('day', now() AT TIME ZONE 'UTC') AT TIME ZONE 'UTC')"
 )
 
@@ -176,9 +199,12 @@ async def _spent(
     owner_id: uuid.UUID | None = None,
     month: bool = False,
     day: bool = False,
+    line: str | None = None,
 ) -> Decimal:
     params: dict[str, Any]
-    if day:
+    if line is not None:  # FR-AGENT-19: the owner's spend on one ledger line
+        where, params = "s.owner_id = :o AND s.line = :l", {"o": owner_id, "l": line}
+    elif day:
         where, params = _DAY, {"o": owner_id, "t": task}
     elif month:
         where, params = _MONTH, {"o": owner_id}
@@ -198,10 +224,14 @@ async def spent(
     owner_id: uuid.UUID | None = None,
     month: bool = False,
     day: bool = False,
+    line: str | None = None,
 ) -> Decimal:
-    """`day=True`: the owner's spend on `task` this UTC calendar day (FR-AGENT-12's scope)."""
+    """`day=True`: the owner's spend in `task`'s daily scope this UTC calendar day (FR-AGENT-12); `line=`: the
+    owner's spend on that ledger line (FR-AGENT-19)."""
     async with engine.connect() as conn:
-        return await _spent(conn, run_id=run_id, task=task, owner_id=owner_id, month=month, day=day)
+        return await _spent(
+            conn, run_id=run_id, task=task, owner_id=owner_id, month=month, day=day, line=line
+        )
 
 
 async def reserve(engine: AsyncEngine, scope: Scope, model: str, usd: Decimal, caps: Caps) -> int:
@@ -212,13 +242,14 @@ async def reserve(engine: AsyncEngine, scope: Scope, model: str, usd: Decimal, c
             {"ns": LOCK_NAMESPACE, "o": str(scope.owner_id)},
         )
         if await _spent(conn, run_id=scope.run_id) + usd > caps.run_cap_usd:
-            raise agent_error("budget_exhausted")
+            raise agent_error(caps.run_code)
         if caps.task_budget_usd is not None and (
             await _spent(conn, run_id=scope.run_id, task=scope.task) + usd > caps.task_budget_usd
         ):
             raise agent_error("task_budget_exhausted")
         if caps.daily_task_usd is not None and (
-            await _spent(conn, owner_id=scope.owner_id, task=scope.task, day=True) + usd > caps.daily_task_usd
+            await _spent(conn, owner_id=scope.owner_id, task=scope.daily_key, day=True) + usd
+            > caps.daily_task_usd
         ):
             raise agent_error("daily_budget_exhausted")
         month = await _spent(conn, owner_id=scope.owner_id, month=True)
@@ -227,9 +258,10 @@ async def reserve(engine: AsyncEngine, scope: Scope, model: str, usd: Decimal, c
         row = await conn.execute(
             text(
                 "INSERT INTO agent_spend (owner_id, run_id, lesson_id, stage, task, attempt, kind, model,"
-                " usd) VALUES (:o, :r, :l, :s, :t, :a, 'reserve', :m, :u) RETURNING id"
+                " usd, line) VALUES (:o, :r, :l, :s, :t, :a, 'reserve', :m, :u, :line) RETURNING id"
             ),
             {
+                "line": scope.line,
                 "o": scope.owner_id,
                 "r": scope.run_id,
                 "l": scope.lesson_id,
@@ -258,11 +290,11 @@ async def reserve(engine: AsyncEngine, scope: Scope, model: str, usd: Decimal, c
 _CLOSE = (
     "INSERT INTO agent_spend (owner_id, run_id, lesson_id, stage, task, attempt, kind, reservation_id, model,"
     " usd, sdk_usd, settled_usd, upstream, input, output, cache_write_5m, cache_write_1h, cache_read,"
-    " thinking, web_search_requests)"
+    " thinking, web_search_requests, line)"
     " SELECT owner_id, run_id, lesson_id, stage, task, attempt, CAST(:kind AS text), id, model,"
     " CAST(:usd AS numeric), CAST(:sdk AS numeric), CAST(:settled AS numeric), CAST(:upstream AS jsonb),"
     " CAST(:i AS bigint), CAST(:out AS bigint), CAST(:w5 AS bigint), CAST(:w1 AS bigint),"
-    " CAST(:cr AS bigint), CAST(:th AS bigint), CAST(:ws AS int)"
+    " CAST(:cr AS bigint), CAST(:th AS bigint), CAST(:ws AS int), line"
     " FROM agent_spend WHERE id = :rid AND kind = 'reserve'"
 )
 
@@ -335,6 +367,7 @@ __all__ = [
     "UpstreamRecord",
     "reserve",
     "reserve_amount",
+    "reserve_for",
     "settle",
     "settle_amount",
     "spent",

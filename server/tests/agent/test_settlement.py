@@ -10,7 +10,7 @@ from typing import Any
 
 import pytest
 
-from .conftest import FIXTURES, load_yaml, need, spec_bounds
+from .conftest import FIXTURES, SPEC, load_yaml, need, spec_bounds
 
 VECTORS = load_yaml(FIXTURES / "cost-vectors.yaml")
 
@@ -70,6 +70,35 @@ def test_transient_and_permanent_codes() -> None:
         assert not isinstance(error, errors.TransientAgentError)
     for code in ("budget_exhausted", "task_budget_exhausted", "monthly_budget_exhausted"):
         assert isinstance(errors.agent_error(code), errors.BudgetRefused)
+
+
+def test_every_code_has_one_class() -> None:
+    """FR-AGENT-10 (ADR-0039 revision): every code the adapter raises is budget, permanent or transient; agent-proxy's
+    forwarding refusals appear only in records (→ sdk_error) and its issue answers are mapped (FR-AGENT-6)."""
+    errors = need("reader.agent.errors")
+    classes = errors.ERROR_CLASSES
+    assert not set(classes) & errors.PROXY_REFUSALS
+    assert set(classes) | errors.PROXY_REFUSALS == set(load_yaml(SPEC)["errors"])
+    for code, cls in classes.items():
+        error = errors.agent_error(code)
+        assert cls in ("budget", "permanent", "transient"), code
+        assert isinstance(error, errors.BudgetRefused) == (cls == "budget"), code
+        assert isinstance(error, errors.TransientAgentError) == (cls == "transient"), code
+    for code in ("index_budget_exhausted", "eval_budget_exhausted", "daily_budget_exhausted"):
+        assert classes[code] == "budget"
+    for code in ("cap_missing", "line_invalid", "replay_miss", "judge_window_too_long", "judge_input_too_large"):
+        assert classes[code] == "permanent"
+    assert classes["lane_saturated"] == "transient"
+    assert dict(errors.PROXY_CODES) == {"client_quota": "lane_saturated", "client_unknown": "sdk_error",
+                                        "tools_not_allowed": "sdk_error", "bad_request": "sdk_error"}
+
+
+def test_issue_refusals_settle_at_zero() -> None:
+    """FR-AGENT-9 (e): no token reached the CLI, so the empty record settles at $0 whatever the reserve."""
+    ledger = need("reader.agent.ledger")
+    for case in VECTORS["issue_settlements"]:
+        settled, log_code = ledger.settle_amount(Decimal(str(case["reserve"])), ledger.UpstreamRecord((), ()), None)
+        assert (settled, log_code) == (Decimal(str(case["settled_usd"])), None)
 
 
 @pytest.mark.parametrize(

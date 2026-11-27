@@ -16,7 +16,7 @@ from typing import Any
 import httpx
 import pytest
 
-from .conftest import FIXTURES, Upstream, forward, load_yaml, make_proxy, message_body, need
+from .conftest import FIXTURES, LANE_ADDR, Upstream, forward, load_yaml, make_proxy, message_body, need
 
 pytestmark = pytest.mark.anyio
 D = Decimal
@@ -243,6 +243,14 @@ async def test_allowance_invariant_over_random_sequences(tmp_path: Path) -> None
                     if kind == "nested" and rng.random() < 0.3:
                         tools[0]["max_uses"] = rng.randint(1, 9)
                     await forward(c, token, body=body_with(tools))
+        before = len(upstream.bodies)
+        async with p.client(LANE_ADDR) as lane:  # INV-AGENT-6 amended: worker-judge never gets an allowance
+            refused = await issue_with(lane, task=rng.choice(["freshness_web", "judge.find"]), web_search=allowance)
+            assert (refused.status_code, refused.json()) == (400, {"error": "tools_not_allowed"})
+            plain_lane = (await issue_with(lane)).json()["run_token"]
+            r = await forward(lane, plain_lane, body=body_with(copy.deepcopy(rng.choice([MAIN, NESTED]))))
+            assert r.status_code == 403
+        assert len(upstream.bodies) == before  # nothing with tools forwarded for the lane
         sent = [json.loads(b) for b in upstream.bodies]
         assert len(sent) <= allowance["requests_max"]
         uses = [t["max_uses"] for b in sent for t in b.get("tools", []) if "type" in t]

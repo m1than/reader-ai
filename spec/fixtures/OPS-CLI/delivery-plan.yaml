@@ -13,6 +13,7 @@ cases:
         postgres: { user: "999:999" }
         api: { user: "10001:10001" }
         worker: { user: "10001:10001" }
+        worker-judge: { user: "10001:10001" }   # ADR-0039 B7b: the judge lane (FR-CLI-5 amended)
         caddy: { user: "0:0" }
         kernel-pair-1: { user: "1000:1000" }
         kernel-user-ivan: { user: "1000:1000" }
@@ -24,6 +25,7 @@ cases:
         - { service: api, uid: 10001, name: db-password }
         - { service: postgres, uid: 999, name: db-password }
         - { service: worker, uid: 10001, name: db-password }
+        - { service: worker-judge, uid: 10001, name: db-password }
   - id: with-agent-proxy
     # The same rule once a stage adds mcp and agent-proxy to the active model: one file per provider token.
     rendered:
@@ -33,6 +35,7 @@ cases:
         postgres: { user: "999:999" }
         api: { user: "10001:10001" }
         worker: { user: "10001:10001" }
+        worker-judge: { user: "10001:10001" }
         mcp: { user: "10001:10001" }
         agent-proxy: { user: "10002:10002" }
         kernel-user-ivan: { user: "1000:1000" }
@@ -48,5 +51,6 @@ cases:
         - { service: mcp, uid: 10001, name: db-password }
         - { service: postgres, uid: 999, name: db-password }
         - { service: worker, uid: 10001, name: db-password }
+        - { service: worker-judge, uid: 10001, name: db-password }
 script: >-
   umask 077; cat > "/run/secrets/.$1.tmp" && mv "/run/secrets/.$1.tmp" "/run/secrets/$1"

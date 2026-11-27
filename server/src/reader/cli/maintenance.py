@@ -36,7 +36,7 @@ from reader.config import SecretResolutionError, load_config, resolve
 
 ROOT_CRT: Final = "/data/caddy/pki/authorities/local/root.crt"
 BACKUP_LABEL: Final = "org.reader-ai.backup"
-WRITERS: Final = ("api", "worker", "mcp")
+WRITERS: Final = ("api", "worker", "worker-judge", "mcp")  # FR-CLI-17/-18 (worker-judge: ADR-0039 B7b)
 RESTORE_SCRIPT: Final = "find /v -mindepth 1 -delete && tar -C /v -xf -"
 EMPTY_CHECK: Final = "find /v -mindepth 1 -print -quit"
 # Exact row count over every application table. Declared system tables, filled by migrations at first start,
@@ -220,6 +220,23 @@ def compose_major(text: str) -> int | None:
     return int(match.group(1)) if match else None
 
 
+def judge_slots_check(config: Any, agents: bool) -> tuple[bool, str]:
+    """FR-CLI-25: every judge slot of SRV-AGENT's table bound in `tasks`. Only a missing `judge.find` fails
+    (it leaves every `find` unjudged); the offline slots refuse on their own. Names and aliases only."""
+    from reader.agent.judges import FIND, JUDGE_SLOTS
+
+    if not agents:
+        return True, "off"
+    missing = sorted(name for name in JUDGE_SLOTS if name not in config.tasks)
+    if not missing:
+        return True, "all bound"
+    hint = (
+        f"missing: {', '.join(missing)}; add tasks.<slot>: {{model: <alias>}} to reader.yaml"
+        " (v1 bindings: deploy/reader.example.yaml)"
+    )
+    return FIND not in missing, hint
+
+
 @guarded
 def cmd_doctor(ctx: Ctx, config_path: Path, as_json: bool = False) -> int:
     config = load_config(config_path)  # a configuration error exits 2 before any check runs
@@ -243,12 +260,14 @@ def cmd_doctor(ctx: Ctx, config_path: Path, as_json: bool = False) -> int:
         lookup = False
     check("keyring", lookup and backend == "keyring.backends.macOS", f"backend {backend}")
     project: Project | None = None
+    # FR-CLI-5: the profiles `reader up` would choose now, so provider references are checked before
+    # the first `up` with agents.
+    chosen = choose_profiles(ctx, config)
     try:
-        # FR-CLI-5: the profiles `reader up` would choose now, so provider references are checked before
-        # the first `up` with agents.
-        project = load(ctx, config_path, choose_profiles(ctx, config), config)
+        project = load(ctx, config_path, chosen, config)
     except (CliError, OSError) as error:
         check("config", False, error.code if isinstance(error, CliError) else "unreadable")
+    check("judge_slots", *judge_slots_check(config, "agents" in chosen))  # FR-CLI-25
     if project is not None:
         check("config", True, f"{len(config.users)} user(s)")
         _doctor_secrets(ctx, project, check)

@@ -55,7 +55,7 @@ layer: server
 track: engineering
 adr: [ADR-0006, ADR-0007, ADR-0018, ADR-0020]
 slice: V.SRV-JOBS-min
-review: "deep-reviewer (Fable), 2026-11-20: round 1 changes (procrastinate integration seams); round 2 changes (single-shot jobs, per-key reconcile, non-blocking enqueue, one table); round 3 changes (uniform stall-like rule, commit order, key-row writes last); round 4 approve (three nits applied: increment always with dead in the same transaction, max_attempts = 1 requeue gap, idempotent log filter). Approved with Red after SRV-AUTH merged (2026-11-22). Code review round 1 (2026-11-22): changes — deadline-only timeout, try-lock on the unknown-kind stalled path, real lock and shutdown tests, pattern log masking, wrapper sanitizing; applied with paired tests. Paired change from SRV-INGEST (2026-11-22, reviewed in SRV-INGEST's code review): KIND_MODULES lists `reader.ingest.jobs` (FR-EVENTS-1); FR-EVENTS-12's status read is also exposed as `reader.jobs.queue.job_status_of(conn, kind, key)` for callers without a procrastinate app (SRV-INGEST's routes), and `Jobs.job_status` uses it; no behaviour of this module changed. Integration (V/SRV-TUTOR-impl, 2026-11-23): KIND_MODULES lists ingest, search and tutor. Amendment from SRV-TUTOR (2026-11-23, FR-EVENTS-1): `JobKind.priority`, passed at every defer, bounded below the sweep's priority; tests: the catalog bound (unit), the priority stored on the first enqueue and on a retry, and fetch order (db); reviewed with SRV-TUTOR's code review. Integration (V/slice-integration, 2026-11-23): KIND_MODULES ingest, search, pipeline, tutor (SRV-TUTOR's order). Final code review on 2924dcf (2026-11-23, deep-reviewer): changes, no live correctness bug, untested or unspecified behaviour. Applied on V/SRV-EVENTS-final, spec then tests then code: FR-EVENTS-1 injectable start hooks (`hooks=`), awaited once after the start sweep with `running()` set, failure and a 30 s timeout isolated, idempotent and enqueue-only, `running()` cleared in the finally; FR-EVENTS-15 skips unknown-kind keys (the reconcile's `dead`/`unknown_kind` write removed) and a failing enqueue no longer ends a sweep round; FR-EVENTS-9 a failing start sweep returns 1 and `stop` is observed during the start sweep and hooks; tests for FR-EVENTS-7's unknown-kind `dead` with the lock free, `wrapper_error`, the worker's own re-enqueue after a lost run, `requeue_dead` on a key with no outcome and no job, the stored sweep priority. Green: worker.run(hooks=), HOOK_TIMEOUT_S 30 s, `stop` raced against the start sweep and each hook, `_RUNNING` cleared in the finally; queue: the idempotency key computed inside the wrapper's try, the lost-run log names the failed step (count or re-enqueue), sweep enqueues guarded (`_sweep_defer`), the reconcile's unknown-kind `dead` removed. Round 2 (40900db): one test short of approve — the production default `hooks=None` had no test; added [unit] `start_hooks()` equals search's and pipeline's `on_worker_start` in KIND_MODULES order (empty for no modules) and [db] `run` without `hooks` awaits the declared hooks once; HOOK_TIMEOUT_S in `bounds` with its limit; `_unless_stopped` also cancels its task in the finally; a start sweep that fails while `stop` is set returns 0. Round 3 (6eeb576): VERDICT approve. Its items applied: a test where the start sweep sets `stop` and then raises (`run` returns 0; kills M36); a hook that cancels itself counts as a stop only when `stop` is set, so the worker still serves (FR-EVENTS-1 failure isolation), with a test. Paired amendment (2026-11-23, V/compile-ui, for SRV-PIPELINE FR-PIPELINE-16, asked by the coordinator after that spec's review round 2 approve on 08534df): FR-EVENTS-17 `dead_error_code_of`, a published read of `job_keys.error_code` so SRV-PIPELINE does not query the table; no write or behaviour of this module changes. Paired change 2026-11-24 (SRV-OBS, ADR-0032 accepted): FR-EVENTS-18 (key_rows_of, recent_keys_of, revision jobs_0002 with one index) and FR-EVENTS-19 (the `trace` task kwarg, the job span around the run, `reader.obs.jobs` in KIND_MODULES); reviewed in SRV-OBS's code review. Paired change from SRV-FRESH (2026-11-23, reviewed with SRV-FRESH's code; merged into V/slice-integration 2026-11-24): KIND_MODULES appends `reader.freshness.jobs` after `reader.obs.jobs` (kinds `freshness.scan`, `freshness.web`; no start hook); the declared-list test takes it; no behaviour of this module changed. Management code-review fix (V/manage-fix-srv, 2026-11-24, B2): the audit `material` id rule is SRV-CONFIG FR-CONFIG-18's own (the former slug pattern refused valid reader.yaml ids such as `Bashir`, so renaming or deleting them failed with a bare 500); FR-EVENTS-30 states that a refused row answers 500 `audit_refused` with the reason logged only. Code review round 2 (V/manage-fix2, 2026-11-24): `audit_actions` gains `self.credential_add` (kind user, id uuid, detail [pid]), written by SRV-AUTH FR-AUTH-6's register verify in its own transaction; the material id rule follows FR-CONFIG-18's refusal of `.` and `..` (test_audit.py's id table gains both)"
+review: "deep-reviewer (Fable), 2026-11-20: round 1 changes (procrastinate integration seams); round 2 changes (single-shot jobs, per-key reconcile, non-blocking enqueue, one table); round 3 changes (uniform stall-like rule, commit order, key-row writes last); round 4 approve (three nits applied: increment always with dead in the same transaction, max_attempts = 1 requeue gap, idempotent log filter). Approved with Red after SRV-AUTH merged (2026-11-22). Code review round 1 (2026-11-22): changes — deadline-only timeout, try-lock on the unknown-kind stalled path, real lock and shutdown tests, pattern log masking, wrapper sanitizing; applied with paired tests. Paired change from SRV-INGEST (2026-11-22, reviewed in SRV-INGEST's code review): KIND_MODULES lists `reader.ingest.jobs` (FR-EVENTS-1); FR-EVENTS-12's status read is also exposed as `reader.jobs.queue.job_status_of(conn, kind, key)` for callers without a procrastinate app (SRV-INGEST's routes), and `Jobs.job_status` uses it; no behaviour of this module changed. Integration (V/SRV-TUTOR-impl, 2026-11-23): KIND_MODULES lists ingest, search and tutor. Amendment from SRV-TUTOR (2026-11-23, FR-EVENTS-1): `JobKind.priority`, passed at every defer, bounded below the sweep's priority; tests: the catalog bound (unit), the priority stored on the first enqueue and on a retry, and fetch order (db); reviewed with SRV-TUTOR's code review. Integration (V/slice-integration, 2026-11-23): KIND_MODULES ingest, search, pipeline, tutor (SRV-TUTOR's order). Final code review on 2924dcf (2026-11-23, deep-reviewer): changes, no live correctness bug, untested or unspecified behaviour. Applied on V/SRV-EVENTS-final, spec then tests then code: FR-EVENTS-1 injectable start hooks (`hooks=`), awaited once after the start sweep with `running()` set, failure and a 30 s timeout isolated, idempotent and enqueue-only, `running()` cleared in the finally; FR-EVENTS-15 skips unknown-kind keys (the reconcile's `dead`/`unknown_kind` write removed) and a failing enqueue no longer ends a sweep round; FR-EVENTS-9 a failing start sweep returns 1 and `stop` is observed during the start sweep and hooks; tests for FR-EVENTS-7's unknown-kind `dead` with the lock free, `wrapper_error`, the worker's own re-enqueue after a lost run, `requeue_dead` on a key with no outcome and no job, the stored sweep priority. Green: worker.run(hooks=), HOOK_TIMEOUT_S 30 s, `stop` raced against the start sweep and each hook, `_RUNNING` cleared in the finally; queue: the idempotency key computed inside the wrapper's try, the lost-run log names the failed step (count or re-enqueue), sweep enqueues guarded (`_sweep_defer`), the reconcile's unknown-kind `dead` removed. Round 2 (40900db): one test short of approve — the production default `hooks=None` had no test; added [unit] `start_hooks()` equals search's and pipeline's `on_worker_start` in KIND_MODULES order (empty for no modules) and [db] `run` without `hooks` awaits the declared hooks once; HOOK_TIMEOUT_S in `bounds` with its limit; `_unless_stopped` also cancels its task in the finally; a start sweep that fails while `stop` is set returns 0. Round 3 (6eeb576): VERDICT approve. Its items applied: a test where the start sweep sets `stop` and then raises (`run` returns 0; kills M36); a hook that cancels itself counts as a stop only when `stop` is set, so the worker still serves (FR-EVENTS-1 failure isolation), with a test. Paired amendment (2026-11-23, V/compile-ui, for SRV-PIPELINE FR-PIPELINE-16, asked by the coordinator after that spec's review round 2 approve on 08534df): FR-EVENTS-17 `dead_error_code_of`, a published read of `job_keys.error_code` so SRV-PIPELINE does not query the table; no write or behaviour of this module changes. Paired change 2026-11-24 (SRV-OBS, ADR-0032 accepted): FR-EVENTS-18 (key_rows_of, recent_keys_of, revision jobs_0002 with one index) and FR-EVENTS-19 (the `trace` task kwarg, the job span around the run, `reader.obs.jobs` in KIND_MODULES); reviewed in SRV-OBS's code review. Paired change from SRV-FRESH (2026-11-23, reviewed with SRV-FRESH's code; merged into V/slice-integration 2026-11-24): KIND_MODULES appends `reader.freshness.jobs` after `reader.obs.jobs` (kinds `freshness.scan`, `freshness.web`; no start hook); the declared-list test takes it; no behaviour of this module changed. Management code-review fix (V/manage-fix-srv, 2026-11-24, B2): the audit `material` id rule is SRV-CONFIG FR-CONFIG-18's own (the former slug pattern refused valid reader.yaml ids such as `Bashir`, so renaming or deleting them failed with a bare 500); FR-EVENTS-30 states that a refused row answers 500 `audit_refused` with the reason logged only. Code review round 2 (V/manage-fix2, 2026-11-24): `audit_actions` gains `self.credential_add` (kind user, id uuid, detail [pid]), written by SRV-AUTH FR-AUTH-6's register verify in its own transaction; the material id rule follows FR-CONFIG-18's refusal of `.` and `..` (test_audit.py's id table gains both). Revision for ADR-0039 B7b (V.kl-deploy-judge-lane, 2026-11-26): lanes, judge_requests, collectors, reserved periodic tasks; deep-reviewer (Fable) rounds 1–2 changes, round 3 approve; approved_by agent (end-of-file note)."
 
 paths:
   - server/src/reader/jobs/**
@@ -66,6 +66,7 @@ tables:
   job_keys: { system: true, columns: "kind text, key text, args jsonb, attempts int, outcome text null, error_code text null, job_id bigint null, created_at, updated_at, finished_at null; pk (kind, key)" }
   "procrastinate_*": { system: true, columns: "procrastinate 3.12.0's own schema (its shipped Alembic chain)" }
   audit_log: { system: true, columns: "id bigint GENERATED ALWAYS AS IDENTITY pk, at timestamptz, actor_id uuid (no FK), action text, object_kind text, object_id text, detail jsonb; trigger refuses UPDATE, DELETE, TRUNCATE (FR-EVENTS-30)" }
+  judge_requests: { owner_id: true, columns: "request_id uuid pk, owner_id → users.id on delete cascade, line, run_id, run_cap_usd, lesson_id null, daily_budget_usd null, input_sha256, created_at default now(), deadline, query text, cards jsonb, pack_ids text[] (FR-EVENTS-33; jobs_0004)" }
 
 normative:
   - id: REF-EVENTS-1
@@ -102,6 +103,10 @@ bounds:
   - { name: worker concurrency, value: 1, kind: "structural: ADR-0006 load profile < 1 job/s; one compile stage at a time keeps spend serial against budget.live_runs_usd" }
   - { name: shutdown_graceful_timeout, value: "8 s", kind: "structural: below Compose's 10 s stop timeout (REF-EVENTS-7), so procrastinate aborts the job and records it before SIGKILL" }
   - { name: start hook timeout (HOOK_TIMEOUT_S), value: "30 s per hook", kind: "structural: a start hook only enqueues (FR-EVENTS-1), milliseconds per key. Limit: a hook that needs more than 30 s is cancelled on every start, so it never completes; such work belongs in a job, not a hook" }
+  - { name: judge lane concurrency, value: 4, kind: "initial value (ADR-0039 B7b): one CLI per call, at most 4 live lane tokens (SRV-AGENT client_quota); `judge-gate` sets it" }
+  - { name: judge request grace, value: "60 s past `deadline`", kind: "initial value (ADR-0039 B7b): the collectors delete a `judge_requests` row older than its deadline plus this" }
+  - { name: judge key retention, value: "1 day after finish", kind: "initial value (ADR-0039 B7b, decision 21): `job_keys` rows of kinds with `key_retention_s`, and their terminal procrastinate jobs; a request-id key is never reused" }
+  - { name: collector period, value: "every minute", kind: "structural: cron granularity, as the sweep" }
 
 requirements:
   - id: FR-EVENTS-1
@@ -136,6 +141,18 @@ requirements:
       `args`, a `priority` outside 0 ≤ priority < the sweep's 1,000,000 (`kind_bounds_invalid`), and an `args` model
       that fails FR-EVENTS-10 (a field typed `Secret` or any subclass of it). Handlers are `async` functions; blocking work runs in `asyncio.to_thread` and checks a
       cancellation flag between steps, because `timeout_s` cannot interrupt blocking synchronous code.
+      Amended (ADR-0039 B7b, V.kl-deploy-judge-lane): (c) a `judge.find` handler (SRV-AGENT FR-AGENT-21) opens its
+      own connections on the run's engine for its reads, its output write and its final delete-and-notify, each
+      committed at once, because the request must be deleted and the waiter notified whatever the run's outcome;
+      the run's transaction still holds the key lock and records the outcome (FR-EVENTS-4, -13). Its effects are
+      idempotent per key: the output insert is insert-or-ignore, the delete removes at most one row, and
+      `max_attempts` is 1. No other kind does this. (d) `JobKind` gains `key_retention_s: int | None = None`;
+      `judge.find` sets 86,400 (bounds); a value ≤ 0 → `kind_bounds_invalid`. (e) Reserved names: a kind may not be
+      named `jobs.sweep`, `jobs.judge_reap`, `jobs.judge_gc` or any name ending in `.tick` (`kind_name_reserved`),
+      because those are the periodic tasks' names (FR-EVENTS-15, -34).
+    tests_planned:
+      - "change server/tests/jobs/test_jobs_unit.py [unit]: key_retention_s accepted when positive or None, refused at 0 and below (kind_bounds_invalid); kind_name_reserved for jobs.judge_reap, jobs.judge_gc and a name ending in .tick"
+      - "test_lanes_db.py [db]: a judge.find stub handler that writes through its own connection and then raises leaves its write committed and the key dead"
   - id: FR-EVENTS-2
     text: >-
       The idempotency key of a job is `sha256` over the canonical JSON (sorted keys, separators `,` and `:`,
@@ -244,6 +261,39 @@ requirements:
       0 when `stop` is already set by then).
       `stop` is observed during the start sweep and the start hooks too: a stop there cancels the sweep or hook
       (any gap a cancelled sweep leaves is FR-EVENTS-15's, as after a crash) and `run` returns 0 without serving.
+      Amended (ADR-0039 B7b, V.kl-deploy-judge-lane): **lanes**. `run(engine, target, stop, catalog=None,
+      secret_values=(), hooks=None, lane="main")`; `reader-server --role worker --lane main|judge` passes it
+      (SRV-AUTH). `reader.jobs.lanes.LANES` is data, one entry per lane:
+      `main` — queues: every queue of the catalog except `judge`, plus the sweep queue; concurrency 1; the start
+      sweep, the periodic sweep, every periodic entry and the collector `jobs.judge_gc` (FR-EVENTS-34); hooks:
+      `start_hooks()` as approved (every KIND_MODULES module's `on_worker_start`, `reader.agent.lane`'s included, so
+      the worker revokes its own stale run tokens at start, SRV-AGENT FR-AGENT-3/-21).
+      `judge` — queues: exactly `judge`; concurrency 4 (bounds); no start sweep and no sweep queue; its own periodic
+      task `jobs.judge_reap` on the `judge` queue (FR-EVENTS-34), so expired requests and stalled `judge.find` jobs
+      are handled even while the main lane's single slot runs a long job (the main lane's sweep still covers the
+      judge queue when the lane is down); hooks: `reader.agent.lane.on_worker_start` only. `jobs.judge_reap` is
+      model-free database maintenance: it runs in one of the judge lane's 4 slots and counts in INV-EVENTS-9's 4.
+      Connections: a `judge.find` run holds at most 2 SQLAlchemy connections at once: its run transaction (key lock,
+      outcome) and one handler connection at a time (FR-AGENT-21 opens its reads, the ledger's reserve and settle,
+      its output write and its final delete one after another), so the lane needs at most 8 at concurrency 4, inside
+      the default pool of 5 + 10 overflow. procrastinate's psycopg pool size, the constant `POOL_MAX_SIZE` (4) until
+      now, becomes per lane: concurrency + 4, so 5 for main and 8 for the judge lane (the listener, fetch, heartbeat
+      and periodic deferrer, plus one job-finish write per running job).
+      Both lanes load the full catalog, so neither cancels the other's `todo` jobs (FR-EVENTS-15) nor writes
+      `unknown_kind` for them (FR-EVENTS-7). procrastinate's periodic deferrer runs in both processes; its
+      `procrastinate_periodic_defers` unique (task, periodic id, tick) defers each tick once, and the queue decides
+      which lane runs it. Building a catalog (`load_kinds(modules, lanes=LANES)`) refuses a queue that no lane of
+      the given `lanes` serves (`queue_unserved`) and a kind on `judge` other than `judge.find`
+      (`queue_reserved`). Both lanes run with LISTEN/NOTIFY on, so a deferred `judge.find` job wakes an idle lane
+      worker at once instead of after procrastinate's 5 s polling interval, and `shutdown_graceful_timeout=8`
+      (above the 6.6 s kill deadline of FR-AGENT-21). An unknown `lane` → `JobError("lane_unknown")` before the
+      database is touched. KIND_MODULES appends `reader.agent.lane` (kind `judge.find`, queue `judge`), after
+      `reader.freshness.jobs`.
+    tests_planned:
+      - "add server/tests/jobs/test_lanes.py [unit]: LANES' queues per lane for the integrated catalog (main: every queue but judge, plus the sweep queue; judge: [judge]); concurrency 1 and 4; pool sizes 5 and 8; hooks per lane; queue_unserved with a LANES argument whose main lane omits a declared queue, queue_reserved and lane_unknown refusals; KIND_MODULES order ends with reader.agent.lane (FR-EVENTS-1's declared-list test updated)"
+      - "add server/tests/jobs/test_lanes_db.py [db]: with a main and a judge worker running, a judge-queue job (stub handler) is run only by the judge lane and a main-queue job only by main; 4 judge jobs that each wait on an event run at once while a fifth waits; main never runs two jobs at once; a judge job deferred to an idle judge worker starts within 1 s (the notify path); the judge lane runs no start sweep"
+      - "add to test_lanes_db.py [db]: four concurrent judge-queue runs that each open a second connection on the production engine settings: the SQLAlchemy pool never checks out more than 8 and no pool timeout is raised; procrastinate's psycopg pool reports `requests_waiting` 0 (psycopg_pool `get_stats`) and no PoolTimeout"
+      - "add to test_lanes_db.py [db]: the judge lane killed mid-job (SIGKILL of a subprocess `run(lane='judge')`) — a sweep ends the key dead/stalled after the stall, with no second run"
   - id: FR-EVENTS-10
     text: >-
       No job payload carries a secret. An `args` model must not contain a field of type `reader.config.Secret`, at any
@@ -263,6 +313,12 @@ requirements:
       `updated_at` where `outcome is null`. `outcome`, `error_code`, `job_id` and `finished_at` are set together.
       Every write sets `updated_at`. Its downgrade drops `job_keys` only. procrastinate's own schema comes from its
       shipped revisions; downgrading them is declared unsupported.
+      Amended (ADR-0039 B7b): a retention rule. `job_keys` rows of a kind with `key_retention_s` are deleted by the
+      collector (FR-EVENTS-34) once they have an outcome and `finished_at` is older than that many seconds; rows of
+      other kinds are kept as before. A key so deleted reads `none` in `job_status` (FR-EVENTS-12), which for a
+      request-id key is never asked again.
+    tests_planned:
+      - "test_judge_requests_db.py [db] (FR-EVENTS-34's collector case): a finished judge.find key older than one day is deleted, a younger one and an unfinished one stay, a finished key of another kind of any age stays"
   - id: FR-EVENTS-12
     text: >-
       `job_status(kind, key)` returns one of `none`, `queued`, `running`, `succeeded`, `dead` from the key's outcome
@@ -316,7 +372,14 @@ requirements:
       re-deferred at most once per abort or lost run. An enqueue that fails inside a sweep (FR-EVENTS-7 or this
       rule) is logged with the kind only and does not end the round; the key is left with no `todo` job, so
       reconciliation takes it once its row is 60 s old, like FR-EVENTS-6's lost re-enqueue. Separately, each sweep
-      cancels every `todo` job whose `task_name` is neither in `KINDS` nor `jobs.sweep`.
+      cancels every `todo` job whose `task_name` is neither in `KINDS` nor a reserved periodic task. Amended
+      (ADR-0039 B7b): the reserved periodic tasks are exactly `jobs.sweep`, `jobs.judge_reap`, `jobs.judge_gc` and
+      every `<kind>.tick` task registered for a kind with a `periodic` entry (FR-EVENTS-32), whichever lane's queue
+      they sit on (before this amendment a todo `<kind>.tick` was cancelled too). FR-EVENTS-7 likewise: a stalled
+      `jobs.judge_reap` or `jobs.judge_gc` job (and a stalled `<kind>.tick`) is finished `failed` with no outcome,
+      like a stalled `jobs.sweep`; none of them has a `job_keys` row.
+    tests_planned:
+      - "add to test_lanes_db.py [db]: with both lanes' tasks registered, a main-lane sweep leaves todo jobs.judge_reap, jobs.judge_gc and a `<kind>.tick` uncancelled and still cancels a todo job of an unknown task; a stalled judge_reap and a stalled judge_gc are finished failed with no outcome and no job_keys row; over two real ticks with an idle main lane, jobs.judge_gc reaches succeeded"
   - id: FR-EVENTS-16
     text: >-
       Logging. The scrubber is a filter on every handler of the root logger, installed by `worker.run` (after
@@ -436,6 +499,60 @@ requirements:
       title looked up by the client from the lists it already has (a deleted object shows its kind and the id's first
       8 characters). The route is in `reader.jobs.audit_routes` (SRV-AUTH ROUTERS, paired). [db] paging; a learner
       gets 403.
+  - id: FR-EVENTS-33
+    text: >-
+      **`judge_requests`** (ADR-0039 B7b, transport of query and card text). Revision `jobs_0004` (branch `jobs`,
+      down_revision `jobs_0003`, `depends_on = "0001_auth"`, SRV-AUTH's revision that creates `users`, because the
+      `jobs` branch otherwise has no ordering against it) creates `judge_requests(request_id uuid primary key,
+      owner_id uuid not null references users(id) on delete cascade, line text not null check (line in
+      ('tutor','compile','mcp')), run_id uuid not null, run_cap_usd numeric(12,6) not null check (> 0), lesson_id uuid
+      null, daily_budget_usd numeric(12,6) null, input_sha256 text not null check (~ '^[0-9a-f]{64}$'), created_at
+      timestamptz not null default now(), deadline timestamptz not null check (deadline > created_at), query text not
+      null, cards jsonb not null, pack_ids text[] not null)` and an index on `deadline`; its downgrade drops the
+      table. `cards` is a JSON array of `[card_id, text]` pairs in judge order, non-empty. The table is owner data
+      (`owner_id: true`, SRV-AUTH INV-AUTH-8), not a system table, and a user's deletion removes their rows.
+      `reader.jobs.judge_requests` exports `NewJudgeRequest` (a frozen record: request_id, owner_id, line, run_id,
+      run_cap_usd, lesson_id, daily_budget_usd, input_sha256, deadline, query, cards, pack_ids; no `created_at`) and
+      `STORE` with `put(conn, new: NewJudgeRequest)`, `get(conn, request_id) -> JudgeRequest | None` and
+      `delete(conn, request_id) -> None`, satisfying SRV-AGENT's `JudgeRequests` protocol and returning its
+      `JudgeRequest` record (FR-AGENT-21). `reader.agent.lane` imports this module for its `JOB_KINDS`, so this
+      module imports `reader.agent.lane` (the record and the window bounds) only inside `get` and `put`, never at
+      module level: no import cycle. `put` validates the fields in Python first (line, a non-empty `cards` of
+      string pairs, `pack_ids` strings, the hash shape) and raises `JobError("judge_request_invalid")` naming the
+      field only; it then writes with one statement, `INSERT … SELECT … WHERE :deadline > now() AND
+      judge_kill_factor × (:deadline − now()) ≤ lane_token_ttl_s − lane_ttl_margin_s` (the lane's own form of
+      FR-AGENT-21 step 4: 3 × 8.33 s ≤ 25 s at today's bounds), whose `created_at` is that statement's `now()`; no
+      row inserted → `JobError("judge_request_invalid")` naming `deadline`. So a request the lane would refuse with
+      `judge_window_too_long` is never written. The waiter commits its `put` before it enqueues the job (FR-EVENTS-3
+      commits independently), so the job never runs ahead of its row. Nothing in this module logs a row's query or
+      card text; its records carry the request id only.
+    tests_planned:
+      - "add server/tests/jobs/test_judge_requests_db.py [db]: put/get round trip equals the JudgeRequest record (cards order kept, created_at from the database); delete removes one row and a second delete is a no-op; each invalid field refused with its name and nothing inserted; the CHECKs refuse a raw insert with a bad line, hash or deadline; a deadline 9 s ahead refused and 8 s ahead accepted; a past deadline refused; deleting the owner removes the row; migration heads at jobs_0004 and its downgrade drops only judge_requests (FR-EVENTS-11's head test updated); `alembic upgrade heads` on a fresh, empty database succeeds with jobs_0004 after 0001_auth"
+      - "add to test_judge_requests_db.py [unit]: importing reader.jobs.judge_requests in a fresh interpreter does not import reader.agent.lane, and importing reader.agent.lane first works (no cycle)"
+      - "add to test_judge_requests_db.py [db]: STORE passes SRV-AGENT's lane handler end to end with a fake provider (request read, deleted at the end)"
+  - id: FR-EVENTS-34
+    text: >-
+      **The collectors** (ADR-0039 B7b). Two periodic tasks, registered like the sweep (not `JobKind`s; both names
+      reserved, FR-EVENTS-1 e), every minute, each step in its own short transaction, a failure in one step logged
+      with the step name only and not stopping the next, counts only in logs, every comparison on the database's
+      `now()`. They are registered only when the catalog holds `judge.find`.
+      `jobs.judge_reap` on the `judge` queue, so the judge lane runs it whatever the main lane is doing: (1) delete
+      every `judge_requests` row whose `deadline` + 60 s < `now()` (the job deletes its own row at its end, SRV-AGENT
+      FR-AGENT-21; this catches rows of jobs that never ran or died); (2) FR-EVENTS-7's stalled-job rule restricted
+      to jobs of the `judge` queue (`max_attempts` 1: the key ends `dead`, `stalled`, never re-enqueued). Bound: a
+      row is gone within its deadline + 60 s + one tick (60 s) + the reap's wait in the judge queue (behind at most
+      4 running `judge.find` jobs, each killed by 6.6 s, FR-AGENT-21) while the judge lane runs, or within the same
+      bound with the main lane's wait while the main lane is free to run `jobs.judge_gc`.
+      `jobs.judge_gc` on the sweep queue (main lane): (1) the same delete as `judge_reap`'s step 1 (idempotent;
+      covers a lane that is down); (2) FR-EVENTS-11's retention: delete the `job_keys` rows of kinds with
+      `key_retention_s` past it, and the same kinds' terminal procrastinate jobs through
+      `JobManager.delete_old_jobs(nb_hours=24, queue="judge", include_failed=True, include_cancelled=True,
+      include_aborted=True)`; (3) the periodic tasks' own `succeeded` rows on the sweep queue older than 24 h,
+      through `delete_old_jobs(nb_hours=24, queue=<sweep queue>)` (succeeded only, so failures stay visible); (4)
+      call SRV-AGENT's `judges.expire(conn)` (recorded `judge.find` outputs past their retention, FR-AGENT-20).
+    tests_planned:
+      - "add to test_judge_requests_db.py [db]: rows written by raw insert with a past created_at and deadline (put refuses those): one 61 s past its deadline is deleted by a direct call of the reap step, one 30 s past stays; the retention case of FR-EVENTS-11; terminal judge-queue procrastinate jobs older than 24 h deleted, a todo one kept; succeeded sweep-queue rows older than 24 h deleted, a failed one kept; judges.expire called once per judge_gc run (spy); a failing step 1 still runs the later steps"
+      - "add to test_lanes_db.py [db]: with the main lane busy in a long stub job, one real judge-lane tick (cron every minute, the test waits up to 70 s) deletes an expired row and ends a stalled judge-queue key dead/stalled"
 
 invariants:
   - id: INV-EVENTS-1
@@ -457,6 +574,22 @@ invariants:
     text: The per-key transition function over (state, event) is total and matches VEC-EVENTS-1 exactly; `succeeded` and `dead` are terminal except for `requeue` from `dead`.
   - id: INV-EVENTS-7
     text: "`enqueue` never waits for a key lock: with the key lock held by another session for the whole call (and no uncommitted key-row write), it completes under a 2 s `statement_timeout` set by the test only. Its only possible wait is on an uncommitted key-row write, bounded by one statement plus a commit (FR-EVENTS-3)."
+  - id: INV-EVENTS-8
+    text: >-
+      No query or card text in the queue (ADR-0039 B7b): for any `judge.find` request written by `put` and
+      enqueued, no substring of at least 8 characters of its query or of any card text appears in
+      `procrastinate_jobs.args`, `job_keys.args`, `job_keys.key`, `procrastinate_events`, or any log record of the
+      lane's process (procrastinate loggers included); the job's args are exactly `{"request_id", "input_sha256"}`
+      (the canary in the style of FR-EVENTS-10).
+    tests_planned:
+      - "add server/tests/jobs/test_judge_canary_db.py [db]: canary query and card texts through put + enqueue + a judge-lane run with SRV-AGENT's handler and a fake provider, every logger captured at DEBUG; the canaries are absent from the four tables and every record, and present in judge_requests until the run ends"
+  - id: INV-EVENTS-9
+    text: >-
+      Lane separation: a job on queue `judge` is only ever fetched by a `judge` lane worker, and a job on any other
+      queue only by a `main` lane worker; a `main` worker runs at most one job at a time and a `judge` worker at most
+      its concurrency (4), `jobs.judge_reap` included.
+    tests_planned:
+      - "test_lanes_db.py [db]: a mix of judge-queue and main-queue stub kinds with both lanes running; every run's lane recorded by its handler matches its queue; the running counts never exceed 1 and 4"
 
 nfr: []
 
@@ -618,3 +751,19 @@ audit_actions:
     self.credential_remove: { kind: user, id: uuid, detail: [pid, revoked_sessions] }
     settings.set: { kind: setting, id: "an OVERRIDABLE key", detail: [old, new] }
     settings.reset: { kind: setting, id: "an OVERRIDABLE key", detail: [old, file] }
+
+# ---- Revision for ADR-0039 B7b (V.kl-deploy-judge-lane, 2026-11-26): FR-EVENTS-1, -9, -11, -15 amended;
+# FR-EVENTS-33, -34; INV-EVENTS-8, -9; bounds and the `judge_requests` table. deep-reviewer (Fable) rounds 1–2
+# changes, round 3 approve. Two lanes over one catalog: `main` keeps every queue but `judge` at concurrency 1;
+# `worker-judge` (OPS-DEPLOY FR-DEPLOY-16) serves only `judge` at concurrency 4. This revision supplies SRV-AGENT's
+# `JudgeRequests` seam with its production store and lists `reader.agent.lane` in KIND_MODULES.
+# Still open, paired elsewhere: SRV-SEARCH's waiter (`judge_requests.put` and commit, then LISTEN on SRV-AGENT's
+# `judge_done` channel, and only then `enqueue`, so a notify sent by a fast job is never missed; it waits at most
+# the B6 timeout and, on timeout, re-reads the recorded output once).
+# Red tests (2026-11-26): test_jobs_unit.py (KIND_MODULES, start hooks, reserved names, key retention),
+# test_lanes.py, test_lanes_db.py, test_judge_requests_db.py, test_judge_canary_db.py; the migration-head checks
+# name jobs_0004. Green: lanes.py, judge_requests.py, jobs_0004, the collectors and the sweep exemption in queue.py,
+# worker.run(lane=); tests reformatted for ruff (line length, assertions split), no oracle changed. Code review
+# round 1 (non-blocking, applied): `put` also refuses run_cap_usd <= 0 (`run_cap_usd`) and a NUL byte in the query
+# or a card (`query`, `cards`) before the insert; a test shows judge_reap leaves a stalled main-queue job alone.
+
