@@ -186,6 +186,34 @@ async def test_second_converter_version_imports_a_second_pack(
         assert await w.scalar("SELECT count(*) FROM ingests") == 2
 
 
+async def test_the_routes_read_the_newest_ingest(pg: Pg, tmp_path: Path, monkeypatch: Any) -> None:
+    """Code review of unit B, blocking 3: r2 and r3 differ in span text and count; every reader shows r3."""
+    ingest, uploads = need("reader.ingest"), need("reader.ingest.uploads")
+    jobs = need("reader.ingest.jobs")
+    base = [json.loads(x) for x in build_artifact()["spans.jsonl"].splitlines()]
+    newer = [dict(s) for s in base[:-1]]  # one span fewer (the last, on page 2)
+    page1 = next(i for i, s in enumerate(newer) if s["page"] == 1 and s["kind"] == "text")
+    newer[page1]["text"] = "Текст r3"
+    async with world(pg, tmp_path) as w:
+        monkeypatch.setattr(ingest, "CONVERTER_VERSION", R2)
+        await receive(w, tar(converter_version=R2))
+        await w.work()
+        monkeypatch.setattr(ingest, "CONVERTER_VERSION", R3)
+        await receive(w, io.BytesIO(tar_of(build_artifact(spans=newer))))
+        await w.work()
+        assert await w.scalar("SELECT count(*) FROM ingests") == 2
+        async with client(w) as c:
+            listed = next(m for m in (await c.get("/api/materials")).json()["materials"]
+                          if m["sha256"] == MATERIAL_SHA)
+            assert listed["span_count"] == len(newer) == len(base) - 1
+            assert (await c.get("/api/materials/synthetic/outline")).status_code == 200
+            pages = [(await c.get("/api/materials/synthetic/spans", params={"page": p})).json()["spans"]
+                     for p in (1, 2)]
+            assert [s["text"] for page in pages for s in page] == [s["text"] for s in newer]
+        async with w.engine.connect() as conn:
+            assert await uploads.import_key(conn, MATERIAL_SHA) == jobs.key_for(MATERIAL_SHA, R3)
+
+
 async def test_r2_artifact_is_refused_by_an_r3_receive(pg: Pg, tmp_path: Path) -> None:
     async with world(pg, tmp_path) as w:
         assert await refused(w, tar(converter_version=R2)) == "version_mismatch"

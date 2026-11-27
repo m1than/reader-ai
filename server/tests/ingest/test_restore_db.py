@@ -1,6 +1,6 @@
 """Activation run-through, restore and rollback with the seq map and re-anchoring (SRV-INGEST [db]).
 
-@trace FR-INGEST-39 FR-INGEST-43
+@trace FR-INGEST-39 FR-INGEST-43 FR-INGEST-40
 """
 
 from __future__ import annotations
@@ -97,6 +97,28 @@ async def test_delete_while_waiting_then_restore(pg: Pg, tmp_path: Path) -> None
         assert await w.scalar("SELECT count(*) FROM pending_activations") == 0
         assert await w.scalar("SELECT count(*) FROM anchor_runs WHERE from_pack_id = :f AND to_pack_id = :t",
                               f=legacy, t=r3) == 1  # re-anchored inline
+
+
+async def test_restore_without_a_worker_stores_the_wait_and_commits(pg: Pg, tmp_path: Path) -> None:
+    """Code review of unit B, blocking 1: the api runs no worker; the follow-up is skipped, not raised."""
+    from reader.jobs import worker as jobs_worker
+
+    async with world(pg, tmp_path) as w:
+        sha = sha_of("no worker")
+        legacy = await synthetic_pack(w, sha, R2, ROWS)
+        await activate(w, legacy)
+        r3 = await synthetic_pack(w, sha, R3, ROWS)
+        await with_vectors(w, r3, "seqmap_missing")
+        await delete(w, sha)
+        previous, jobs_worker._RUNNING[0] = jobs_worker._RUNNING[0], None
+        try:
+            await restore(w, sha)
+        finally:
+            jobs_worker._RUNNING[0] = previous
+        restored = await w.scalar("SELECT deleted_at FROM materials WHERE sha256 = :s", s=sha)
+        assert restored is None  # the restore committed
+        assert await reason_of(w, r3) == "seqmap_missing"
+        assert list(await head_packs(w)) == [legacy]
 
 
 async def test_one_seq_map_suffices_and_restore_skips_older_rows(

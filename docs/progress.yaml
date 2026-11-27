@@ -2056,8 +2056,7 @@ tasks:
         (FR-INGEST-39 to -43, INV-INGEST-15, VEC-INGEST-10/-11). Code review of unit 2: its 7 blocking items fixed
         (row guards check old and new pack/overlay; deleted materials registered with a pending row; reconcile one
         transaction per pack; locator fullmatch; shareable() fails closed on a null license; pending-branch test).
-        REMAINING GATE: start_reconcile and the sweep are not wired into SRV-EVENTS' worker start (paired change);
-        it must land before any consumer of profile_for_pack or active_view merges. PackGuard waits for SRV-AGENT.
+        (Gate met in unit 7, below.) PackGuard waits for SRV-AGENT.
         Unit 4 done: artifact format reader-ingest/2 (locators, quote hashes, parse_config, pack_id), CONVERTER_VERSION
         docling-2.151.1+r3, no frozen version, status collected/purged (FR-INGEST-10..13, -15 first part, -17;
         INV-INGEST-1, -2, -7; VEC-INGEST-1, -5); fixtures only, the pilot was not re-converted. MERGE GATE (code
@@ -2071,7 +2070,20 @@ tasks:
         routes (404 for a foreign pack). Recorded deviations: purge promoted without PackGuard (a judge output
         committed after a purge may name the pack until SRV-AGENT's PackGuard); seams declared in gc.Seams —
         SRV-SEARCH forget_overlay/forget_legacy and SRV-EVENTS judge_requests purge are no-ops until paired; `cited`
-        fails closed (no pack is collected until SRV-LESSON revision_packs and SRV-KB bind it). Remaining: 6 facets.",
+        fails closed (no pack is collected until SRV-LESSON revision_packs and SRV-KB bind it). Unit 6 done: facets
+        file and schema (reader/ingest/facets.yaml, facets.schema.json; closed vocabularies, enabled with
+        consumers, only `license` enabled, `form` disabled; FR-INGEST-37, VEC-INGEST-9); deviation: the test-vector
+        rule is promoted unmeasured and must be measured on the pilot span dump before `form` is enabled. Unit 7
+        done — merge gate (a)-(c) met (FR-INGEST-40 note), (d) OPEN: INV-INGEST-16's reader scan must pass on the
+        integration branch, i.e. the paired readers pipeline/source.py, tutor/store.py, plan/store.py,
+        search/jobs.py, obs/summary.py, freshness/store.py read through active_view; until then the r3 bump must not
+        merge (a second ingests row per material doubles sources). Owner step after the r3 bump (later): re-run
+        `reader-ingest --setup` and restart the watcher. Paired WEB change: labels for collected/purged, stale
+        version_frozen messages. Unit 7: JOB_KINDS holds all eight ingest kinds (SRV-EVENTS FR-EVENTS-1
+        note and test, SRV-OBS VEC-OBS-1 job_args {} and attributes.py), on_worker_start enqueues ingest.reconcile,
+        whose job runs start_reconcile and the sweep (the hook contract allows only enqueues); enqueue_known skips
+        without a worker (api restore). Still proposed: INV-INGEST-16, FR-INGEST-13 embed args, FR-INGEST-15/19/23
+        view changes, VEC-INGEST-2..6, FR-INGEST-6 rev, PackGuard, FR-INGEST-47/-48 (conditional).",
       what: "SRV-INGEST revision (~1,200–1,850 lines with the citation readers): span identity = ADR-0039 P2 locator
         (offsets into the page's canonical span text; empty text as a zero-length range with an ordinal; file and
         line range for non-PDF) + quote hash. Order: converter revision -> re-conversion -> seq-to-locator map, 1:1

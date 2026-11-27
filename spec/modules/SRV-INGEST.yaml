@@ -1680,8 +1680,13 @@ requirements:
       **Merge gate (code review of unit A, 2026-11-27):** the `CONVERTER_VERSION` change to r3 (unit 4) is built on
       V/kl-ingest-packs but must not merge into the integration branch before (a) SRV-EVENTS' KIND_MODULES and
       SRV-OBS's span-name list serve `ingest.seqmap` and `ingest.reanchor`, (b) `start_reconcile` and the sweep are
-      wired at worker start, and (c) the `seqmap_missing` re-enqueue above is in place (done).
-      **Gate met (phase 2 unit 7, 2026-11-27), as paired changes on this branch:** `reader.ingest.jobs.JOB_KINDS`
+      wired at worker start, (c) the `seqmap_missing` re-enqueue above is in place (done), and (d) INV-INGEST-16's
+      source scan (test_readers_scan_unit.py) passes on the integration branch: every paired reader
+      (`reader/pipeline/source.py`, `reader/tutor/store.py`, `reader/plan/store.py`, `reader/search/jobs.py`,
+      `reader/obs/summary.py`, `reader/freshness/store.py`) reads through `active_view`, since a second `ingests`
+      row per material would otherwise double their sources (code review of unit B, 2026-11-27). **(d) is open**:
+      those readers are other specs' paired changes, not this task's.
+      **(a)–(c) met (phase 2 unit 7, 2026-11-27), as paired changes on this branch:** `reader.ingest.jobs.JOB_KINDS`
       holds every kind of this revision (`ingest.import`, `ingest.seqmap`, `ingest.reanchor`, `ingest.gc`,
       `ingest.gc_pack`, `ingest.gc_overlay`, `ingest.purge`, `ingest.reconcile`), so SRV-EVENTS' worker serves them
       (FR-EVENTS-1 note) and SRV-OBS's `job_args` lists each with `{}` (VEC-OBS-1 note: no argument reaches a span).
@@ -1694,7 +1699,11 @@ requirements:
       worker start's sweep enqueues the follow-up.
       [db] test_overlays_db.py: on_worker_start enqueues one ingest.reconcile; running it reconciles and sweeps (a
       pending row of an imported pack is appended); every kind of this revision is in JOB_KINDS; enqueue_known
-      without a running worker enqueues nothing and returns False.
+      without a running worker enqueues nothing and returns False. test_restore_db.py (code review of unit B,
+      blocking 1): a restore with no running worker, while the material's r3 pack waits on `seqmap_missing`,
+      commits with the reason stored. test_ingest_db.py (blocking 3, "newest ingest"): with r2 and r3 artifacts that
+      differ in span text and count, the listing, outline and spans routes return the r3 rows and
+      `uploads.import_key` is the r3 key.
   - id: FR-INGEST-41
     text: >-
       **Migration step 4: mutable citations** (P2 (4)). `python -I -m reader.ingest.migrate_citations` (run by
