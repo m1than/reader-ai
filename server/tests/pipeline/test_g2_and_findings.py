@@ -122,6 +122,17 @@ def test_findings_for_a_stop_at_the_rule_check() -> None:
             assert claim["credibility"] == 6
 
 
+def test_source_too_large_is_a_blocking_open_cell() -> None:
+    """FR-PIPELINE-10 (revised): a `source_too_large` outcome becomes a blocking fact_check open cell."""
+    findings = need("reader.pipeline.findings")
+    reports = need("reader.pipeline.reports")
+    verdicts = [reports.Verdict("f01-explain", "c1", "source_too_large", (), "", None, 6)]
+    problems = findings.problems_from(verdicts, [], json.loads(F01))
+    hit = [p for p in problems if p.kind == "fact_check"]
+    assert len(hit) == 1 and hit[0].blocking and hit[0].stage == "fact_check"
+    assert hit[0].text.startswith("source_too_large")
+
+
 def test_final_revision_is_the_deterministic_deltas() -> None:
     """INV-PIPELINE-5 (revised): F = append_findings(stamp_credibility(stamp_labs(M, lab), fact), problems);
     a lab failure reaches the notebook as an open cell only through the findings step; any other F fails."""

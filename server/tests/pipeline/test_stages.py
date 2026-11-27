@@ -1,4 +1,4 @@
-# @trace VEC-PIPELINE-1, VEC-PIPELINE-2, FR-PIPELINE-5, FR-PIPELINE-23, FR-PIPELINE-26, INV-PIPELINE-1
+# @trace VEC-PIPELINE-1, VEC-PIPELINE-2, FR-PIPELINE-5, FR-PIPELINE-13, FR-PIPELINE-23, FR-PIPELINE-26, INV-PIPELINE-1
 """The steps as data and the step decision (pure): VEC-PIPELINE-1's file, VEC-PIPELINE-2's sequences in the
 four-check order, and a property over generated outcome sequences (INV-PIPELINE-1: the loop bound, every return
 counted, no check before a cheaper one has passed, termination)."""
@@ -170,3 +170,17 @@ def test_loop_bound_order_and_termination(failures: list[bool], answers: list[st
     for checks in passes:
         assert [d.stage for d in checks] == CHECKS[: len(checks)]
         assert all(not d.problems for d in checks[:-1])
+
+
+def test_live_check_refuses_budgets_other_than_the_cap() -> None:
+    """FR-PIPELINE-13 (D6): the live compile stops before create_run when a compile task's effective budget
+    differs from the run cap."""
+    stages = need("reader.pipeline.stages")
+    live = need("reader.pipeline.live")
+    p = stages.load()
+    cap = {"draft": Decimal("8.0"), "fact_check": Decimal("8.00"), "review": Decimal(8)}
+    live.check_budgets(p, cap)
+    for task, value in (("review", Decimal("4.0")), ("fact_check", None)):
+        with pytest.raises(live.BudgetsNotCap) as wrong:
+            live.check_budgets(p, {**cap, task: value})
+        assert wrong.value.tasks == [task]

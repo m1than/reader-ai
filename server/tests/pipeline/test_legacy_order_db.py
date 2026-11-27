@@ -118,3 +118,44 @@ async def test_open_v2_runs_are_untouched(pg: Pg, tmp_path: Path) -> None:
         run = await env.compile()
         assert await runs.cancel_legacy(env.engine, env.jobs) == []
         assert await env.scalar("SELECT cancelled_at FROM compile_runs WHERE id = :r", r=run) is None
+
+
+async def test_read_1_refuses_a_v1_job_without_the_cancel(pg: Pg, tmp_path: Path) -> None:
+    """(b): a queued job of an open v1 run that was not cancelled (the worker start has not run) does nothing."""
+    steps = need("reader.pipeline.steps")
+    async with pipeline_env(pg, tmp_path, floors=BY_NAME_HINT) as env:
+        lesson = await env.import_plan()
+        run = await _v1_run(env, lesson)
+        args = {"run_id": str(run), "step": 1, "stage": "draft", "input_sha256": "0" * 64}
+        payload = type("Args", (), args)
+        async with env.engine.begin() as conn:
+            await steps.handle(payload, conn, None)
+        assert await env.scalar("SELECT count(*) FROM compile_steps WHERE run_id = :r", r=run) == 0
+        assert await env.scalar("SELECT count(*) FROM agent_spend WHERE run_id = :r", r=run) == 0
+        assert await env.scalar("SELECT cancelled_at FROM compile_runs WHERE id = :r", r=run) is None
+
+
+async def test_ends_cap_and_worker_start_order(pg: Pg, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """(a): `ends` stays at most 100; the worker start cancels v1 runs before it ensures unfinished runs."""
+    jobs_mod = need("reader.pipeline.jobs")
+    order: list[str] = []
+    real_cancel, real_ensure = jobs_mod.cancel_legacy, jobs_mod.ensure_all
+
+    async def cancel(engine: Any, jobs: Any) -> Any:
+        order.append("cancel")
+        return await real_cancel(engine, jobs)
+
+    async def ensure(engine: Any, jobs: Any) -> Any:
+        order.append("ensure")
+        return await real_ensure(engine, jobs)
+
+    monkeypatch.setattr(jobs_mod, "cancel_legacy", cancel)
+    monkeypatch.setattr(jobs_mod, "ensure_all", ensure)
+    async with pipeline_env(pg, tmp_path, floors=BY_NAME_HINT) as env:
+        lesson = await env.import_plan()
+        run = await _v1_run(env, lesson)
+        await _sql(env, "UPDATE compile_runs SET ends = 100 WHERE id = :r", r=run)
+        await jobs_mod.on_worker_start(env.jobs)
+        assert order == ["cancel", "ensure"]
+        assert await env.scalar("SELECT ends FROM compile_runs WHERE id = :r", r=run) == 100
+        assert await env.scalar("SELECT cancelled_at FROM compile_runs WHERE id = :r", r=run) is not None

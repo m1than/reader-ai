@@ -304,7 +304,9 @@ async def test_run_history(pg: Pg, tmp_path: Path) -> None:
             assert len(listed) == 20 and listed[0]["run_id"] == run
             assert set(listed[0]) == {
                 "run_id", "state", "created_at", "finished_at", "spent_usd", "cap_usd", "steps", "error",
+                "loops", "stop", "refused_limit",  # FR-PIPELINE-6 revised (ADR-0039)
             }
+            assert (listed[0]["loops"], listed[0]["stop"], listed[0]["refused_limit"]) == (0, None, None)
             assert listed[0]["state"] == "stalled" and listed[1]["state"] == "converged"
             assert [x["created_at"] for x in listed] == sorted((x["created_at"] for x in listed), reverse=True)
             assert await _keys(env, run) == 0  # read-only: no ensure

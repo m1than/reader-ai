@@ -750,8 +750,21 @@ owner_notes:
 #   - The findings step's input_sha256 also hashes the run's `budget_refused` code: a stale findings job (enqueued
 #     while the recorded decision admitted a loop, FR-PIPELINE-5) returns without effect but completes its job key,
 #     so the findings of a later refusal at the same step must have another key (test_loop_rule_db.py pins it).
-#   - FR-PIPELINE-13's example task budgets (D6) are OPS-DEPLOY's deploy/reader.example.yaml change, listed for its
-#     task; the live check asserts the effective budgets of the stack it runs against.
+#   - FR-PIPELINE-13's example task budgets (D6) are OPS-DEPLOY's deploy/reader.example.yaml change, with its own
+#     test, listed for its task; live.py refuses to start (exit 3, before create_run) when a compile task's
+#     effective budget differs from the cap, and the live check asserts them.
+#   - Code review round 1 (2a69eb7) fixes: a stale findings job raises input_not_ready (its key does not
+#     complete) and a findings key that died that way is requeued once findings is next; a model step's refusal
+#     commits on its own connection before its findings enqueue; the loop plan drops a check only when its own
+#     input_sha256 (from the notebook an earlier check of that revision judged, under the current prompts and
+#     model) has a completed step, so a changed review prompt plans the review; planned calls use
+#     custom_system=True like every stage call, so the planned sum equals the reserves the calls write; history
+#     rows carry loops, stop and refused_limit. The route-mode `degraded` reuse exclusion is not in the code until
+#     FR-PIPELINE-26's route lands (no find runs in section mode).
+#   - Notes for the record: under prompt_version v1 two prompt texts now exist (before and after this revision);
+#     input_sha256 hashes the file content, so they never share a reuse. VEC-PIPELINE-1's text changed from v2 to v1
+#     after the owner's approval (Green note above). ADR-0039 B7a's no-regression evaluation rule for prompt
+#     changes is met by the stage live check (FR-PIPELINE-13), which is not run in this phase.
 #   - Paired changes made here because this task's tests need them: the SRV-LESSON schema (its header note) and
 #     SRV-OBS's SPEC_CODES plus test_pipeline_obs_db.py's step order (its header note). Listed for their own tasks:
 #     WEB-UI FR-UI-15 labels, OPS-DEPLOY example budgets (D6), OPS-SANDBOX's reference-library import test,
@@ -842,6 +855,8 @@ owner_notes:
 #   - SRV-AGENT: `reserve_for` (FR-AGENT-6) and `loop_fits_limit(...) -> None | "run" | "task" | "month"` (FR-AGENT-23,
 #     the first limit the planned sum crosses), both approved and merged in V/slice-integration; used as written.
 #   - OPS-DEPLOY: deploy/reader.example.yaml task budgets per D6, including `tasks."judge.find".budget_usd_per_lesson`.
+#   - SRV-EVENTS (FR-EVENTS-30) and WEB-MANAGE (the audit view): the deploy's cancel rows carry actor_id = the nil
+#     UUID (`DEPLOY_ACTOR`); no user has it, so the audit view shows it as the deploy (a label for those tasks).
 #   - SRV-FRESH: no change. The ADR-0030 freshness check keeps its place beside fact-check (ADR-0039 ADR-0009 row): it
 #     is not one of the four checks, never counts as a loop and spends on the `freshness` line; FR-PIPELINE-7's slice
 #     rule for `changed` cells and URL citations stays.
@@ -932,12 +947,15 @@ revisions:
       call); for `budget_refused` it enqueues `findings` before returning (nothing before any notebook exists).
       **A refusal wins over `next`:** when `budget_refused` is set, the run's next step is `findings` (none before
       any notebook exists) whatever `next` is recorded, for `ensure`, for FR-PIPELINE-6's derivation and for a stale
-      model step. A `findings` job
-      returns without effect when the run's recorded decision admitted a loop (the last check's report has `next:
-      revise`) and neither a refusal nor `loop_limit` is recorded after it. Each check's report carries the
+      model step. A `findings` job whose run's recorded decision admitted a loop (the last check's report has
+      `next: revise`) with neither a refusal nor `loop_limit` recorded after it has no effect: it raises the
+      transient `input_not_ready` (as a mismatched input does), so its job key does not complete; when findings
+      later becomes the run's next step and its key has died that way, the enqueue requeues it (SRV-EVENTS
+      `requeue_dead`). Each check's report carries the
       decision as a named field, `next: revise | findings | <the next check>`, with `stop` (`passed`, `loop_limit`,
       `loop_cap`) when it is `findings`. A model step refused for budget writes no `compile_steps` row: it commits
-      `budget_refused` and enqueues `findings` (or finishes the run, before any notebook), and FR-PIPELINE-6 derives
+      `budget_refused` (and, before any notebook, the run's finish) on its own connection, so a rollback of the
+      step's job transaction cannot undo the refusal, then enqueues `findings`; FR-PIPELINE-6 derives
       `stop: budget_refused` from the column. The handler of a check writes its `compile_steps` row (with that report)
       and the loop decision (`loops` + 1, or `budget_refused`) in one transaction; the enqueue
       of the next step follows SRV-EVENTS FR-EVENTS-3 (its own commit, before the handler returns), as approved.
@@ -1008,7 +1026,8 @@ revisions:
       the owner reviews to accept the re-measured compile cost per lesson. [live]
     tests_planned:
       - "change server/tests/pipeline/test_live.py: assert the effective task budgets of draft, fact_check, review and judge.find equal the run cap before the run; record each loop decision's planned sum and its planned judge.find sum (FR-PIPELINE-23) beside the actual spend; loops ≤ 3, stop present, zero task_budget_exhausted rows, ledger sum equal to the SDK total"
-      - "add a [unit] test in test_stages.py: deploy/reader.example.yaml gives draft, fact_check, review and judge.find a budget_usd_per_lesson equal to bounds.run_cap_usd"
+      - "add a [unit] test in test_stages.py: live.py's pre-check refuses (non-zero exit, before create_run) when a compile task's effective budget differs from bounds.run_cap_usd"
+      # The deploy/reader.example.yaml budgets test belongs to OPS-DEPLOY's paired change (D6), listed in the header.
   - id: NFR-PIPELINE-1
     metric: wall time of one L02 compile from run creation to its terminal state, with up to 3 loops, minutes
     threshold: 45            # ADR-0005/roadmap criterion. ESTIMATE, not a measurement or a bound: measured stage

@@ -188,3 +188,85 @@ async def test_the_decision_commits_with_the_row(pg: Pg, tmp_path: Path, monkeyp
         run = await _start(env, [*FACT_FAILS, *FACT_FAILS[1:], *FACT_FAILS[1:]])
         assert "fact_check" not in await _stages(env, run)
         assert await env.scalar("SELECT loops FROM compile_runs WHERE id = :r", r=run) == 0
+
+
+REFUSING = {"draft": 4.0, "fact_check": 0.3, "review": 4.0}  # the fact_check reserve 0.38 > 0.30
+
+
+async def test_a_refusal_survives_a_rolled_back_step(
+    pg: Pg, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The refused step's transaction is lost after its refusal and findings enqueue; the retry is refused with
+    the same code (the stale-step path): the refusal was committed on its own, the findings ran once, and the run
+    ends budget_exhausted."""
+    steps = need("reader.pipeline.steps")
+    errors = need("reader.pipeline.errors")
+    async with pipeline_env(pg, tmp_path, task_budgets=REFUSING, floors=DEFAULTS["reserves"]) as env:
+        real = steps._refused
+        lost: list[int] = []
+
+        async def refused_then_lost(*args: Any) -> None:
+            await real(*args)
+            if not lost:
+                lost.append(1)
+                raise errors.InputNotReady()  # the job transaction rolls back; the job is retried
+
+        monkeypatch.setattr(steps, "_refused", refused_then_lost)
+        run = await _start(env, [{"stage": "draft", "cost": 0.6}])
+        assert lost == [1]
+        state = await env.state(run)
+        assert state["state"] == "budget_exhausted" and state["refusals"] == ["task_budget_exhausted"]
+        assert await _stages(env, run) == ["draft", "rules", "lab_verification", "findings"]
+        assert await _reserves(env, run) == 1  # the draft's only: neither attempt of fact_check reserved
+
+
+async def test_a_stale_findings_job_does_not_consume_its_key(pg: Pg, tmp_path: Path) -> None:
+    """The coordinator's sequence: a findings job (keyed with the refusal code) runs while the run shows no
+    refusal yet: it has no effect and does not complete its key; when the step is then refused with that same
+    code, findings runs and the run ends budget_exhausted."""
+    runs = need("reader.pipeline.runs")
+    async with pipeline_env(pg, tmp_path, task_budgets=REFUSING, floors=DEFAULTS["reserves"]) as env:
+        held = _dropping(env, "fact_check")  # the fact_check job has not run yet
+        run = await _start(env, [{"stage": "draft", "cost": 0.6}])
+        assert await _stages(env, run) == ["draft", "rules", "lab_verification"]
+        async with env.engine.connect() as conn:
+            row = await runs.load_run(conn, run)
+            done = await runs.load_steps(conn, run)
+            lesson = await runs.load_lesson(conn, env.runtime, row.owner_id, row.lesson_id)
+        code = "task_budget_exhausted"
+        findings = runs.step_args(
+            row, len(done) + 1, "findings", runs.step_input(env.runtime, lesson, done, "findings", code)
+        )
+        env.jobs.enqueue = type(env.jobs).enqueue.__get__(env.jobs)
+        await env.jobs.enqueue("pipeline.stage", findings)
+        await env.work()  # the stale findings job: input_not_ready, no effect
+        assert await _stages(env, run) == ["draft", "rules", "lab_verification"]
+        await env.jobs.enqueue("pipeline.stage", held[0])  # the fact_check step, refused with that code
+        for _ in range(4):
+            await env.work()
+        assert (await env.state(run))["state"] == "budget_exhausted"
+        assert await _stages(env, run) == ["draft", "rules", "lab_verification", "findings"]
+
+
+async def test_planned_sum_equals_the_reserves_written(pg: Pg, tmp_path: Path) -> None:
+    """FR-PIPELINE-23 with custom_system (as every stage call): with floors below the estimate, the planned sum
+    of a loop equals the sum of the reserve rows its three calls write."""
+    floors = {stage: 0.0001 for stage in DEFAULTS["reserves"]}
+    results = [*FACT_FAILS, {"stage": "revise", "cost": 0.87},
+               {"stage": "fact_check", "cost": 0.24, "unsupported": 0, "contradicted": 0},
+               {"stage": "adversarial_review", "cost": 0.5, "blocking": 0, "nonblocking": 0}]
+    async with pipeline_env(pg, tmp_path, floors=floors) as env:
+        run = await _start(env, results)
+        assert (await env.state(run))["state"] == "converged"
+        report = await env.scalar(
+            "SELECT report FROM compile_steps WHERE run_id = :r AND stage = 'fact_check' AND step = 4", r=run
+        )
+        planned = Decimal(report["planned_usd"])
+        reserved = Decimal(await env.scalar(
+            "SELECT sum(usd) FROM agent_spend WHERE run_id = :r AND kind = 'reserve'"
+            " AND stage IN ('revise', 'adversarial_review')"
+            " OR (run_id = :r AND kind = 'reserve' AND stage = 'fact_check' AND id = (SELECT max(id)"
+            " FROM agent_spend WHERE run_id = :r AND kind = 'reserve' AND stage = 'fact_check'))", r=run
+        ))
+        assert planned > Decimal("0.0003")  # the estimate, not the floors
+        assert planned == reserved

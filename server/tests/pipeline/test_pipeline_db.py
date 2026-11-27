@@ -66,9 +66,11 @@ class _Counting:
 
     def __init__(self, real: Any) -> None:
         self.real, self.calls = real, 0
+        self.planned: list[list[str]] = []
 
     async def __call__(self, *args: Any) -> Any:
         self.calls += 1
+        self.planned.append([p.task for p in args[3]])
         return await self.real(*args)
 
 
@@ -140,6 +142,14 @@ async def test_loop_case(
         if case["expect_state"] != "stage_failed" and not any("error" in r for r in case["results"]):
             assert await _spent(env, run) == settled  # INV-PIPELINE-1: spend = the reported costs, within cap
         assert await _spent(env, run) <= Decimal(str(case.get("cap", DEFAULTS["cap"])))
+        # FR-PIPELINE-21 rows carry FR-PIPELINE-6's loops, stop and refused_limit
+        runs = need("reader.pipeline.runs")
+        (row,) = [r for r in await runs.history(env.engine, env.jobs, env.users["ivan"], env.lesson) if r["run_id"] == str(run)]
+        assert (row["loops"], row["stop"], row["refused_limit"]) == (
+            status["loops"], status["stop"], status["refused_limit"]
+        )
+        if case["name"] == "clean-first-pass":  # FR-PIPELINE-8: every check ran on M, nothing open
+            assert status["g2"]["publishable"] is True, status["g2"]
         # INV-PIPELINE-4: no source text, prompt or output in any log line
         assert CANARY not in "\n".join(r.getMessage() for r in caplog.records)
         assert "Claim 1." not in "\n".join(r.getMessage() for r in caplog.records)
@@ -232,6 +242,8 @@ async def test_recompiles_reuse_unchanged_steps(pg_container: tuple[Pg, Any], tm
                 assert status["state"] == recompile["expect_state"]
             if recompile["name"] == "recompile-unchanged":
                 assert counting.calls == 0  # every call of the loop was reusable: no ask, even at the month cap
+            if recompile["name"] == "recompile-after-review-prompt-change":
+                assert counting.planned == [["review"]]  # the review's input changed with its prompt
 
 
 async def test_converged_run_with_a_finding_has_no_deltas_mismatch(pg: Pg, tmp_path: Path) -> None:

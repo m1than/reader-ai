@@ -312,7 +312,11 @@ async def enqueue_next(jobs: Any, rt: Runtime, run: RunRow, lesson: Lesson, step
     stage = next_step(rt, run, steps)
     if stage is not None:
         input_sha = step_input(rt, lesson, steps, stage, run.budget_refused)
-        await jobs.enqueue(kind_for(stage), step_args(run, len(steps) + 1, stage, input_sha))
+        args = step_args(run, len(steps) + 1, stage, input_sha)
+        result = await jobs.enqueue(kind_for(stage), args)
+        if stage == "findings" and getattr(result, "kind", None) == "dead":
+            # FR-PIPELINE-5: a findings key that died while stale (input_not_ready) runs now that it is next
+            await jobs.requeue_dead(kind_for(stage), idempotency_key(jobs.catalog[kind_for(stage)], args))
 
 
 def _str(value: Decimal) -> str:
@@ -550,6 +554,9 @@ async def history(
                 "cap_usd": derived["cap_usd"],
                 "steps": int(steps),
                 "error": derived["error"],
+                "loops": derived["loops"],  # FR-PIPELINE-6 revised: also on the history rows (FR-PIPELINE-21)
+                "stop": derived["stop"],
+                "refused_limit": derived["refused_limit"],
             }
         )
     return out

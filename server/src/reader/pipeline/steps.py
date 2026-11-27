@@ -39,6 +39,7 @@ from reader.pipeline import runs
 from reader.pipeline import runtime as runtime_mod
 from reader.pipeline.errors import InputNotReady
 from reader.pipeline.findings import Problem, append_findings, problems_from, stamp_credibility, stamp_labs
+from reader.pipeline.prompts import input_sha256
 from reader.pipeline.reports import (
     Finding,
     Verdict,
@@ -258,7 +259,6 @@ async def _reusable(conn: AsyncConnection, run: RunRow, stage: str, input_sha: s
                 "SELECT s.id, s.step, s.stage, s.input_sha256, s.output_sha256, s.report, s.reused_from,"
                 " s.model FROM compile_steps s JOIN compile_runs r ON r.id = s.run_id WHERE r.lesson_id = :l"
                 " AND s.owner_id = :o AND s.stage = :s AND s.input_sha256 = :h"  # this run or an earlier one
-                " AND NOT coalesce((s.report ->> 'degraded')::boolean, false)"  # FR-PIPELINE-5: never reused
                 " ORDER BY s.id LIMIT 1"
             ),
             {"l": run.lesson_id, "o": run.owner_id, "s": stage, "h": input_sha},
@@ -271,24 +271,38 @@ async def _reusable(conn: AsyncConnection, run: RunRow, stage: str, input_sha: s
     )
 
 
-async def _judged_before(conn: AsyncConnection, run: RunRow, stage: str, model_sha256: str) -> bool:
-    """A completed check of this lesson judged that model-written notebook's derivation (FR-PIPELINE-23)."""
-    row = (
-        await conn.execute(
-            text(
-                "SELECT 1 FROM compile_steps s JOIN compile_runs r ON r.id = s.run_id WHERE r.lesson_id = :l"
-                " AND s.owner_id = :o AND s.stage = :s AND s.report ->> 'model_sha256' = :m LIMIT 1"
-            ),
-            {"l": run.lesson_id, "o": run.owner_id, "s": stage, "m": model_sha256},
-        )
-    ).first()
-    return row is not None
+async def _reusable_check(
+    conn: AsyncConnection, rt: Runtime, run: RunRow, lesson: Lesson, stage: str, model_sha256: str
+) -> bool:
+    """FR-PIPELINE-23: a check of the revised notebook is unplanned only when its own input_sha256 — computed
+    from the notebook an earlier check of that model-written revision judged, under the current prompts and
+    model — has a completed step to reuse (the `_reusable` predicate)."""
+    rows = await conn.execute(
+        text(
+            "SELECT DISTINCT s.report ->> 'notebook_sha256' FROM compile_steps s JOIN compile_runs r"
+            " ON r.id = s.run_id WHERE r.lesson_id = :l AND s.owner_id = :o AND s.stage = :s"
+            " AND s.report ->> 'model_sha256' = :m"
+        ),
+        {"l": run.lesson_id, "o": run.owner_id, "s": stage, "m": model_sha256},
+    )
+    model = stage_model(rt, stage)
+    for (notebook_sha,) in rows.all():
+        if notebook_sha is None:
+            continue
+        input_sha = input_sha256(stage, lesson.source.sha256, [str(notebook_sha)], rt.prompts, model)
+        if await _reusable(conn, run, stage, input_sha) is not None:
+            return True
+    return False
 
 
 def _planned(rt: Runtime, stage: str, prompt_chars: int) -> PlannedCall:
     sdef = rt.pipeline.stages[stage]
     assert sdef.task is not None  # noqa: S101
-    return PlannedCall(sdef.task, prompt_chars, sdef.max_output_tokens, sdef.floor_reserve_usd)
+    # custom_system: every stage call sets its own system prompt (FR-AGENT-13), so the reserve counts the
+    # CLI's overhead beside it, not its whole system prompt
+    return PlannedCall(
+        sdef.task, prompt_chars, sdef.max_output_tokens, sdef.floor_reserve_usd, custom_system=True
+    )
 
 
 def _prompt_chars(
@@ -315,7 +329,7 @@ async def loop_plan(
     else:
         revised = reuse.output_sha256
     for stage in ("fact_check", "adversarial_review"):
-        if revised is not None and await _judged_before(conn, run, stage, revised):
+        if revised is not None and await _reusable_check(conn, rt, run, lesson, stage, revised):
             continue
         planned.append(_planned(rt, stage, _prompt_chars(rt, stage, current, lesson, steps)))
     return planned
@@ -427,8 +441,9 @@ async def handle(args: Any, conn: AsyncConnection, ctx: JobContext) -> None:
         await enqueue_next(jobs, rt, run, lesson, steps)
         return
     if stage == "findings" and len(steps) == args.step - 1 and next_step(rt, run, steps) != "findings":
-        log.info("compile_step_stale run=%s step=%s", run.id, args.step)  # the decision admitted a loop
-        return
+        # the decision admitted a loop: no effect, and the key must not complete (FR-PIPELINE-5)
+        log.info("compile_step_stale run=%s step=%s", run.id, args.step)
+        raise InputNotReady()
     expected = step_input(rt, lesson, steps, stage, run.budget_refused)
     if len(steps) != args.step - 1 or expected != args.input_sha256:
         raise InputNotReady()
@@ -585,27 +600,30 @@ async def _refused(
     code: str,
 ) -> None:
     """A model step refused for budget writes no compile_steps row: it records `budget_refused` and enqueues
-    `findings`, or finishes the run when no notebook exists yet (FR-PIPELINE-5)."""
-    updated = await conn.execute(
-        text(
-            "UPDATE compile_runs SET budget_refused = coalesce(budget_refused, :c) WHERE id = :r"
-            " AND cancelled_at IS NULL RETURNING id"  # FR-PIPELINE-20: a cancelled run is left as it is
-        ),
-        {"c": code, "r": run.id},
-    )
-    if updated.first() is None:
-        return
-    refused = dataclasses.replace(run, budget_refused=run.budget_refused or code)
-    if not any(s.stage in ("draft", "revise") for s in steps):  # no notebook: nothing more to do
-        await conn.execute(
+    `findings`, or finishes the run when no notebook exists yet (FR-PIPELINE-5). The refusal (and the finish)
+    commit on their own connection, before the enqueue, so a rollback of the job's transaction cannot leave a
+    findings job without its refusal. `conn` is the job's connection; nothing is written on it."""
+    async with conn.engine.begin() as own:
+        updated = await own.execute(
             text(
-                "UPDATE compile_runs SET finished_at = now(), g2 = CAST(:g AS jsonb) WHERE id = :r"
-                " AND cancelled_at IS NULL"
+                "UPDATE compile_runs SET budget_refused = coalesce(budget_refused, :c) WHERE id = :r"
+                " AND cancelled_at IS NULL RETURNING budget_refused"  # FR-PIPELINE-20: a cancelled run stays
             ),
-            {"r": run.id, "g": json.dumps({"publishable": False, "failing": [], "blocking_open": 0})},
+            {"c": code, "r": run.id},
         )
-        return
-    await enqueue_next(jobs, rt, refused, lesson, steps)
+        recorded = updated.scalar()
+        if recorded is None:
+            return
+        if not any(s.stage in ("draft", "revise") for s in steps):  # no notebook: nothing more to do
+            await own.execute(
+                text(
+                    "UPDATE compile_runs SET finished_at = now(), g2 = CAST(:g AS jsonb) WHERE id = :r"
+                    " AND cancelled_at IS NULL"
+                ),
+                {"r": run.id, "g": json.dumps({"publishable": False, "failing": [], "blocking_open": 0})},
+            )
+            return
+    await enqueue_next(jobs, rt, dataclasses.replace(run, budget_refused=str(recorded)), lesson, steps)
 
 
 def _blocking_open(notebook: Mapping[str, Any]) -> int:

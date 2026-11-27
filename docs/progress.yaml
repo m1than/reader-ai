@@ -1998,7 +1998,15 @@ tasks:
         judged per card (true only if read and kept), judge_ran per response, judged/unjudged token counts in the trace;
         per-channel response budgets; cache key with caller identity, roles and manifest version.
         FR-SEARCH-3, -4, -5, -7, -8, -9, -20; INV-SEARCH-4; NFR-SEARCH-1; VEC-SEARCH-1, -2, -5" }
-  - { id: V.kl-pipeline-checks, stage: V, kind: module, track: ai, status: todo, needs: [V.kl-search-find],
+  - { id: V.kl-pipeline-checks, stage: V, kind: module, track: ai, status: in_progress, needs: [V.kl-search-find],
+      note: "2026-11-27, branch V/kl-pipeline-checks: spec revision owner-approved after deep-reviewer (Fable) rounds
+        1–5 with the round-5 fix; promoted with Red tests, Green in section mode (rules → lab → fact-check → review,
+        up to 3 loops under loop_fits_limit, rule checks, lab references, Admiralty credibility, old-order runs
+        cancelled at worker start); local CI PASS. Code review round 1 changes fixed; awaiting the coordinator's
+        code review and merge. Deferred: FR-PIPELINE-26 route mode (fact-check through SRV-SEARCH) lands with
+        V.kl-search-find and the retrieval-ablation decision; the stage live check (paid) re-measures the cost per
+        lesson for the owner. Paired, listed for their tasks: WEB-UI FR-UI-15 labels, OPS-DEPLOY example budgets
+        (cap-sized), OPS-SANDBOX reference-library import test, the nil-UUID deploy actor in WEB-MANAGE's audit view.",
       what: "SRV-PIPELINE revision (~300–500 lines): checks after drafting cheapest first (rules, lab, claim support,
         adversarial review), first failure loops back, at most 3 loops, every return counted; a loop starts only if its
         reserve (the sum of its calls' FR-AGENT-9 reserves) fits under budget.compile_cap_usd ($8 per lesson, $184 for
