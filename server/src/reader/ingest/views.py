@@ -180,12 +180,20 @@ async def ingest_facts(conn: AsyncConnection, ingest_id: uuid.UUID | str) -> Ing
 async def active_span_texts(
     conn: AsyncConnection, owner_id: uuid.UUID, ids: Sequence[str]
 ) -> dict[str, tuple[int, str]]:
-    """span id → (page, text) from the owner's active packs only.
+    """span id → (page, text): `active_span_rows` without the hash."""
+    return {ref: (page, body) for ref, (page, body, _) in (await active_span_rows(conn, owner_id, ids)).items()}
+
+
+async def active_span_rows(
+    conn: AsyncConnection, owner_id: uuid.UUID, ids: Sequence[str]
+) -> dict[str, tuple[int, str, str]]:
+    """span id → (page, text, quote_sha256) from the owner's active packs only (INV-INGEST-16).
 
     A legacy id reads its seq in a legacy active pack, and otherwise goes through the resolver's accepted seq
-    map (FR-INGEST-42); a locator reads the active pack's span with that locator."""
+    map (FR-INGEST-42); a locator reads the active pack's span with that locator. The hash is the stored one,
+    or where it is null the sha256 of the stored text (FR-INGEST-34's formula)."""
     heads = await active_packs(conn, owner_id)
-    found: dict[str, tuple[int, str]] = {}
+    found: dict[str, tuple[int, str, str]] = {}
     mapped: list[str] = []
     for ref in dict.fromkeys(ids):
         if locator.is_legacy_id(ref):
@@ -197,7 +205,8 @@ async def active_span_texts(
                 mapped.append(ref)
                 continue
             row = (await conn.execute(text(
-                "SELECT page, text FROM material_spans WHERE ingest_id = :i AND owner_id = :o AND seq = :s"),
+                "SELECT page, text, quote_sha256 FROM material_spans"
+                " WHERE ingest_id = :i AND owner_id = :o AND seq = :s"),
                 {"i": pack.ingest_id, "o": owner_id, "s": int(seq)})).first()
         else:
             try:
@@ -208,13 +217,14 @@ async def active_span_texts(
             if pack is None:
                 continue
             row = (await conn.execute(text(
-                "SELECT page, text FROM material_spans WHERE ingest_id = :i AND owner_id = :o"
+                "SELECT page, text, quote_sha256 FROM material_spans WHERE ingest_id = :i AND owner_id = :o"
                 " AND locator = :l"),
                 {"i": pack.ingest_id, "o": owner_id, "l": ref})).first()
         if row is not None:
-            found[ref] = (int(row[0]), str(row[1]))
+            body = str(row[1])
+            found[ref] = (int(row[0]), body, locator.quote_sha256(body) if row[2] is None else str(row[2]))
     resolved = await spanref.resolve(conn, owner_id, [(r, None) for r in mapped])
     for ref, got in zip(mapped, resolved, strict=True):
         if got.text is not None and got.page is not None and got.state in ("active", "reanchored"):
-            found[ref] = (got.page, got.text)
+            found[ref] = (got.page, got.text, got.quote_sha256 or locator.quote_sha256(got.text))
     return found

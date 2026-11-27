@@ -2872,7 +2872,10 @@ proposed_owner_notes:
 #   6. The test-vector rule is measured on the pilot span dump before promotion.
 
 # ---- Paired with SRV-TUTOR's ADR-0039 revision (V.kl-tutor-find), approved with it (2026-11-28). span_rows is
-# promoted into INV-INGEST-16 with test_span_rows_db.py; gate (g) lands with FR-TUTOR-8's Red tests.
+# promoted into INV-INGEST-16 with test_span_rows_db.py; gate (g) lands with FR-TUTOR-8's Red tests. Green
+# correction (test data, no oracle weakened): the inactive-pack case reads a span of a sealed, never activated pack
+# of another material, because a span with the same page and text has the same locator in both packs of one
+# material (FR-INGEST-33), so it is the active one's; and an extra r3 span makes the seq map refuse.
 kl_tutor_find:
   span_rows:
     text: >-
