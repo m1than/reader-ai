@@ -1,21 +1,40 @@
-# VEC-SEARCH-4 — search_status (FR-SEARCH-9): the search.embed job status for the material's current key
-# (SRV-EVENTS FR-EVENTS-12: none | queued | running | succeeded | dead) and whether a search_embeds row exists for that
-# key, mapped to the status V.COMPILE-min waits on.
+# VEC-SEARCH-4 — search_status (FR-SEARCH-9, ADR-0039 revision): the search.embed job status of the current key
+# [owner_id, overlay_id] (SRV-EVENTS FR-EVENTS-12: none | queued | running | succeeded | dead) and the state of that
+# vector overlay (none: no row; building; sealed: sealed, not in the owner's head entry; active: sealed and in the
+# head entry; collected: GC collected it), mapped to the status V.COMPILE-min waits on.
 rows:
-  - { job: none,      embeds_row: false, status: none }
-  - { job: queued,    embeds_row: false, status: queued }
-  - { job: running,   embeds_row: false, status: running }
-  - { job: dead,      embeds_row: false, status: dead }
-  # The row and the success outcome commit in one transaction (FR-SEARCH-5 step 3), so succeeded without the row is
-  # unreachable. If it is ever seen, it is reported as `dead` with a logged `status_inconsistent` line: enqueueing a
-  # succeeded key returns already_done (SRV-EVENTS FR-EVENTS-3), so `ensure` cannot re-run it and a caller must not
-  # wait on it; the owner-visible fix is a new key (a chunking or model change) or a manual cleanup.
-  - { job: succeeded, embeds_row: false, status: dead }
-  # A row means the vectors exist for the current key, whatever the job record says.
-  - { job: succeeded, embeds_row: true,  status: ready }
-  - { job: none,      embeds_row: true,  status: ready }
-  - { job: queued,    embeds_row: true,  status: ready }
-  - { job: running,   embeds_row: true,  status: ready }
-  - { job: dead,      embeds_row: true,  status: ready }
-# An embed service that stays unhealthy (FR-SEARCH-5 step 2) spends attempts: queued between retries, dead after the
-# third, when `reader.search.ensure` requeues it.
+  # A collected overlay id is never built again (FR-SEARCH-5): `collected`, whatever the job says.
+  - { job: none,      overlay: collected, status: collected }
+  - { job: queued,    overlay: collected, status: collected }
+  - { job: running,   overlay: collected, status: collected }
+  - { job: succeeded, overlay: collected, status: collected }
+  - { job: dead,      overlay: collected, status: collected }
+  # Sealed and active: searchable.
+  - { job: none,      overlay: active,    status: ready }
+  - { job: queued,    overlay: active,    status: ready }
+  - { job: running,   overlay: active,    status: ready }
+  - { job: succeeded, overlay: active,    status: ready }
+  - { job: dead,      overlay: active,    status: ready }
+  # Sealed, activation pending in SRV-INGEST's row (seqmap, anchors, a deleted material): a waiter keeps waiting
+  # (`queued`) unless a job is running or the key is dead.
+  - { job: none,      overlay: sealed,    status: queued }
+  - { job: queued,    overlay: sealed,    status: queued }
+  - { job: running,   overlay: sealed,    status: running }
+  - { job: succeeded, overlay: sealed,    status: queued }
+  - { job: dead,      overlay: sealed,    status: dead }
+  # No sealed overlay: the job status. The seal and the success outcome commit in one transaction (FR-SEARCH-5), so
+  # succeeded without a sealed overlay is unreachable; if seen it is `dead` with a logged `status_inconsistent` line
+  # (enqueueing a succeeded key returns already_done, so a caller must not wait on it). A `building` row exists only
+  # inside an uncommitted build, so it reads as `none`.
+  - { job: none,      overlay: none,      status: none }
+  - { job: queued,    overlay: none,      status: queued }
+  - { job: running,   overlay: none,      status: running }
+  - { job: succeeded, overlay: none,      status: dead }
+  - { job: dead,      overlay: none,      status: dead }
+  - { job: none,      overlay: building,  status: none }
+  - { job: queued,    overlay: building,  status: queued }
+  - { job: running,   overlay: building,  status: running }
+  - { job: succeeded, overlay: building,  status: dead }
+  - { job: dead,      overlay: building,  status: dead }
+# An embed service that stays unhealthy spends attempts: queued between retries, dead after the third, when
+# `reader.search.ensure` requeues it.

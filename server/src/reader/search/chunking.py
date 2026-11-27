@@ -1,59 +1,39 @@
-"""Chunks from material spans (SRV-SEARCH FR-SEARCH-3, VEC-SEARCH-2).
+"""Span windows (SRV-SEARCH FR-SEARCH-3, VEC-SEARCH-2).
 
-Per page, in span seq order: each span's text is whitespace-collapsed; empty results are skipped; the rest are
-joined with one space. Windows start at range(0, max(len - overlap, 1), size - overlap) and take
-text[start:start + size]; a window shorter than `min_len` is dropped. The chunk lists every span whose
-character range intersects the window; its primary span has the largest overlap, the first on a tie.
+The unit of retrieval is one span. Its text alone is cut into windows that start at
+range(0, max(len - overlap, 1), width - overlap) and take text[start:start + width]; the first window has no
+minimum (a short span is one window) and a later window shorter than `min_len` is merged into the previous one
+(the previous window's stop moves to the later one's). A later window is at least overlap + 1 characters long,
+so with the production parameters (overlap 200, minimum 80) nothing merges and every passage stays within
+`size`. A prefix shrinks the width to size - len(prefix) - 1 and the passage is prefix + "\\n" + window.
+A span whose text is empty or only whitespace has no window. Offsets are into the span's own text.
 """
 
 from __future__ import annotations
 
-from collections.abc import Sequence
 from dataclasses import dataclass
-from itertools import groupby
 
 
 @dataclass(frozen=True)
-class Span:
-    seq: int
-    page: int
-    text: str
-
-
-@dataclass(frozen=True)
-class Chunk:
-    page: int
-    chunk_no: int
+class Window:
+    window_no: int
     char_start: int
     char_stop: int
-    text: str
-    span_seqs: tuple[int, ...]
-    primary_seq: int
+    passage: str
 
 
-def chunk_spans(spans: Sequence[Span], size: int, overlap: int, min_len: int) -> list[Chunk]:
-    ordered = sorted(spans, key=lambda s: (s.page, s.seq))
-    chunks: list[Chunk] = []
-    for page, group in groupby(ordered, key=lambda s: s.page):
-        text = ""
-        ranges: list[tuple[int, int, int]] = []
-        for span in group:
-            body = " ".join(span.text.split())
-            if not body:
-                continue
-            if text:
-                text += " "
-            ranges.append((span.seq, len(text), len(text) + len(body)))
-            text += body
-        for start in range(0, max(len(text) - overlap, 1), size - overlap):
-            piece = text[start : start + size]
-            if len(piece) < min_len:
-                continue
-            stop = start + len(piece)
-            overlaps = [(seq, min(b, stop) - max(a, start)) for seq, a, b in ranges if a < stop and b > start]
-            best = max(o for _, o in overlaps)
-            primary = next(seq for seq, o in overlaps if o == best)
-            chunks.append(
-                Chunk(page, len(chunks), start, stop, piece, tuple(seq for seq, _ in overlaps), primary)
-            )
-    return chunks
+def windows(text: str, size: int, overlap: int, min_len: int, prefix: str | None = None) -> list[Window]:
+    if not text.strip():
+        return []
+    width = size if prefix is None else size - len(prefix) - 1
+    if width <= overlap:
+        raise ValueError("window_too_small")
+    bounds: list[tuple[int, int]] = []
+    for start in range(0, max(len(text) - overlap, 1), width - overlap):
+        stop = min(start + width, len(text))
+        if bounds and stop - start < min_len:
+            bounds[-1] = (bounds[-1][0], stop)
+        else:
+            bounds.append((start, stop))
+    head = "" if prefix is None else prefix + "\n"
+    return [Window(n, a, b, head + text[a:b]) for n, (a, b) in enumerate(bounds)]

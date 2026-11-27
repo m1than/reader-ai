@@ -20,15 +20,17 @@ log = logging.getLogger("reader.ingest")
 LOCK_NAMESPACE: Final = 0x524B504B  # "RKPK", as SRV-LESSON's "RCPO"
 UPLOAD_LICENSE: Final = "personal-use"  # an upload's license (the materials listing states the same)
 
-# SRV-SEARCH's `ensure(conn, owner_id, material_sha256)` (paired); a no-op until its revision binds it.
+# SRV-SEARCH's `ensure_material(conn, owner_id, material_sha256)` (paired, FR-SEARCH-9), imported lazily.
 SearchEnsure = Callable[[AsyncConnection, uuid.UUID, str], Awaitable[None]]
 
 
-async def _unbound_ensure(conn: AsyncConnection, owner_id: uuid.UUID, material_sha256: str) -> None:
-    del conn, owner_id, material_sha256
+async def _search_ensure(conn: AsyncConnection, owner_id: uuid.UUID, material_sha256: str) -> None:
+    from reader.search.jobs import ensure_material
+
+    await ensure_material(conn, owner_id, material_sha256)
 
 
-SEARCH_ENSURE: list[SearchEnsure] = [_unbound_ensure]
+SEARCH_ENSURE: list[SearchEnsure] = [_search_ensure]
 
 
 class PackError(Exception):

@@ -214,7 +214,7 @@ job_args:
   pipeline.verify: { run_id: reader.run_id, step: reader.step, stage: reader.stage }
   tutor.answer: { question_id: reader.question_id }
   ingest.import: { material_sha256: reader.material_sha256 }
-  search.embed: { material_sha256: reader.material_sha256, ingest_id: reader.ingest_id }
+  search.embed: {}   # SRV-SEARCH FR-SEARCH-5 (ADR-0039): args {owner_id, pack_id, overlay_id}; the handler annotates the pack's ingest id and material (FR-OBS-5 e)
   obs.retention: {}
   obs.feedback: {}   # FR-OBS-14: no argument reaches the span
   obs.prompts: {}    # FR-OBS-15

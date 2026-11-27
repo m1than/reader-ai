@@ -1,10 +1,10 @@
-# VEC-SEARCH-5 — full-text list with OR semantics and no operator parsing (FR-SEARCH-7 step 3, INV-SEARCH-7).
-# Synthetic English chunks, fts_config english. Expected sets are the chunks sharing at least one lexeme with the
-# query; order inside a set is checked against ts_rank_cd computed by the same database (not hand-ranked), then id.
-# Each text is one page of at least 80 characters (CHUNK_MIN), so each becomes exactly one chunk; the filler words
-# share no lexeme with any query below (corrected 2026-11-22: the first texts were shorter than CHUNK_MIN).
+# VEC-SEARCH-5 — full-text list with OR semantics and no operator parsing (FR-SEARCH-7, INV-SEARCH-7), over span
+# windows (ADR-0039 revision). Synthetic English spans, fts_config english, each one window. Expected sets are the
+# spans sharing at least one lexeme with the query; order inside a set is checked against ts_rank_cd computed by the
+# same database (not hand-ranked), then locator. `lexemes` are the query elements FR-SEARCH-25's coverage objective
+# uses (`l:<lexeme>`): the query's english lexemes, sorted; `covers` per expected span are the ones it shares.
 fts_config: english
-chunks:
+spans:
   - { id: c1, text: "The miner validates blocks and earns a reward. Nothing further is said here about anything." }
   - { id: c2, text: "Wallets store private keys. Nothing further is said here about anything else in this paragraph." }
   - { id: c3, text: "Blocks link to previous blocks by hash. Nothing further is said here about anything else." }
@@ -12,12 +12,20 @@ cases:
   - name: partial-overlap
     query: "miners link blocks"
     expected_ids: [c1, c3]          # lexemes miner, link, block: c1 shares miner+block, c3 shares link+block; AND would match none
+    lexemes: [block, link, miner]
+    covers: { c1: [block, miner], c3: [block, link] }
   - name: operators-are-text
     query: "block & !link | :* <-> 'x\\"
     expected_ids: [c1, c3]          # only the words block and link (and x) become lexemes; no operator is parsed
+    lexemes: [block, link, x]
+    covers: { c1: [block], c3: [block, link] }
   - name: stop-words-only
     query: "the a of"
     expected_ids: []                # no lexemes -> empty list, no error
+    lexemes: []
+    covers: {}
   - name: no-overlap
     query: "quantum telescope"
     expected_ids: []
+    lexemes: [quantum, telescop]
+    covers: {}

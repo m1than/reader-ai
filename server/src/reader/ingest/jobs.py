@@ -194,28 +194,18 @@ async def _reanchor(args: ReanchorArgs, conn: AsyncConnection, ctx: JobContext) 
 
 
 async def _enqueue_embed(conn: AsyncConnection, owner: uuid.UUID, material_sha256: str, version: str) -> None:
-    """FR-INGEST-13 (SRV-SEARCH FR-SEARCH-5 paired change): search.embed for the ingest this run wrote.
-
-    The ingest id is read in the run session (its rows are not committed yet); the enqueue commits on its
-    own connection and is idempotent by FR-SEARCH-5's key. Imported lazily: reader.search pulls httpx and
-    the config. A missing or broken reader.yaml (ConfigError) fails the attempt, as it fails the api.
+    """FR-INGEST-13 (SRV-SEARCH FR-SEARCH-5 paired change): search.embed {owner_id, pack_id, overlay_id} for
+    the pack this run sealed, the overlay id from FR-INGEST-36's function over the language of the profile the
+    run named (read in the run session: its rows are not committed yet). The enqueue commits on its own
+    connection and is idempotent by FR-SEARCH-5's key. Imported lazily: reader.search pulls httpx.
     """
+    from reader.ingest import packs
     from reader.jobs import running
     from reader.search.jobs import KIND as EMBED_KIND
-    from reader.search.jobs import embed_args
-    from reader.search.store import fts_config_of
+    from reader.search.jobs import args_for
 
-    ingest_id = (
-        await conn.execute(
-            text(
-                "SELECT i.id FROM ingests i JOIN materials m ON m.id = i.material_id"
-                " WHERE m.owner_id = :o AND m.sha256 = :s AND i.converter_version = :v"
-            ),
-            {"o": owner, "s": material_sha256, "v": version},
-        )
-    ).scalar_one()
-    fts_config = await fts_config_of(conn, material_sha256, ingest_id)
-    await running().enqueue(EMBED_KIND, embed_args(material_sha256, ingest_id, fts_config))
+    args = await args_for(conn, owner, packs.pack_id(material_sha256, version))
+    await running().enqueue(EMBED_KIND, args)
 
 
 async def _deleted(conn: AsyncConnection, material_sha256: str) -> bool:

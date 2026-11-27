@@ -30,7 +30,7 @@ export const KIND_KEYS = {
   'pipeline.verify': ['run_id', 'step', 'stage', 'input_sha256'],
   'tutor.answer': ['question_id'],
   'ingest.import': ['material_sha256', 'converter_version'],
-  'search.embed': ['ingest_id', 'model', 'params_sha256'],
+  'search.embed': ['owner_id', 'overlay_id'],
 };
 
 const canonical = (value) => {

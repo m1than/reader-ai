@@ -124,16 +124,14 @@ async def _ingest_id(conn: AsyncConnection, sha256: str) -> uuid.UUID | None:
 
 
 async def embed_key(conn: AsyncConnection, sha256: str) -> str | None:
-    """SRV-SEARCH FR-SEARCH-5's key of the material's frozen ingest under the current params, if any."""
-    ingest_id = await _ingest_id(conn, sha256)
-    if ingest_id is None:
+    """SRV-SEARCH FR-SEARCH-9's current key [owner_id, overlay_id] of the instance owner's material (the
+    buildable pack's current vector overlay), if any."""
+    owner = await store.owner_id(conn)
+    if owner is None:
         return None
-    from reader.jobs.model import idempotency_key
-    from reader.search.jobs import JOB_KINDS, embed_args
-    from reader.search.store import fts_config_of
+    from reader.search.jobs import embed_key as search_key
 
-    args = embed_args(sha256, ingest_id, await fts_config_of(conn, sha256, ingest_id))
-    return idempotency_key(JOB_KINDS[0], args.model_dump(mode="json"))
+    return await search_key(conn, owner, sha256)
 
 
 async def _status(conn: AsyncConnection, kind: str, key: str | None) -> tuple[str, str | None]:

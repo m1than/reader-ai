@@ -124,8 +124,8 @@ seed:
     - { kind: tutor.answer, job_id: 209, outcome: dead, error_code: exhausted, finished_at: "2026-11-24T11:31:00Z", key: "tutor.answer:302a0a351b8124981abd88c696916181b8d21fc040d6c57e812c77723e76a58e", args: { question_id: 30000000-0000-4000-8000-000000000009 } }   # other owner's question: not shown
     - { kind: ingest.import, job_id: 309, outcome: dead, error_code: ValueError, finished_at: "2026-11-24T10:06:00Z", key: "ingest.import:2d2b5303f176518d1a8da4d9c1c664c88d68bacf410c257a60cc062f52bbf7f2",   # other owner's material: not shown
         args: { material_sha256: "77ee77ee77ee77ee77ee77ee77ee77ee77ee77ee77ee77ee77ee77ee77ee77ee", converter_version: r2, artifact_id: "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", material_id: upload-8 } }
-    - { kind: search.embed, job_id: 401, outcome: dead, error_code: exhausted, finished_at: "2026-11-24T10:10:00Z", key: "search.embed:7e140447d6d3b066f243d7418ed73c27b82000d26e33798e89eb32c53fe58239",   # system job, shown
-        args: { material_sha256: "aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11", ingest_id: 40000000-0000-4000-8000-000000000001, model: BAAI/bge-m3, params_sha256: "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd" } }
+    - { kind: search.embed, job_id: 401, outcome: dead, error_code: exhausted, finished_at: "2026-11-24T10:10:00Z", key: "search.embed:614f4f8c058a8bbdb515c90ae86ba8715351d605b74d02552673b4b0a7feeffd",   # system job, shown
+        args: { owner_id: 00000000-0000-4000-8000-000000000001, pack_id: "aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11aa11", overlay_id: "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd" } }   # SRV-SEARCH FR-SEARCH-5's args and key (ADR-0039)
 
 expected:
   compile_runs:
@@ -154,7 +154,7 @@ expected:
     jobs:
       - { kind: ingest.import, error_code: ValueError, count: 1, system: true, jobs: [302], trace_ids: [f751ff316a35f92486a722815c09d412] }
       - { kind: pipeline.stage, error_code: exhausted, count: 1, system: false, jobs: [106], trace_ids: [85b524475f9f651f8b30426af5fbb218] }
-      - { kind: search.embed, error_code: exhausted, count: 1, system: true, jobs: [401], trace_ids: [c049c37c22fa5a48cbefc90389647cef] }
+      - { kind: search.embed, error_code: exhausted, count: 1, system: true, jobs: [401], trace_ids: [7927ab030c729d236b202a5c35800aa0] }
     tutor:
       - { error_code: provider_unavailable, count: 1, jobs: [204], trace_ids: [8f76441a086e06da18ab6655ef8f50a1] }
   ingest:

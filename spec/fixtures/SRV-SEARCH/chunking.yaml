@@ -1,21 +1,40 @@
-# VEC-SEARCH-2 — chunking over material spans (FR-SEARCH-3). Synthetic text, small parameters so the windows can be
-# checked by hand; production parameters are size 1200, overlap 200, min 80 (spikes/embeddings-local/bench.py
-# chunk_pages, the parameters behind the measured recall). The algorithm is the same for both.
+# VEC-SEARCH-2 — span windows (FR-SEARCH-3, ADR-0039 revision): each span's own text, cut by hand-checkable small
+# parameters; production parameters are size 1200, overlap 200, minimum 80 (spikes/embeddings-local/bench.py, the
+# parameters behind the measured recall). The algorithm is the same for both.
 #
-# Per page, in span seq order: each span's text is whitespace-collapsed (" ".join(text.split())); empty results are
-# skipped; the rest are joined with one space. Windows start at range(0, max(len(text) - overlap, 1), size - overlap)
-# and take text[start:start + size]; a window shorter than `min` is dropped. A chunk lists every span seq whose
-# character range intersects the window; its primary span is the one with the largest overlap with the window, the
-# first such span on a tie. (Chunk 1 below: seq 0 overlaps 10 characters [0,10), seq 2 overlaps 9 [11,20) -> seq 0.)
-params: { size: 20, overlap: 5, min: 4 }
-spans:
-  - { seq: 0, page: 1, text: "Alpha beta" }
-  - { seq: 1, page: 1, text: "" }
-  - { seq: 2, page: 1, text: "gamma  delta\nepsilon" }
-  - { seq: 3, page: 2, text: "Hi" }
-  - { seq: 4, page: 3, text: "xxxxxxx" }
-expected:
-  - { page: 1, start: 0, end: 20, text: "Alpha beta gamma del", span_seqs: [0, 2], primary_seq: 0 }
-  - { page: 1, start: 15, end: 30, text: "a delta epsilon", span_seqs: [2], primary_seq: 2 }
-  # page 2: "Hi" is 2 characters, shorter than min 4 -> no chunk
-  - { page: 3, start: 0, end: 7, text: "xxxxxxx", span_seqs: [4], primary_seq: 4 }
+# Width = size, or size - len(prefix) - 1 with a prefix. Windows start at range(0, max(len(text) - overlap, 1),
+# width - overlap) and take text[start:start + width]. The first window has no minimum; a later window shorter than
+# `min` is merged into the previous one (its stop moves). The passage is the window text, or prefix + "\n" + window
+# text. Empty or whitespace-only text has no window. Here min (8) exceeds overlap + 1 (6) so that a merge can occur;
+# with the production parameters (80 < 201) none does.
+params: { size: 20, overlap: 5, min: 8 }
+cases:
+  - name: two-windows
+    text: "Alpha beta gamma delta epsilon"
+    expected:
+      - { window_no: 0, start: 0, stop: 20, passage: "Alpha beta gamma del" }
+      - { window_no: 1, start: 15, stop: 30, passage: "a delta epsilon" }
+  - name: short-span-is-one-window
+    text: "Hi"
+    expected:
+      - { window_no: 0, start: 0, stop: 2, passage: "Hi" }
+  - name: empty
+    text: ""
+    expected: []
+  - name: whitespace-only
+    text: "  \n "
+    expected: []
+  - name: short-trailing-window-merged
+    text: "abcdefghijklmnopqrstuvwxyz0123456789A"
+    expected:
+      - { window_no: 0, start: 0, stop: 20, passage: "abcdefghijklmnopqrst" }
+      # starts 0, 15, 30: the window [30, 37) has 7 < 8 characters, so the previous one ends at 37
+      - { window_no: 1, start: 15, stop: 37, passage: "pqrstuvwxyz0123456789A" }
+  - name: prefix-shrinks-the-window
+    text: "Alpha beta gamma delta epsilon"
+    prefix: "Ch1"
+    expected:
+      # width 20 - 3 - 1 = 16, step 11: starts 0, 11, 22; every passage is at most 20 characters
+      - { window_no: 0, start: 0, stop: 16, passage: "Ch1\nAlpha beta gamma" }
+      - { window_no: 1, start: 11, stop: 27, passage: "Ch1\ngamma delta epsi" }
+      - { window_no: 2, start: 22, stop: 30, passage: "Ch1\n epsilon" }

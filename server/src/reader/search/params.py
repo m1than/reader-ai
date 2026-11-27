@@ -51,24 +51,27 @@ def fts_config_for(language: str | None) -> str:
     return _LANGUAGES.get(language or "", "simple")
 
 
-def params_sha256(fts_config: str, model: str = MODEL_ID) -> str:
-    """FR-SEARCH-5: the key's parameter digest; a model, chunking or language change is a new key."""
+def params_sha256(fts_config: str) -> str:
+    """FR-SEARCH-5: the vector overlay's parameter digest over {max_seq_length, window size, overlap, minimum,
+    fts_config}; the model enters the overlay inputs beside it."""
     params = {
-        "chunk_size": CHUNK_SIZE,
-        "chunk_overlap": CHUNK_OVERLAP,
-        "chunk_min": CHUNK_MIN,
         "max_seq_length": MAX_SEQ_LENGTH,
-        "model": model,
+        "window_size": CHUNK_SIZE,
+        "overlap": CHUNK_OVERLAP,
+        "minimum": CHUNK_MIN,
         "fts_config": fts_config,
     }
     canonical = json.dumps(params, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
-def status_from(job: str, embeds_row: bool) -> str:
-    """VEC-SEARCH-4: a row for the current key is `ready`; succeeded without one is reported as `dead`."""
-    if embeds_row:
+def status_from(job: str, overlay: str) -> str:
+    """VEC-SEARCH-4: the job status of the current key by the state of its vector overlay (none, building,
+    sealed, active, collected)."""
+    if overlay == "collected":
+        return "collected"
+    if overlay == "active":
         return "ready"
-    if job == "succeeded":
-        return "dead"
-    return job
+    if overlay == "sealed":
+        return {"none": "queued", "succeeded": "queued"}.get(job, job)
+    return "dead" if job == "succeeded" else job

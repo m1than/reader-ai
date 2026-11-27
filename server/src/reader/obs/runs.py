@@ -241,12 +241,10 @@ _SPEND_SQL: Final = (
 )
 _MODELS_SQL: Final = "SELECT stage, max(model) AS model FROM compile_steps WHERE run_id = :id GROUP BY stage"
 _INGEST_SQL: Final = (
-    # the ingest's own row comes from SRV-INGEST's `views.ingest_facts` (INV-INGEST-16)
-    "SELECT (SELECT count(*) FROM search_chunks c WHERE c.ingest_id = :id AND c.owner_id = :o) AS chunks,"
-    " (SELECT max(e.embedded_at) FROM search_embeds e WHERE e.ingest_id = :id AND e.owner_id = :o)"
-    " AS embedded_at,"
+    # the ingest's own row comes from SRV-INGEST's `views.ingest_facts` (INV-INGEST-16), its windows and
+    # embed time from SRV-SEARCH's `store.embed_facts` (the pack's span-vector overlay, paired)
     # FR-OBS-20 f: the import job's own key (enqueued to succeeded)
-    " (SELECT extract(epoch FROM max(k.finished_at - k.created_at)) FROM job_keys k"
+    "SELECT (SELECT extract(epoch FROM max(k.finished_at - k.created_at)) FROM job_keys k"
     " WHERE k.kind = 'ingest.import' AND k.outcome = 'succeeded' AND k.args->>'material_sha256' = :s"
     " AND k.args->>'converter_version' = :v) AS import_s"
 )
@@ -322,14 +320,16 @@ async def snapshot(conn: Any, args: RunsArgs, now: datetime) -> Snapshot | None:
     facts = await views.ingest_facts(conn, args.id)
     if facts is None:
         return None
-    row = (await conn.execute(text(_INGEST_SQL), {
-        "id": args.id, "o": facts.owner_id, "s": facts.material_sha256, "v": facts.converter_version,
-    })).one()
+    from reader.search.store import embed_facts
+
+    bound = {"s": facts.material_sha256, "v": facts.converter_version}
+    row = (await conn.execute(text(_INGEST_SQL), bound)).one()
+    windows, embedded_at = await embed_facts(conn, facts.owner_id, args.id)
     pages = facts.page_count
     ingest_metrics: dict[str, float | int] = {
         "pages": pages,
         "spans": facts.span_count,
-        "chunks": int(row.chunks or 0),
+        "chunks": windows,
     }
     if row.import_s is not None:
         import_s = max(float(row.import_s), 0.0)
@@ -341,7 +341,7 @@ async def snapshot(conn: Any, args: RunsArgs, now: datetime) -> Snapshot | None:
         key=args.id,
         name=f"import {facts.material_sha256[:8]}",
         start_ms=_ms(facts.imported_at),
-        end_ms=_ms(max(facts.imported_at, row.embedded_at or facts.imported_at)),  # the late end's time (d)
+        end_ms=_ms(max(facts.imported_at, embedded_at or facts.imported_at)),  # the late end's time (d)
         status="FINISHED",
         outcome="succeeded",
         end=args.end,

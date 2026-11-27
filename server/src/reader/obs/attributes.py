@@ -256,7 +256,9 @@ JOB_ARGS: Final[Mapping[str, Mapping[str, str]]] = {
     "pipeline.verify": {"run_id": "reader.run_id", "step": "reader.step", "stage": "reader.stage"},
     "tutor.answer": {"question_id": "reader.question_id"},
     "ingest.import": {"material_sha256": "reader.material_sha256"},
-    "search.embed": {"material_sha256": "reader.material_sha256", "ingest_id": "reader.ingest_id"},
+    # SRV-SEARCH FR-SEARCH-5 (paired): args {owner_id, pack_id, overlay_id} copy nothing; the handler
+    # annotates reader.ingest_id and reader.material_sha256 from the pack (FR-OBS-5 e)
+    "search.embed": {},
     "obs.retention": {},
     "obs.feedback": {},  # FR-OBS-14: its args name another job and a catalogue entry; none reaches the span
     "obs.prompts": {},  # FR-OBS-15
