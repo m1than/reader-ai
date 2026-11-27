@@ -178,6 +178,47 @@ async def test_the_routes(pg: Pg, tmp_path: Path) -> None:
         assert await w.scalar("SELECT count(*) FROM job_keys WHERE kind = 'ingest.purge'") == 1
 
 
+async def test_a_dead_purge_is_requeued_by_the_next_request(
+    pg: Pg, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    gc = need("reader.ingest.gc")
+    async with world(pg, tmp_path) as w:
+        pid = await pack(w, MATERIAL_SHA, R2, material_id="synthetic")
+        async with w.engine.begin() as conn:
+            await vectors(conn, w.users["ivan"], pid)  # the production seams refuse: seam_unbound
+        url = f"/api/materials/synthetic/packs/{pid}/purge"
+        async with client(w, jobs=w.jobs) as c:
+            assert (await c.post(url, json={"confirm": "synthetic"})).json()["enqueued"] is True
+        await w.work()
+        assert await w.scalar("SELECT outcome FROM job_keys WHERE kind = 'ingest.purge'") == "dead"
+        assert await w.scalar("SELECT purged_at FROM base_packs WHERE pack_id = :p", p=pid) is None
+        monkeypatch.setattr(gc, "SEAMS", [Calls().seams()])  # the seam is bound
+        async with client(w, jobs=w.jobs) as c:
+            got = await c.post(url, json={"confirm": "synthetic"})
+        assert (got.status_code, got.json()) == (202, {"pack_id": pid, "enqueued": True})
+        await w.work()
+        assert await w.scalar("SELECT outcome FROM job_keys WHERE kind = 'ingest.purge'") == "succeeded"
+        assert await w.scalar("SELECT purged_at IS NOT NULL FROM base_packs WHERE pack_id = :p", p=pid)
+
+
+async def test_a_lost_compare_and_swap_is_retried_not_dead(
+    pg: Pg, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    gc, manifest = need("reader.ingest.gc"), need("reader.ingest.manifest")
+    async with world(pg, tmp_path) as w:
+        pid = await pack(w, sha_of("conflict"), R2)
+
+        async def conflict(*args: Any) -> bool:
+            raise manifest.ManifestError("manifest_conflict")
+
+        monkeypatch.setattr(manifest, "remove_pack", conflict)
+        monkeypatch.setattr(gc, "SEAMS", [Calls().seams()])
+        await w.jobs.enqueue("ingest.purge", {"owner_id": str(w.users["ivan"]), "pack_id": pid})
+        await w.work()
+        rows = await w.rows("SELECT outcome, attempts FROM job_keys WHERE kind = 'ingest.purge'")
+        assert [tuple(r) for r in rows] == [(None, 1)]  # counted, not dead: SRV-EVENTS retries it
+
+
 def test_the_purge_kind_is_declared_with_its_key(tmp_path: Path) -> None:
     kinds: dict[str, Any] = {k.name: k for k in need("reader.ingest.jobs").make_kinds(tmp_path)}
     assert kinds["ingest.purge"].key == ("owner_id", "pack_id")

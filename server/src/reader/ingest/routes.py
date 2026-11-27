@@ -25,7 +25,7 @@ from reader.api.http import Ctx, Handler, Route, error
 from reader.config import ConfigError, load_config
 from reader.config.model import Material
 from reader.ingest import manage, manifest, packs, params, store, upload, uploads
-from reader.ingest.jobs import KIND, PURGE_KIND, key_for
+from reader.ingest.jobs import KIND, PURGE_KIND, key_for, purge_key
 from reader.jobs import audit
 from reader.jobs.queue import job_status_of
 
@@ -543,6 +543,8 @@ async def purge_pack(ctx: Ctx) -> Response:
     if jobs is None:
         return error(503, "unavailable")
     result = await jobs.enqueue(PURGE_KIND, {"owner_id": str(owner), "pack_id": pid})
+    if result.kind == "dead":  # a purge that ended dead runs again on the owner's next request
+        result = await jobs.requeue_dead(PURGE_KIND, purge_key(owner, pid))
     return JSONResponse({"pack_id": pid, "enqueued": result.kind == "queued"}, status_code=202)
 
 

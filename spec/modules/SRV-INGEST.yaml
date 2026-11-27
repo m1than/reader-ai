@@ -1901,6 +1901,13 @@ requirements:
       [db] test_purge_db.py (production seams): purge of an r2 pack with legacy search rows leaves 0 `search_chunks`
       and 0 `search_embeds` rows of its ingest and another pack's rows unchanged; with a `vectors` overlay on the
       pack, purge raises `seam_unbound` and spans, search rows and `purged_at` are unchanged.
+      (3) A purge request whose key is `dead` requeues it (SRV-EVENTS `requeue_dead`, key
+      `reader.ingest.jobs.purge_key(owner_id, pack_id)`) and answers 202 `{pack_id, enqueued: true}`; `enqueued` is
+      false when the key is queued, running or done. The job treats `manifest_conflict` (its head append lost every
+      CAS retry, FR-INGEST-38) as transient: the run fails, the key is not dead and SRV-EVENTS retries it with its
+      backoff. [db] test_purge_db.py: a purge job that ends dead on `seam_unbound`, then the seam bound and the route
+      called again → 202 enqueued true, and the next run purges the pack; a `manifest_conflict` raised once by the
+      job leaves its key with no outcome and one counted attempt (not dead; a retry is scheduled).
       [db] test_purge_db.py (Seams doubles): purge of an active pack → one entry without it; spans, outline,
       overlays and their rows gone, forget_pack, judge_inputs and judge_requests seams called with the pack id;
       purge of a migrated r2 pack calls search forget_legacy once with its ingest id; ingests and base_packs rows
