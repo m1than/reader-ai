@@ -172,6 +172,14 @@ requirements:
       source has a stable sha256. The spans are read from SRV-INGEST's tables (`materials`, `ingests`,
       `material_spans`), created by its migration `ingest_0001`; the [db] tests insert rows that satisfy that schema
       and create no tables of their own (integration on V/slice-integration, 2026-11-23).
+      **Paired change, ADR-0039 / SRV-INGEST INV-INGEST-16, V.kl-active-view-readers:** the spans are those of the
+      material's pack in the owner's head manifest entry, read through `reader.ingest.views` (`active_pack`,
+      `pack_spans`), never the `ingests` join, so a material with two packs (r2 and r3) gives one pack's spans,
+      never both; a material with no active pack has no spans (`no_source_spans`). Each span id is the one the view
+      mints: `<sha>:<seq>` for a legacy (r2) pack, the locator for an r3 pack (FR-INGEST-33); the locator form is
+      refused by SRV-LESSON's `span_ref` until its paired change (with FR-PIPELINE-7's `quote_sha256`) lands, so a
+      compile from an r3 pack fails validation rather than cite a wrong span. The [db] fixtures seal their ingest as
+      an active r2 pack (server/tests/ingest/packseed.py). [db] test_source_active_pack_db.py.
   - id: FR-PIPELINE-3
     text: >-
       Stage prompts. A model stage's system prompt is the rendered source followed by a fixed instruction that text

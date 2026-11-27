@@ -2128,6 +2128,27 @@ invariants:
       test_gc_db.py: only `reader.ingest.jobs` imports `reader.ingest.gc`, and the DELETE statements of span,
       outline and overlay rows appear only in `reader/ingest/gc.py`; a DELETE of a sealed pack's spans without the
       setting is refused.
+  - id: INV-INGEST-16
+    text: >-
+      **Every read goes through the active view** (P5). No module of `reader.*` outside `reader.ingest` names the
+      tables `ingests`, `material_spans` or `material_outline` in a string literal (SQL text; docstrings and comments
+      excluded); they read packs through `reader.ingest.manifest.active_view` and the read helpers, which live in
+      their own module `reader.ingest.views` (the header's `reader.ingest.packs` helpers; promoted by
+      V.kl-active-view-readers, paired change, ADR-0039): `active_packs` / `active_pack` (material → the head
+      entry's pack, as `Pack(owner_id, pack_id, ingest_id, material_sha256, converter_version)`), `pack_of_ingest`
+      (any state; a stored ingest id may name a superseded pack), `live_packs`, `material_has_pack`, `pack_spans`
+      (optionally a page range), `span_ids`, `page_stats`, `span_chars`, `pack_outline`, `ingest_facts` and
+      `active_span_texts` (span id → page and text from active packs only; a legacy id in a non-legacy active pack
+      goes through FR-INGEST-42's resolver). **Span ids minted from a pack** are its locators (FR-INGEST-33), except
+      for a pack of a `LEGACY_VERSIONS` converter, whose spans keep `<material_sha256>:<seq>` (the form its
+      published citations and the seq map hold). Foreign-key declarations in other modules' migrations
+      (`REFERENCES ingests`) are the only exception, listed by file in the test. The source scan is also the
+      sequencing gate of the header: no r3 import before it passes on the integration branch. [unit]
+      test_readers_scan_unit.py: an AST scan of every reader.* module outside reader.ingest finds no string constant
+      (docstrings excluded) matching `\b(ingests|material_spans|material_outline)\b`, except the listed REFERENCES
+      lines in plan/migrations/plan_0001.py and freshness/migrations/freshness_0001.py; a planted literal in a
+      temporary module is found. Each paired reader's own spec pins, with two packs of one material (r2 and r3),
+      that only the active pack's rows are read.
 
 nfr:
   - id: NFR-INGEST-1
@@ -2623,17 +2644,7 @@ proposed_invariants:
         the citation's `quote_sha256`.
     tests_planned:
       - "add server/tests/ingest/test_packs_property_db.py [db, property]: the rules above; the model as a plain Python structure; a citation pool sampled after each activation"
-  # INV-INGEST-15 is promoted into `invariants` (phase 2, unit 3).
-  - id: INV-INGEST-16
-    text: >-
-      **Every read goes through the active view** (P5). No module of `reader.*` outside `reader.ingest` names the
-      tables `ingests`, `material_spans` or `material_outline` in a string literal (SQL text; docstrings and comments
-      excluded); they read packs through `reader.ingest.manifest.active_view` and the helpers of `reader.ingest.packs`.
-      Foreign-key declarations in other modules' migrations (`REFERENCES ingests`) are the only exception, listed by
-      file in the test. The source scan is also the sequencing gate of the header: no r3 import before it passes on
-      the integration branch. [unit]
-    tests_planned:
-      - "add server/tests/ingest/test_readers_scan_unit.py [unit]: an AST scan of every reader.* module outside reader.ingest finds no string constant (docstrings excluded) matching \\b(ingests|material_spans|material_outline)\\b, except the listed REFERENCES lines in plan/migrations/plan_0001.py and freshness/migrations/freshness_0001.py; a planted literal in a temporary module is found"
+  # INV-INGEST-15 is promoted into `invariants` (phase 2, unit 3); INV-INGEST-16 by V.kl-active-view-readers.
 
 proposed_vectors:
   # VEC-INGEST-8 is promoted into `vectors` (phase 2, unit 1), VEC-INGEST-9 in unit 6.

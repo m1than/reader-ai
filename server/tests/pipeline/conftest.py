@@ -383,6 +383,9 @@ async def import_material(engine: Any, owner: uuid.UUID, spans: list[Any], sha: 
                 ),
                 {"i": iid, "o": owner, "q": seq, "p": s.page, "k": s.kind, "t": s.text},
             )
+        from ingest.packseed import seal  # FR-PIPELINE-2: readers see only the material's active pack
+
+        await seal(conn, owner, iid, sha)
 
 
 def plan(lesson_pages: tuple[int, int] = (61, 62)) -> dict[str, Any]:
