@@ -2136,7 +2136,19 @@ tasks:
         V.kl-search-find's vector overlays before any r2 -> r3 re-conversion, or a legacy-path rule that a
         replacing pack is not activated before its search_embeds row exists (SRV-INGEST FR-INGEST-40 gate
         (e)-(i))." }
-  - { id: V.kl-search-find, stage: V, kind: module, track: ai, status: todo,
+  - { id: V.kl-search-find, stage: V, kind: module, track: ai, status: in_progress,
+      note: "2026-11-27, branch V/kl-search-find, phase 2 (implementation). Done, each promoted with its Red test
+        then Green: unit 1 FR-SEARCH-34 (the draft's FR-SEARCH-21, renumbered: id taken by forget_legacy) policy.json
+        + schema, policy.load/declared/policy_version/find_routes (declared() maps onto FR-OBS-21's closed key set,
+        deviation recorded); unit 2 FR-SEARCH-22..27, -29, INV-SEARCH-9, -10, -15, VEC-SEARCH-6, -7, -8, -10:
+        reader.search.greedy (budgeted, pivot, set_cover, coverage objective; exhaustive n <= 12 and pivot n <= 6
+        bound tests), reader.search.cards (card shape, cost, cuts, eligibility), reader.search.find (cascade over
+        Corpus / Judge / Links / Findings ports). Remaining: unit 3 (entitlement over material rows, quote
+        allowance, open on sealed span ids: FR-SEARCH-30, -31, INV-SEARCH-12, -13, VEC-SEARCH-9), unit 4 (vector
+        overlays: search_0002, the embed job on overlays, forget_overlay, candidates over search_span_vectors as the
+        production Corpus, the legacy search() path; FR-SEARCH-3..7, -9, -10, -20 revisions), unit 5 (judge.find
+        waiter with the process-wide LISTEN, owner judge_ctx, /api/find and /api/open, FR-SEARCH-28, -33,
+        INV-SEARCH-11, -14; binding the policy load into api and worker start and obs.versions.POLICY)",
       needs: [V.kl-ingest-packs, V.spike.judge-gate, V.kl-agent-judges, V.kl-obs-spans],
       what: "SRV-SEARCH revision (~800–1,200 lines): the B6 cascade (routes, facets file, greedy selection under a token
         budget with stated bounds, 1-hop expansion, one judge.find job last on the worker-judge lane), policy_version,
