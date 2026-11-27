@@ -10,6 +10,7 @@ import asyncio
 import json
 import uuid
 from collections.abc import Mapping
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Final
 
@@ -62,6 +63,90 @@ class ReanchorArgs(BaseModel):
     owner_id: uuid.UUID
     from_pack_id: str = Field(pattern=r"^[0-9a-f]{64}$")
     to_pack_id: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+GC_KIND: Final = "ingest.gc"
+GC_PACK_KIND: Final = "ingest.gc_pack"
+GC_OVERLAY_KIND: Final = "ingest.gc_overlay"
+PURGE_KIND: Final = "ingest.purge"
+GC_CRON: Final = "17 3 * * *"  # daily, UTC; the slot is the tick's UTC date
+_SLOT: Final = r"^\d{4}-\d{2}-\d{2}$"
+
+
+class GcArgs(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    slot: str = Field(pattern=_SLOT)
+
+
+class GcPackArgs(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    owner_id: uuid.UUID
+    pack_id: str = Field(pattern=r"^[0-9a-f]{64}$")
+    slot: str = Field(pattern=_SLOT)
+
+
+class GcOverlayArgs(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    owner_id: uuid.UUID
+    overlay_id: str = Field(pattern=r"^[0-9a-f]{64}$")
+    slot: str = Field(pattern=_SLOT)
+
+
+class PurgeArgs(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    owner_id: uuid.UUID
+    pack_id: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+def _gc_kinds(blobs_root: Path) -> tuple[JobKind, ...]:
+    """FR-INGEST-44, -45: the scanner, the two deleters and purge; artifact directories go after commit."""
+
+    async def scan(args: GcArgs, conn: AsyncConnection, ctx: JobContext) -> None:
+        from reader.ingest import gc
+
+        del ctx
+        await gc.scan(conn, args.slot, gc.POLICY[0], gc.SEAMS[0], blobs_root)
+
+    async def gc_pack(args: GcPackArgs, conn: AsyncConnection, ctx: JobContext) -> None:
+        from reader.ingest import gc
+
+        del ctx
+        await gc.collect_pack(conn, args.owner_id, args.pack_id, gc.POLICY[0], gc.SEAMS[0])
+
+    async def gc_overlay(args: GcOverlayArgs, conn: AsyncConnection, ctx: JobContext) -> None:
+        from reader.ingest import gc
+
+        del ctx
+        await gc.collect_overlay(conn, args.owner_id, args.overlay_id, gc.POLICY[0], gc.SEAMS[0])
+
+    async def purge(args: PurgeArgs, conn: AsyncConnection, ctx: JobContext) -> None:
+        from reader.ingest import gc
+
+        del ctx
+        await gc.purge(conn, args.owner_id, args.pack_id, gc.SEAMS[0])
+
+    async def remove_artifact(engine: Any, payload: Mapping[str, Any], outcome: str) -> None:
+        from reader.ingest import gc
+
+        if outcome != "succeeded":
+            return
+        artifact = await gc.artifact_of(engine, uuid.UUID(str(payload["owner_id"])), str(payload["pack_id"]))
+        if artifact is not None:
+            await gc.remove_artifact(engine, blobs_root, artifact)
+
+    def tick(at: datetime) -> dict[str, Any]:
+        return {"slot": at.astimezone(UTC).date().isoformat()}
+
+    return (
+        JobKind(name=GC_KIND, queue="ingest", args=GcArgs, key=("slot",), handler=scan, transient=_TRANSIENT,
+                periodic=(GC_CRON, tick)),
+        JobKind(name=GC_PACK_KIND, queue="ingest", args=GcPackArgs, key=("owner_id", "pack_id", "slot"),
+                handler=gc_pack, transient=_TRANSIENT, after_end=remove_artifact),
+        JobKind(name=GC_OVERLAY_KIND, queue="ingest", args=GcOverlayArgs,
+                key=("owner_id", "overlay_id", "slot"), handler=gc_overlay, transient=_TRANSIENT),
+        JobKind(name=PURGE_KIND, queue="ingest", args=PurgeArgs, key=("owner_id", "pack_id"), handler=purge,
+                transient=_TRANSIENT, after_end=remove_artifact),
+    )
 
 
 async def _seqmap(args: SeqmapArgs, conn: AsyncConnection, ctx: JobContext) -> None:
@@ -182,6 +267,7 @@ def make_kinds(blobs_root: Path) -> tuple[JobKind, ...]:
                 key=("owner_id", "from_ingest_id", "to_pack_id"), handler=_seqmap, transient=_TRANSIENT),
         JobKind(name=REANCHOR_KIND, queue="ingest", args=ReanchorArgs,
                 key=("owner_id", "from_pack_id", "to_pack_id"), handler=_reanchor, transient=_TRANSIENT),
+        *_gc_kinds(blobs_root),
     )
 
 

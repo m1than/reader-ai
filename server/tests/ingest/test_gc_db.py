@@ -69,12 +69,13 @@ class Calls:
 
 
 def policy(keep: int = 1, later: timedelta = LATER) -> Any:
-    return need("reader.ingest.gc").Policy(keep_entries=keep, age_floor_days=30, now=datetime.now(UTC) + later)
+    now = datetime.now(UTC) + later
+    return need("reader.ingest.gc").Policy(keep_entries=keep, age_floor_days=30, now=now)
 
 
 async def pack(w: World, sha: str, version: str = R2, *, artifact: str | None = None,
                owner: str = "ivan", material_id: str | None = None) -> str:
-    """A sealed pack of `sha` (import_rows, bypassing receive) whose artifact directory exists on the blobs root."""
+    """A sealed pack of `sha` (import_rows, bypassing receive), its artifact directory on the blobs root."""
     artifact = artifact or sha_of(f"artifact {sha} {version}")
     files = build_artifact(spans=spans_of(ROWS), material_sha256=sha, converter_version=version)
     async with w.engine.begin() as conn:
@@ -93,7 +94,8 @@ async def delete(w: World, sha: str) -> None:
 
 async def collect(w: World, pid: str, pol: Any, calls: Calls) -> bool:
     async with w.engine.begin() as conn:
-        return bool(await need("reader.ingest.gc").collect_pack(conn, w.users["ivan"], pid, pol, calls.seams()))
+        gc = need("reader.ingest.gc")
+        return bool(await gc.collect_pack(conn, w.users["ivan"], pid, pol, calls.seams()))
 
 
 async def collect_overlay(w: World, oid: str, pol: Any, calls: Calls) -> bool:
@@ -125,8 +127,10 @@ async def plan_and_report(w: World, sha: str, pid: str) -> None:
     material = await w.scalar("SELECT id FROM materials WHERE sha256 = :s", s=sha)
     async with w.engine.begin() as conn:
         await conn.execute(text(
-            "INSERT INTO freshness_reports (owner_id, material_id, ingest_id, status, scan_inputs_sha256, sample)"
-            " VALUES (:o, :m, :i, 'done', :s, '[]')"), {"o": owner, "m": material, "i": ingest, "s": "c" * 64})
+            "INSERT INTO freshness_reports"
+            " (owner_id, material_id, ingest_id, status, scan_inputs_sha256, sample)"
+            " VALUES (:o, :m, :i, 'done', :s, '[]')"),
+            {"o": owner, "m": material, "i": ingest, "s": "c" * 64})
         course = (await conn.execute(text(
             "INSERT INTO courses (owner_id, title, material_sha256, archived_at) VALUES (:o, 'c', :s, now())"
             " RETURNING id"),
@@ -145,11 +149,13 @@ async def test_a_pack_outside_the_last_entries_and_past_the_floor_is_collected(
         sha = sha_of("collected")
         pid = await pack(w, sha)
         v = await activate(w, pid)
-        profile = await w.scalar("SELECT overlay_id FROM overlays WHERE pack_id = :p AND kind = 'profile'", p=pid)
+        profile = await w.scalar(
+            "SELECT overlay_id FROM overlays WHERE pack_id = :p AND kind = 'profile'", p=pid)
         ingest = await w.scalar("SELECT ingest_id FROM base_packs WHERE pack_id = :p", p=pid)
         await plan_and_report(w, sha, pid)
         await delete(w, sha)  # entry 2 names nothing: with keep 1 the pack is outside the last entries
-        before = {t: await w.scalar(f"SELECT count(*) FROM {t}") for t in ("materials", "uploads")}  # noqa: S608
+        tables = ("materials", "uploads")
+        before = {t: await w.scalar(f"SELECT count(*) FROM {t}") for t in tables}  # noqa: S608
         calls = Calls()
         assert await collect(w, pid, policy(keep=3), calls) is False  # within N
         assert await collect(w, pid, policy(later=timedelta(0)), calls) is False  # younger than the floor
@@ -180,7 +186,8 @@ async def test_kept_when_active_pending_or_a_seq_map_target(pg: Pg, tmp_path: Pa
         r3 = await pack(w, sha, R3)  # waiting: its import requested its profile
         assert await collect(w, r3, policy(), Calls()) is False  # the pack of a pending row
         async with w.engine.begin() as conn:
-            ingest = await conn.execute(text("SELECT ingest_id FROM base_packs WHERE pack_id = :p"), {"p": legacy})
+            ingest = await conn.execute(
+                text("SELECT ingest_id FROM base_packs WHERE pack_id = :p"), {"p": legacy})
             assert await need("reader.ingest.seqmap").build(conn, w.users["ivan"], ingest.scalar(), r3) == (
                 "accepted")
             await conn.execute(text("DELETE FROM pending_activations WHERE pack_id = :p"), {"p": r3})
@@ -229,7 +236,7 @@ async def test_overlays_desired_building_and_lone(pg: Pg, tmp_path: Path) -> Non
             stale = overlays.overlay_id("vectors", other, inputs, "test/1")
             await overlays.begin(conn, owner, stale, kind="vectors", pack_id=other, inputs=inputs,
                                  builder_version="test/1")
-        assert await collect_overlay(w, stale, policy(), Calls()) is True  # building, its pack not in the head
+        assert await collect_overlay(w, stale, policy(), Calls()) is True  # building, pack not in the head
 
 
 async def test_the_default_seams_keep_every_pack(pg: Pg, tmp_path: Path) -> None:
@@ -283,10 +290,13 @@ async def test_the_artifact_directory_goes_only_after_commit(
         await delete(w, sha)
         directory = w.blobs / "ingest" / artifact
         calls = Calls()
-        with pytest.raises(RuntimeError):  # a rolled-back collection leaves the directory
+        async def rolled_back() -> None:
             async with w.engine.begin() as conn:
                 assert await gc.collect_pack(conn, owner, pid, policy(), calls.seams())
                 raise RuntimeError
+
+        with pytest.raises(RuntimeError):  # a rolled-back collection leaves the directory
+            await rolled_back()
         assert await gc.remove_artifact(w.engine, w.blobs, artifact) is False and directory.is_dir()
 
         await add_owner(w)  # olga, another owner of the same book, holds a live ingest of it
@@ -300,8 +310,8 @@ async def test_the_artifact_directory_goes_only_after_commit(
         jp = await pack(w, other, artifact=job_artifact)
         await activate(w, jp)
         await delete(w, other)
-        monkeypatch.setitem(gc.SEAMS, 0, calls.seams())
-        monkeypatch.setitem(gc.POLICY, 0, policy())
+        monkeypatch.setattr(gc, "SEAMS", [calls.seams()])
+        monkeypatch.setattr(gc, "POLICY", [policy()])
         await w.jobs.enqueue("ingest.gc_pack", {"owner_id": str(owner), "pack_id": jp, "slot": "2026-12-01"})
         await w.work()
         assert await w.scalar("SELECT collected_at IS NOT NULL FROM base_packs WHERE pack_id = :p", p=jp)
@@ -328,11 +338,11 @@ async def waiting(w: World) -> None:
 
 async def named(w: World, column: str, value: str) -> int:
     """Manifest entries naming the pack or overlay."""
-    sql = {"pack": "e ->> 'pack_id' = :v", "overlay": "EXISTS (SELECT 1 FROM jsonb_each_text(e -> 'overlays') x"
-           " WHERE x.value = :v)"}[column]
-    return int(await w.scalar(
-        "SELECT count(*) FROM manifest_entries m, jsonb_array_elements(m.entry -> 'packs') e"  # noqa: S608
-        f" WHERE m.seq = (SELECT max(seq) FROM manifest_entries) AND {sql}", v=value))
+    sql = {"pack": "e ->> 'pack_id' = :v",
+           "overlay": "EXISTS (SELECT 1 FROM jsonb_each_text(e -> 'overlays') x WHERE x.value = :v)"}[column]
+    query = ("SELECT count(*) FROM manifest_entries m, jsonb_array_elements(m.entry -> 'packs') e"
+             " WHERE m.seq = (SELECT max(seq) FROM manifest_entries) AND ")
+    return int(await w.scalar(query + sql, v=value))
 
 
 async def test_restore_racing_gc_of_the_same_pack(pg: Pg, tmp_path: Path) -> None:
@@ -342,7 +352,8 @@ async def test_restore_racing_gc_of_the_same_pack(pg: Pg, tmp_path: Path) -> Non
 
         async def restore(sha: str) -> None:
             async with w.engine.begin() as conn:
-                await conn.execute(text("UPDATE materials SET deleted_at = NULL WHERE sha256 = :s"), {"s": sha})
+                await conn.execute(
+                    text("UPDATE materials SET deleted_at = NULL WHERE sha256 = :s"), {"s": sha})
                 await manifest.restore_material(conn, owner, sha)
 
         first = sha_of("gc first")
@@ -409,22 +420,28 @@ async def test_rollback_racing_gc_overlay(pg: Pg, tmp_path: Path) -> None:
 
 def test_only_the_jobs_module_reaches_the_gc_and_only_gc_deletes_pack_rows() -> None:
     reader = SRC / "reader"
+    def imports_gc(node: ast.AST) -> bool:
+        if not isinstance(node, ast.ImportFrom):
+            return False
+        named = node.module == "reader.ingest" and any(a.name == "gc" for a in node.names)
+        return node.module == "reader.ingest.gc" or named
+
     importers = sorted(
         str(p.relative_to(SRC)) for p in reader.rglob("*.py")
-        if any(isinstance(n, ast.ImportFrom) and (
-            n.module == "reader.ingest.gc" or (n.module == "reader.ingest" and any(a.name == "gc" for a in n.names)))
-            for n in ast.walk(ast.parse(p.read_text(encoding="utf-8")))))
+        if any(imports_gc(n) for n in ast.walk(ast.parse(p.read_text(encoding="utf-8")))))
     assert importers == ["reader/ingest/jobs.py"]
     pack_tables = ("material_spans", "material_outline", "pack_profiles", "span_tags", "span_prefixes",
                    "outline_summaries")
     deleters = sorted(
         str(p.relative_to(SRC)) for p in reader.rglob("*.py")
         if "migrations" not in p.parts
-        if any(f"DELETE FROM {t}" in p.read_text(encoding="utf-8") for t in pack_tables))
+        if any(f"DELETE FROM {t}" in p.read_text(encoding="utf-8") for t in pack_tables))  # noqa: S608
     assert deleters == ["reader/ingest/gc.py"]
 
 
-async def test_a_delete_of_a_sealed_packs_spans_without_the_setting_is_refused(pg: Pg, tmp_path: Path) -> None:
+async def test_a_delete_of_a_sealed_packs_spans_without_the_setting_is_refused(
+    pg: Pg, tmp_path: Path
+) -> None:
     from sqlalchemy.exc import DBAPIError
 
     async with world(pg, tmp_path) as w:

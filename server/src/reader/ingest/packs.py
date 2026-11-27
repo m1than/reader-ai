@@ -78,6 +78,24 @@ async def material_of(conn: AsyncConnection, owner_id: uuid.UUID, pid: str) -> s
     return None if value is None else str(value)
 
 
+async def material_packs(
+    conn: AsyncConnection, owner_id: uuid.UUID, material_sha256: str
+) -> list[dict[str, Any]]:
+    """FR-INGEST-45's listing: the owner's packs of the material in converter-version order."""
+    from reader.ingest import manifest
+
+    view = await manifest.active_view(conn, owner_id)
+    active = {e["pack_id"] for e in view.entry["packs"]}
+    rows = (await conn.execute(text(
+        "SELECT pack_id, parse_config ->> 'converter_version', state, collected_at, purged_at FROM base_packs"
+        " WHERE owner_id = :o AND material_sha256 = :s"), {"o": owner_id, "s": material_sha256})).all()
+    listed = [{"pack_id": str(r[0]), "converter_version": str(r[1]), "state": str(r[2]),
+               "active": str(r[0]) in active,
+               "collected_at": None if r[3] is None else r[3].isoformat(),
+               "purged_at": None if r[4] is None else r[4].isoformat()} for r in rows]
+    return sorted(listed, key=lambda p: (version_rank(p["converter_version"]), p["pack_id"]))
+
+
 async def profile_for_pack(conn: AsyncConnection, owner_id: uuid.UUID, pid: str) -> dict[str, Any] | None:
     """The head's profile when the pack is active, else its pending one, else the one its import built."""
     from reader.ingest import manifest

@@ -2688,6 +2688,8 @@ proposed_owner_notes:
 #   oracle change. The packs tests' `imported` helper receives its legacy pack under r2 explicitly (with
 #   CONVERTER_VERSION set to r2 for that receive), since the VEC-INGEST-1 fixture is now r3; the upload test's
 #   span id prefix follows FR-INGEST-15's revised span id (`spn:<sha>:`).
+#   unit 5: the artifact test replaced the module's seam and policy lists with monkeypatch.setattr (setitem does
+#   not take a list); test lines wrapped for ruff (line length, PT012); no oracle change.
 #   code review of unit A (2026-11-27): the reconcile-vs-activation deadlock test was vacuous (only the second pack's
 #   profile changed); both materials' profiles now change, so the first-locked pack appends while the other session
 #   holds the second, and both complete.

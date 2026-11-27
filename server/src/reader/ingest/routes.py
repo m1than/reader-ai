@@ -24,8 +24,8 @@ import reader.ingest as ingest
 from reader.api.http import Ctx, Handler, Route, error
 from reader.config import ConfigError, load_config
 from reader.config.model import Material
-from reader.ingest import manage, manifest, params, store, upload, uploads
-from reader.ingest.jobs import KIND, key_for
+from reader.ingest import manage, manifest, packs, params, store, upload, uploads
+from reader.ingest.jobs import KIND, PURGE_KIND, key_for
 from reader.jobs import audit
 from reader.jobs.queue import job_status_of
 
@@ -515,6 +515,37 @@ async def restore_material(ctx: Ctx) -> Response:
         )
 
 
+# ---- packs and owner purge (FR-INGEST-45): the route enqueues, the job deletes ----
+
+PACK_ID: Final = re.compile(r"[0-9a-f]{64}")
+
+
+async def list_packs(ctx: Ctx) -> Response:
+    async with ctx.engine.connect() as conn:
+        _, sha, _ = await _managed(ctx, conn, lock=False)
+        return JSONResponse({"packs": await packs.material_packs(conn, ctx.signed_in.id, sha)})
+
+
+async def purge_pack(ctx: Ctx) -> Response:
+    body = await ctx.json()
+    if not isinstance(body, dict) or set(body) != {"confirm"}:
+        return error(400, "bad_request")
+    owner = ctx.signed_in.id
+    pid = ctx.request.path_params["pack_id"]
+    async with ctx.engine.connect() as conn:
+        material_id, sha, row = await _managed(ctx, conn, lock=False)
+        if not PACK_ID.fullmatch(pid) or await packs.material_of(conn, owner, pid) != sha:
+            raise manage.refused(404, "not_found")
+        display = await manage.display_title(conn, owner, material_id, row)
+        if not manage.confirm_matches(body["confirm"], display):
+            raise manage.refused(400, "confirm_mismatch")
+    jobs = getattr(ctx.request.app.state, "jobs", None)
+    if jobs is None:
+        return error(503, "unavailable")
+    result = await jobs.enqueue(PURGE_KIND, {"owner_id": str(owner), "pack_id": pid})
+    return JSONResponse({"pack_id": pid, "enqueued": result.kind == "queued"}, status_code=202)
+
+
 ROUTES: tuple[Route, ...] = (
     Route("GET", "/api/materials", "session", _config_guard(list_materials)),
     Route("GET", "/api/materials/converter", "session", get_converter),
@@ -529,4 +560,8 @@ ROUTES: tuple[Route, ...] = (
     Route("GET", "/api/materials/{material_id}/impact", "session", _managed_route(get_impact)),
     Route("DELETE", "/api/materials/{material_id}", "session", _managed_route(delete_material)),
     Route("POST", "/api/materials/{material_id}/restore", "session", _managed_route(restore_material)),
+    Route("GET", "/api/materials/{material_id}/packs", "session", _managed_route(list_packs)),
+    Route(
+        "POST", "/api/materials/{material_id}/packs/{pack_id}/purge", "session", _managed_route(purge_pack)
+    ),
 )

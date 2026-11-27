@@ -9,7 +9,6 @@ from pathlib import Path
 from typing import Any
 
 import pytest
-from sqlalchemy import text
 
 from .conftest import MATERIAL_SHA, Pg, World, client, need, world
 from .test_gc_db import Calls, pack, plan_and_report, rows_of
@@ -108,8 +107,9 @@ async def test_the_routes(pg: Pg, tmp_path: Path) -> None:
             again = await c.post(f"{base}/{r3}/purge", json={"confirm": "synthetic"})
             assert again.status_code == 202 and again.json() == {"pack_id": r3, "enqueued": False}
         await w.work()
-        assert await w.scalar("SELECT purged_at IS NOT NULL FROM base_packs WHERE owner_id = :o AND pack_id = :p",
-                              o=w.users["ivan"], p=r3)
+        assert await w.scalar(
+            "SELECT purged_at IS NOT NULL FROM base_packs WHERE owner_id = :o AND pack_id = :p",
+            o=w.users["ivan"], p=r3)
         async with client(w, jobs=w.jobs) as c:
             listed = (await c.get(base)).json()["packs"]
             assert listed[1]["purged_at"] is not None and listed[0]["purged_at"] is None
@@ -124,8 +124,7 @@ async def test_the_routes(pg: Pg, tmp_path: Path) -> None:
         async with client(w) as c:  # no job runtime in the api
             got = await c.post(f"{base}/{legacy}/purge", json={"confirm": "synthetic"})
             assert (got.status_code, got.json()) == (503, {"error": "unavailable"})
-        async with w.engine.connect() as conn:
-            assert (await conn.execute(text("SELECT count(*) FROM job_keys WHERE kind = 'ingest.purge'"))).scalar() == 1
+        assert await w.scalar("SELECT count(*) FROM job_keys WHERE kind = 'ingest.purge'") == 1
 
 
 def test_the_purge_kind_is_declared_with_its_key(tmp_path: Path) -> None:

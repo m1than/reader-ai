@@ -374,15 +374,29 @@ async def rollback(conn: AsyncConnection, owner_id: uuid.UUID, to_seq: int) -> i
 
 async def remove_material(conn: AsyncConnection, owner_id: uuid.UUID, material_sha256: str) -> bool:
     """FR-INGEST-31's delete: one entry without the material's element when the head names it; no lock."""
+    return await _remove(conn, owner_id, material_sha256, None, "delete")
+
+
+async def remove_pack(conn: AsyncConnection, owner_id: uuid.UUID, pid: str) -> bool:
+    """FR-INGEST-45's purge: one entry without the pack when the head names it (the caller holds its lock)."""
+    return await _remove(conn, owner_id, None, pid, "purge")
+
+
+async def _remove(conn: AsyncConnection, owner_id: uuid.UUID, material_sha256: str | None, pid: str | None,
+                  reason: str) -> bool:
     for _ in range(CAS_RETRIES):
         seq, top = await head(conn, owner_id)
-        current = await _element_of(conn, owner_id, top, material_sha256)
-        if current is None:
+        if material_sha256 is not None:
+            current = await _element_of(conn, owner_id, top, material_sha256)
+            gone = None if current is None else current[0]
+        else:
+            gone = pid if pid in _elements(top) else None
+        if gone is None:
             return False
         elements = _elements(top)
-        del elements[current[0]]
+        del elements[gone]
         try:
-            await append(conn, owner_id, seq, make_entry(elements), "delete")
+            await append(conn, owner_id, seq, make_entry(elements), reason)
         except ManifestError as error:
             if error.code != "manifest_conflict":
                 raise

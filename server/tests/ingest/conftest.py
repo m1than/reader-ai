@@ -322,7 +322,9 @@ async def session_for(w: World, handle: str) -> str:
 
 
 @asynccontextmanager
-async def client(w: World, handle: str | None = "ivan", *, jobs: Any = None) -> AsyncIterator[httpx.AsyncClient]:
+async def client(
+    w: World, handle: str | None = "ivan", *, jobs: Any = None
+) -> AsyncIterator[httpx.AsyncClient]:
     from reader.api.app import create_app
 
     app = create_app(w.settings, w.engine, run_cleanup_task=False)
