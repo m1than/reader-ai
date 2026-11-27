@@ -2243,7 +2243,16 @@ tasks:
         estimate, not a bound; ADR-0005's $4.35 is the reported target); fact-check through the fact-check
         route if the ablation keeps it; Admiralty credibility 1–6 per claim. FR-PIPELINE-4, -5, -6, -8;
         NFR-PIPELINE-1; VEC-PIPELINE-1/2; INV-PIPELINE-1, -2, -3, -5. Supersedes V.cost-optimize lever 7" }
-  - { id: V.kl-tutor-find, stage: V, kind: module, track: ai, status: todo, needs: [V.kl-search-find],
+  - { id: V.kl-tutor-find, stage: V, kind: module, track: ai, status: in_progress, needs: [V.kl-search-find],
+      branch: V/kl-tutor-find,
+      note: "2026-11-28, phase 1: SRV-TUTOR revision drafted (kl_revision, status draft, not approved) with the paired
+        SRV-SEARCH note kl_tutor_find. find on channel tutor scoped to the course material (StoreCorpus
+        material_sha256), L1 card ids then each card's next span, FR-TUTOR-6's 29,000-byte drop rule kept;
+        policy channels.tutor.budget_default 5,250 -> 10,500 (card JSON ~330 tokens before text; moves
+        policy_version); FR-TUTOR-8 citation quote_sha256 (FR-INGEST-40 gate (g)) and FR-TUTOR-22 REWRITERS
+        (FR-INGEST-41 target); judge not wired (Deps.judge None); L5 boost deferred; the tutor's search() path
+        removed, search() and /api/search later (V.kl-live). Measurement: M1 free [local] predictor
+        gold_in_sources; P1 paid bench ~$1.84 (<= $12) waits for the owner. Awaits deep-reviewer",
       what: "SRV-TUTOR revision (~100–200 lines): retrieval through find on the tutor channel with its own maximum in
         policy, starting at today's 21,000-byte source budget, full span text for personal-use cards, NFR-TUTOR-3
         grounding re-measured as a gate; L5 boost once learner

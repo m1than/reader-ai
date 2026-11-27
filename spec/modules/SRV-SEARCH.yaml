@@ -1475,3 +1475,34 @@ proposed_defers:
   - "The caller of `greedy.set_cover` (atlas gaps, purchase proposals): SRV-KB, stage 7."
   - "Dropping search_chunks and search_embeds: a migration after V.kl-live."
   - "A response cache: not built; reproducibility rests on brain_version, policy_version and recorded judge outputs."
+
+# ---- Paired with SRV-TUTOR's ADR-0039 revision (V.kl-tutor-find), DRAFT, not approved; it lands with that revision's
+# Red tests. Approved texts above stay in force until then.
+kl_tutor_find:
+  corpus_scope:
+    text: >-
+      FR-SEARCH-7's `StoreCorpus(conn, policy, material_sha256=None)`: an internal caller (the tutor) may scope the
+      candidates to one material; the value is passed to `store.candidates(material_sha256=…)`, which already takes
+      it. Not a request field and not in the request hash (SRV-TUTOR kl_open_points 3); routes never set it.
+    tests_planned:
+      - "add to server/tests/search/test_find_db.py or test_search_db.py [db]: with two active materials, a StoreCorpus scoped to one returns only that material's cards; unscoped returns both"
+  policy_change:
+    text: >-
+      `policy.json` `channels.tutor.budget_default` 5,250 → 10,500 (= `budget_max`, unchanged; the owner channel's
+      maximum stays equal to it). proposed_bounds.channel_budgets' "5,250 tokens ≈ 21,000 bytes" counted span text only;
+      a card's JSON costs about 330 tokens before its text (`cards.cost`, SRV-TUTOR proposed_bounds find_budget), so
+      the tutor's source budget needs the maximum. This moves `policy_version` (FR-OBS-21 over `declared()`): judge
+      outputs recorded under the old version are not replayed for new requests (none exist while the gate is
+      `never_judge`). Initial until SRV-TUTOR's M1.
+    tests_planned:
+      - "change server/tests/search/test_policy_unit.py [unit]: tutor budget_default == budget_max == the owner channel's budget_max"
+  legacy_search:
+    text: >-
+      FR-SEARCH-7's "it is removed with that task" is narrowed: V.kl-tutor-find removes the **tutor's** call path (the
+      tutor's `Hit` Protocol, `candidate_span_ids` and its `search` dependency) and the Hit contract test against
+      `reader.tutor.jobs.Hit`. `search()` itself keeps serving `POST /api/search` (FR-SEARCH-8), which the owner slice
+      bench (questions-v2, VEC-SEARCH-3, NFR-SEARCH-1's reported recall) still reads; it is removed with that route
+      when those benches read `/api/find`, proposed for V.kl-live together with dropping search_chunks and
+      search_embeds (proposed_defers).
+    tests_planned:
+      - "remove the Hit contract case from server/tests/search/test_search_unit.py (with SRV-TUTOR's FR-TUTOR-5 Red)"
