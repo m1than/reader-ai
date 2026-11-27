@@ -1941,7 +1941,8 @@ requirements:
       **Paired (SRV-SEARCH, V.kl-search-find unit 4a, 2026-11-27):** the production `search_forget_overlay` seam is
       now SRV-SEARCH's `store.forget_overlay` (FR-SEARCH-5), so a purge of a pack with a `vectors` overlay deletes
       its `search_span_vectors` rows; the two `seam_unbound` tests keep testing the refusal with that seam unbound
-      explicitly (`dataclasses.replace(gc.SEAMS[0], search_forget_overlay=gc._unbound)`), no other oracle changed.
+      explicitly (`dataclasses.replace(gc.SEAMS[0], search_forget_overlay=gc._unbound)`), no other oracle changed
+      (Green: a line-length rewrap).
       (4) An applied purge writes one audit row `material.purge_pack` {object id: the material's id
       (`materials.config_id`), detail `{pack_id}`} with the owner as actor, in the job's transaction (paired SRV-EVENTS
       `audit_actions`, FR-EVENTS-30), so it commits or rolls back with the purge; a repeated purge, a 404 and a

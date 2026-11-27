@@ -44,13 +44,14 @@ async def overlay(w: World, handle: str) -> tuple[uuid.UUID, str, str]:
     return owner, oid, pack.pack_id
 
 
-def row(owner: uuid.UUID, oid: str, pid: str, window_no: int = 0, fts_config: str = "english") -> dict[str, Any]:
+def row(owner: uuid.UUID, oid: str, pid: str, window_no: int = 0,
+        fts_config: str = "english") -> dict[str, Any]:
     return {"o": owner, "v": oid, "p": pid, "l": "spn:" + MAT_EN + ":p1:0-5", "n": window_no, "f": fts_config}
 
 
 INSERT = text(
-    "INSERT INTO search_span_vectors (owner_id, overlay_id, pack_id, locator, window_no, char_start, char_stop,"
-    " model, fts_config, fts, embedding) VALUES (:o, :v, :p, :l, :n, 0, 5, 'm', :f,"
+    "INSERT INTO search_span_vectors (owner_id, overlay_id, pack_id, locator, window_no, char_start,"
+    " char_stop, model, fts_config, fts, embedding) VALUES (:o, :v, :p, :l, :n, 0, 5, 'm', :f,"
     " to_tsvector('english', 'hello'), array_fill(0.0::real, ARRAY[1024])::vector)"
 )
 
@@ -70,8 +71,8 @@ async def test_key_check_two_owners_and_no_text_column(w: World) -> None:
     with pytest.raises(IntegrityError):
         async with w.engine.begin() as conn:
             await conn.execute(INSERT, row(ivan, oid, pid, 1, "german"))
-    columns = await scalar(w.engine, "SELECT array_agg(column_name::text ORDER BY column_name)"
-                                     " FROM information_schema.columns WHERE table_name = 'search_span_vectors'")
+    columns = await scalar(w.engine, "SELECT array_agg(column_name::text ORDER BY column_name) FROM"
+                           " information_schema.columns WHERE table_name = 'search_span_vectors'")
     assert "text" not in columns and {"owner_id", "overlay_id", "locator", "window_no", "fts"} <= set(columns)
     heads = await scalar(w.engine, "SELECT array_agg(version_num::text) FROM alembic_version")
     assert "search_0002" in heads
@@ -99,11 +100,12 @@ async def test_a_sealed_overlay_is_immutable_and_forget_overlay_deletes(w: World
         with pytest.raises(DBAPIError):
             async with w.engine.begin() as conn:
                 await conn.execute(statement, params)
-    with pytest.raises(DBAPIError):  # the setting does not open UPDATE
+    update_under_setting = text(  # the setting does not open UPDATE
+        "WITH s AS (SELECT set_config('reader.search_delete', 'on', true))"
+        " UPDATE search_span_vectors SET window_no = 7 FROM s WHERE owner_id = :o")
+    with pytest.raises(DBAPIError):
         async with w.engine.begin() as conn:
-            await conn.execute(text("SELECT set_config('reader.search_delete', 'on', true)"))
-            await conn.execute(text("UPDATE search_span_vectors SET window_no = 7 WHERE owner_id = :o"),
-                               {"o": ivan})
+            await conn.execute(update_under_setting, {"o": ivan})
     async with w.engine.begin() as conn:
         assert await store.forget_overlay(conn, ivan, oid) == 1
         assert await scalar_in(conn, "SELECT current_setting('reader.search_delete', true)") == "off"

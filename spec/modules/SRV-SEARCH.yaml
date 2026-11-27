@@ -243,7 +243,7 @@ requirements:
       returns the count, and it is bound as SRV-INGEST's production `search_forget_overlay` GC and purge seam
       (paired note in SRV-INGEST FR-INGEST-45). The build and read paths (FR-SEARCH-3, -5..-10, -20 revisions) move
       onto these rows in unit 4b; until then the legacy chunk path above serves. Tests in a new file instead of
-      test_search_db.py. [db] test_span_vectors_db.py.
+      test_search_db.py. [db] test_span_vectors_db.py (Green: lint-only test edits, no oracle changed).
   - id: FR-SEARCH-5
     text: >-
       **The embed job.** Kind `search.embed`, declared in `reader.search.jobs.JOB_KINDS`:

@@ -65,6 +65,19 @@ async def forget_legacy(conn: AsyncConnection, owner_id: UUID, ingest_id: UUID) 
     return count
 
 
+async def forget_overlay(conn: AsyncConnection, owner_id: UUID, overlay_id: str) -> int:
+    """FR-SEARCH-5: the owner's span-vector rows of one overlay, deleted on the caller's connection
+    (SRV-INGEST's GC and purge, under their locks); the only writer of `reader.search_delete`, which it
+    switches off again."""
+    await conn.execute(text("SELECT set_config('reader.search_delete', 'on', true)"))
+    done = await conn.execute(
+        text("DELETE FROM search_span_vectors WHERE owner_id = :o AND overlay_id = :v"),
+        {"o": owner_id, "v": overlay_id},
+    )
+    await conn.execute(text("SELECT set_config('reader.search_delete', 'off', true)"))
+    return int(done.rowcount)
+
+
 @dataclass(frozen=True)
 class Hit:
     chunk_id: int

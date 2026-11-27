@@ -287,7 +287,8 @@ async def test_a_dead_purge_is_requeued_by_the_next_request(
         pid = await pack(w, MATERIAL_SHA, R2, material_id="synthetic")
         async with w.engine.begin() as conn:
             await vectors(conn, w.users["ivan"], pid)
-        monkeypatch.setattr(gc, "SEAMS", [dataclasses.replace(gc.SEAMS[0], search_forget_overlay=gc._unbound)])
+        unbound = dataclasses.replace(gc.SEAMS[0], search_forget_overlay=gc._unbound)
+        monkeypatch.setattr(gc, "SEAMS", [unbound])
         url =f"/api/materials/synthetic/packs/{pid}/purge"
         async with client(w, jobs=w.jobs) as c:
             assert (await c.post(url, json={"confirm": "synthetic"})).json()["enqueued"] is True

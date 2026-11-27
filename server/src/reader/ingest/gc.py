@@ -65,6 +65,12 @@ async def _search_forget_legacy(conn: AsyncConnection, owner_id: uuid.UUID, inge
     return await store.forget_legacy(conn, owner_id, ingest_id)
 
 
+async def _search_forget_overlay(conn: AsyncConnection, owner_id: uuid.UUID, overlay_id: Any) -> Any:
+    from reader.search import store
+
+    return await store.forget_overlay(conn, owner_id, str(overlay_id))
+
+
 async def _cited_until_bound(conn: AsyncConnection, owner_id: uuid.UUID, pack_id: Any) -> bool:
     """Fails closed until SRV-LESSON's revision_packs and SRV-KB's findings bind it: every pack is cited."""
     del conn, owner_id, pack_id
@@ -83,7 +89,7 @@ class Seams:
 
     forget_pack: OwnerCall = _judges_forget_pack  # SRV-AGENT judges.forget_pack
     forget_overlay: OwnerCall = _judges_forget_overlay  # SRV-AGENT judges.forget_overlay
-    search_forget_overlay: OwnerCall = _unbound  # SRV-SEARCH forget_overlay (paired; refuses until bound)
+    search_forget_overlay: OwnerCall = _search_forget_overlay  # SRV-SEARCH forget_overlay (FR-SEARCH-5)
     search_forget_legacy: OwnerCall = _search_forget_legacy  # SRV-SEARCH FR-SEARCH-21
     cited: Callable[[AsyncConnection, uuid.UUID, Any], Awaitable[bool]] = _cited_until_bound
     purge_judge_inputs: Callable[[AsyncConnection, str], Awaitable[Any]] = _obs_purge_judge_inputs  # SRV-OBS
