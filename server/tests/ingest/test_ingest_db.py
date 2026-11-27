@@ -288,9 +288,9 @@ async def test_tables_have_owner_ids_and_the_downgrade_drops_only_them(pg: Pg, t
             assert fk == 1 and nullable == "NO", table
         unique = await w.scalar(
             "SELECT count(*) FROM pg_indexes"
-            " WHERE tablename = 'ingests' AND indexdef LIKE '%UNIQUE%(material_id)%'"
+            " WHERE tablename = 'ingests' AND indexdef LIKE '%UNIQUE%(material_id, converter_version)%'"
         )
-        assert unique == 1
+        assert unique == 1  # FR-INGEST-14 revision 3 (ingest_0004_packs): one pack per material and version
         import importlib.util
 
         path = need("reader.ingest").MIGRATIONS / "ingest_0001.py"

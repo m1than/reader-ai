@@ -1,6 +1,6 @@
 """Locator span ids, outline ids and quote hashes over VEC-INGEST-8 (SRV-INGEST revision 3, ADR-0039 P2).
 
-@trace FR-INGEST-33 FR-INGEST-34 VEC-INGEST-8
+@trace FR-INGEST-33 FR-INGEST-34 VEC-INGEST-8 FR-INGEST-35
 """
 
 from __future__ import annotations
@@ -118,3 +118,21 @@ def test_property_locators(texts: list[str], page: int) -> None:
         else:
             assert parsed.ordinal is None
     assert m.quote_sha256(body) == hashlib.sha256(body.encode()).hexdigest()
+
+
+R2_PROFILE = "d7a0ee528c62746bf86f6b813d4a8464b98bbb333c1dbb4fffb9d56433ce2bcb"  # converter.sb at 47aa55a
+
+
+def test_parse_configs_are_pinned_literals() -> None:
+    ingest = need("reader.ingest")
+    configs = ingest.PARSE_CONFIGS
+    assert list(configs) == ["docling-2.151.1+r2", "docling-2.151.1+r3"]  # converter-version order
+    profile = Path(ingest.__file__).resolve().parent / "host" / "converter.sb"
+    assert configs["docling-2.151.1+r3"]["profile_sha256"] == hashlib.sha256(profile.read_bytes()).hexdigest()
+    assert configs["docling-2.151.1+r2"]["profile_sha256"] == R2_PROFILE
+    for version, config in configs.items():
+        assert config["converter_version"] == version
+        assert (config["docling"], config["batch_pages"]) == ("2.151.1", 50)
+        assert config["pipeline"] == {"do_ocr": False, "do_table_structure": True, "do_formula_enrichment": True,
+                                      "do_code_enrichment": False, "device": "cpu"}
+    assert ingest.LEGACY_VERSIONS == ("docling-2.151.1+r2",)
