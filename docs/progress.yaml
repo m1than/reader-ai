@@ -2297,7 +2297,12 @@ tasks:
         id; step 7b locator.parse), lessons_0003 revision_packs (append-only triggers) written in write_revision
         through views.citing_packs (head read + one DISTINCT ON query: active pack first, else the lowest pack id);
         gc.Seams.cited stays unbound; test_manage_courses_db.py's FR-LESSON-20 migration test now downgrades to
-        lessons_0001 by id. CONVERTER_VERSION stays docling-2.151.1+r2 (the bump waits for gate (g)).",
+        lessons_0001 by id. Unit f (SRV-PIPELINE) done: pipeline Span carries quote_sha256 from the view;
+        material_of (in reader.pipeline.source, re-exported by notebook; raises LocatorError on neither form) drives
+        the erratum/route material and the credibility-1 count; span_ref adds the hash beside a locator and fails
+        output_invalid on a locator without one; a model-written reference hash is dropped and to_compact hides
+        hashes; INV-PIPELINE-3 checked over a legacy and a locator source; VEC-PIPELINE-6 gains 3 locator cases.
+        CONVERTER_VERSION stays docling-2.151.1+r2 (the bump waits for gate (g)).",
       what: "spec revisions for FR-INGEST-40 gates (e), (f), (h), (i) and the final CONVERTER_VERSION r3 step" }
   - { id: V.kl-live, stage: V, kind: live, status: todo, needs: [V.kl-pipeline-checks, V.kl-tutor-find],
       what: "upload -> one manifest entry; a BIP-32 question -> cards with locators; remove the pack -> search no longer

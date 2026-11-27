@@ -14,7 +14,8 @@ from dataclasses import dataclass
 from typing import Any, Final
 
 from reader.agent.errors import agent_error
-from reader.pipeline.source import Span
+from reader.ingest import locator
+from reader.pipeline.source import Span, material_of
 
 ITEMS_MAX: Final = 400  # bounds.items_max_per_report
 VERDICTS: Final = frozenset({"supported", "unsupported", "contradicted"})
@@ -48,9 +49,24 @@ def constrain_credibility(verdict: str, value: int, span_ids: Sequence[str]) -> 
     default; 1 ("confirmed by independent sources") needs cited spans from two or more materials, else 2."""
     allowed, default = CREDIBILITY[verdict]
     out = value if value in allowed else default
-    if out == 1 and len({s.split(":", 1)[0] for s in span_ids}) < 2:
+    try:
+        materials = {material_of(s) for s in span_ids}
+    except locator.LocatorError:  # unreachable: every id came from a view (FR-PIPELINE-7)
+        raise invalid() from None
+    if out == 1 and len(materials) < 2:
         out = 2
     return out
+
+
+def span_ref(span: Span) -> dict[str, str]:
+    """FR-PIPELINE-7: the span id, plus its quote_sha256 when the id is a locator (a legacy id gets none).
+    A locator without a stored hash cannot occur (an active pack is sealed); if it does, the step fails
+    closed."""
+    if locator.is_legacy_id(span.span_id):
+        return {"span": span.span_id}
+    if span.quote_sha256 is None:
+        raise invalid()
+    return {"span": span.span_id, "quote_sha256": span.quote_sha256}
 
 
 @dataclass(frozen=True)
@@ -181,9 +197,7 @@ def expand_citations(
             if span is None:
                 stripped.append(str(alias))
                 continue
-            kept.append(
-                {"span": span.span_id, "page": span.page, "material_title": material_title[:TITLE_MAX]}
-            )
+            kept.append({**span_ref(span), "page": span.page, "material_title": material_title[:TITLE_MAX]})
         elif set(citation) == {"url", "retrieved"}:
             kept.append({"url": citation["url"], "retrieved": citation["retrieved"]})
         else:
