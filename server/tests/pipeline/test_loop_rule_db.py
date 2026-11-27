@@ -1,4 +1,4 @@
-# @trace FR-PIPELINE-5, FR-PIPELINE-23
+# @trace FR-PIPELINE-5, FR-PIPELINE-18, FR-PIPELINE-23
 """The loop rule and the stale-step rules on the real job machinery (ADR-0039 decision 22, SRV-AGENT FR-AGENT-23).
 [db]
 
@@ -194,19 +194,16 @@ REFUSING = {"draft": 4.0, "fact_check": 0.3, "review": 4.0}  # the fact_check re
 
 
 async def test_a_refusal_survives_a_rolled_back_step(
-    pg: Pg, tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    pg: Pg, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """The refused step's transaction is lost after its refusal and findings enqueue; the refusal was already
-    committed on its own connection (read from another connection before the loss), so the retry takes the
-    stale-step branch (no second refusal, no reservation); the findings ran once, the run ends budget_exhausted
-    and counts one end."""
-    import logging
-
+    committed on its own connection (read from another connection before the loss), so the retry returns early
+    (by the stale-step branch, or by the already-recorded branch when findings ran first): no second refusal,
+    no reservation; the findings ran once, the run ends budget_exhausted and counts one end."""
     from sqlalchemy import text
 
     steps = need("reader.pipeline.steps")
     errors = need("reader.pipeline.errors")
-    caplog.set_level(logging.INFO, logger="reader.pipeline")
     async with pipeline_env(pg, tmp_path, task_budgets=REFUSING, floors=DEFAULTS["reserves"]) as env:
         real = steps._refused
         lost: list[int] = []
@@ -287,3 +284,33 @@ async def test_planned_sum_equals_the_reserves_written(pg: Pg, tmp_path: Path) -
         ))
         assert planned > Decimal("0.0003")  # the estimate, not the floors
         assert planned == reserved
+
+
+async def test_a_lost_last_check_counts_one_end(pg: Pg, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """FR-PIPELINE-18 (code review round 3): the review's transaction is lost after its findings enqueue; the
+    retry calls the model again and gets another report, so its findings has another key at the same step. Only
+    the key of the run's last row counts: one end."""
+    steps = need("reader.pipeline.steps")
+    errors = need("reader.pipeline.errors")
+    async with pipeline_env(pg, tmp_path, floors=DEFAULTS["reserves"]) as env:
+        real = steps.enqueue_next
+        lost: list[int] = []
+
+        async def enqueue_then_lost(jobs: Any, rt: Any, run: Any, lesson: Any, done: Any) -> None:
+            await real(jobs, rt, run, lesson, done)
+            if done and done[-1].stage == "adversarial_review" and not lost:
+                lost.append(1)
+                raise errors.InputNotReady()
+
+        monkeypatch.setattr(steps, "enqueue_next", enqueue_then_lost)
+        run = await _start(env, [
+            {"stage": "draft", "cost": 0.6},
+            {"stage": "fact_check", "cost": 0.24, "unsupported": 0, "contradicted": 0},
+            {"stage": "adversarial_review", "cost": 0.5, "blocking": 0, "nonblocking": 1},
+            {"stage": "adversarial_review", "cost": 0.5, "blocking": 0, "nonblocking": 1},
+        ])
+        for _ in range(4):
+            await env.work()
+        assert lost == [1]
+        assert await env.scalar("SELECT ends FROM compile_runs WHERE id = :r", r=run) == 1
+        assert (await env.state(run))["state"] == "converged"

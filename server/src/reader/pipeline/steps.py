@@ -331,8 +331,9 @@ async def loop_plan(
     for stage in ("fact_check", "adversarial_review"):
         # a check is droppable only while every earlier call of the loop is reused: once one runs anew, the
         # notebooks after it are new, so every later check is planned too
-        droppable = not planned and revised is not None
-        if droppable and revised is not None and await _reusable_check(conn, rt, run, lesson, stage, revised):
+        if not planned and revised is not None and await _reusable_check(
+            conn, rt, run, lesson, stage, revised
+        ):
             continue
         planned.append(_planned(rt, stage, _prompt_chars(rt, stage, current, lesson, steps)))
     return planned

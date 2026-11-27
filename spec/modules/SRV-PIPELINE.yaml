@@ -423,8 +423,10 @@ requirements:
       outcome, its status or the read routes (SRV-OBS INV-OBS-3). A resumed run that ends again enqueues with the
       next `end`. With tracing off nothing is enqueued. The end is counted (`compile_runs.ends` + 1, at most 100)
       by the stage kinds' SRV-EVENTS `after_end` hook only for the step that ended the run (code review of
-      8466329): a succeeded step of a run that is finished and not cancelled whose `step` is at least every
-      recorded step of the run, or a dead step of a run that is not finished (a dead step after the run ended, or
+      8466329; ADR-0039 revision, code review rounds 2–3): a succeeded step of a run that is finished and not
+      cancelled whose job key is the run's last compile_steps row — the row with the highest `step` has this
+      `step`, `stage` and `input_sha256` — or, when the run has no row at all, the draft (step 1) whose budget
+      refusal finished it; or a dead step of a run that is not finished (a dead step after the run ended, or
       after a cancel, counts nothing). A cancel (FR-PIPELINE-20) counts its end in its own transaction and enqueues
       after commit; the step that sees the cancel counts nothing. Tests: [db] a finished and a failed run each enqueue exactly
       one `obs.runs` with end 1 after commit; a resumed run's second end enqueues end 2; a cancelled run enqueues
@@ -501,7 +503,8 @@ requirements:
       call whose `input_sha256` is known now and has a completed step to reuse (FR-PIPELINE-5) is not planned.
       `revise`: its input is known now (exact prompt); when it is reusable, its output notebook is known, so the
       inputs of the loop's `fact_check` and `adversarial_review` are computed from it and reusable ones are dropped
-      too. Otherwise `fact_check` and `adversarial_review` are planned with prompts rendered from the current notebook
+      too, in order: once a call is planned, every later check is planned too (the review is dropped only when
+      revise and fact_check are both reusable). Otherwise `fact_check` and `adversarial_review` are planned with prompts rendered from the current notebook
       as an estimate of the revised one, the route-mode fact-check source counted at `bounds.source_max_chars`, plus
       in route mode one `judge.find` per fact-checkable item of the current notebook (at most
       `bounds.items_max_per_report`; an over-estimate, since the find deadline may reach fewer) with the slot's input
