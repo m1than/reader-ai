@@ -1179,5 +1179,5 @@ proposed_revisions:
 
 proposed_decisions:  # deep-reviewer round 1 (340bc02), coordinator answers
   - "A locator span with no stored hash fails the step closed (output_invalid), never a citation without its hash."
-  - "VEC-PIPELINE-6 is extended in place (new cases, old ones kept); the old `A:1` placeholders are legacy-id shaped and stay valid."
+  - "VEC-PIPELINE-6 is extended in place (new cases, old ones kept); the old `A:1` placeholders are legacy-id shaped once the test substitutes 64-hex shas for `A`/`B`, and stay valid."
   - "A compile run in flight across the r3 activation: option (a), the owner step forbids it and INV-PIPELINE-3 is stated per step."

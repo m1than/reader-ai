@@ -2705,8 +2705,8 @@ proposed_requirements:
       embed longer and the legacy embed is wasted (round 1, open question (i) answered);
       (4) `reader-ingest <pilot material id>` converts
       again (FR-INGEST-12 revised: no import under the current version; 702 s and 4.36 GB peak measured).
-      **No compile run of the pilot's lessons from step (4) until step (5) ends `appended`** (`reader status` shows
-      no compile running before step (4); round 1, blocking 3, option (a)): a run whose draft was written with the
+      **No compile run of the pilot's lessons from step (4) until step (5) ends `appended`** (before step (4),
+      `GET /api/compiles` lists no open run, its `open_runs` predicate in reader/pipeline/routes.py; round 1, blocking 3, option (a)): a run whose draft was written with the
       legacy pack's aliases and whose later step loads the r3 pack would mix id forms in one notebook. SRV-PIPELINE's
       INV-PIPELINE-3 revision states the property per step, so such a run is still well-formed, only wasteful;
       (5) watch the r3 pack's pending activation pass `vectors_missing` (one embed, 26.8 min measured),
