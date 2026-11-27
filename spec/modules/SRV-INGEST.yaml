@@ -2622,6 +2622,10 @@ proposed_owner_notes:
 #   unit 2: the reconcile test counted the import as an entry; the import appends none (FR-INGEST-39), so the
 #   expected seqs are 1..4, not 2..5.
 #   unit 3: two test lines wrapped for ruff (line length), no oracle change.
+#   unit 4: test lines wrapped for ruff (line length) and the gone-pack column named from a fixed map (S608), no
+#   oracle change. The packs tests' `imported` helper receives its legacy pack under r2 explicitly (with
+#   CONVERTER_VERSION set to r2 for that receive), since the VEC-INGEST-1 fixture is now r3; the upload test's
+#   span id prefix follows FR-INGEST-15's revised span id (`spn:<sha>:`).
 #
 # Open points:
 #   1. FR-INGEST-41 runs as a one-shot command, not an Alembic migration (P2 (4) wording): startup migrations would

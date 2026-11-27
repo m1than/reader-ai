@@ -1,6 +1,7 @@
 """`python -I -m reader.ingest.status --material-sha256 <sha>`: a material's import status (FR-INGEST-12).
 
-The key is the material's frozen converter version when it has one (FR-INGEST-17), else CONVERTER_VERSION.
+The key is (material_sha256, CONVERTER_VERSION) only (revision 3: no frozen version); a succeeded key whose
+pack is collected or purged reports `collected` or `purged`.
 """
 
 from __future__ import annotations
@@ -21,14 +22,17 @@ class StatusSource(Protocol):
 
 
 async def current_version(engine: AsyncEngine, material_sha256: str) -> str:
-    async with engine.connect() as conn:
-        frozen = await store.frozen_version(conn, material_sha256)
-    return frozen or ingest.CONVERTER_VERSION
+    del engine, material_sha256
+    return ingest.CONVERTER_VERSION
 
 
 async def status(engine: AsyncEngine, jobs: StatusSource, material_sha256: str) -> dict[str, Any]:
     version = await current_version(engine, material_sha256)
     state = await jobs.job_status(KIND, key_for(material_sha256, version))
+    if state == "succeeded":
+        async with engine.connect() as conn:
+            gone = await store.pack_state(conn, material_sha256, version)
+        state = state if gone == "live" else gone
     return {"status": state, "converter_version": version}
 
 

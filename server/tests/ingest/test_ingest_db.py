@@ -158,7 +158,9 @@ R2: Final = "docling-2.151.1+r2"
 R3: Final = "docling-2.151.1+r3"
 
 
-async def test_second_converter_version_imports_a_second_pack(pg: Pg, tmp_path: Path, monkeypatch: Any) -> None:
+async def test_second_converter_version_imports_a_second_pack(
+    pg: Pg, tmp_path: Path, monkeypatch: Any
+) -> None:
     """FR-INGEST-11, -12, -13, -17 revised: no frozen version; an r2-imported material is `none` under r3."""
     ingest = need("reader.ingest")
     status = need("reader.ingest.status")
@@ -167,7 +169,8 @@ async def test_second_converter_version_imports_a_second_pack(pg: Pg, tmp_path: 
         await receive(w, tar(converter_version=R2))
         await w.work()
         monkeypatch.setattr(ingest, "CONVERTER_VERSION", R3)
-        assert await status.status(w.engine, w.jobs, MATERIAL_SHA) == {"status": "none", "converter_version": R3}
+        report = await status.status(w.engine, w.jobs, MATERIAL_SHA)
+        assert report == {"status": "none", "converter_version": R3}
         assert (await receive(w, tar()))["result"] == "queued"
         await w.work()
         assert await status.status(w.engine, w.jobs, MATERIAL_SHA) == {
@@ -201,13 +204,14 @@ async def test_locator_and_pack_mismatch_are_refused_at_receive(pg: Pg, tmp_path
 
 @pytest.mark.parametrize("gone", ["collected", "purged"])
 async def test_status_of_a_gone_pack(pg: Pg, tmp_path: Path, gone: str) -> None:
-    """FR-INGEST-12 and VEC-INGEST-5 revised: a succeeded key whose pack is collected or purged reports it."""
+    """FR-INGEST-12, VEC-INGEST-5 revised: a succeeded key whose pack is collected or purged reports that."""
     status = need("reader.ingest.status")
+    column = {"collected": "collected_at", "purged": "purged_at"}[gone]
     async with world(pg, tmp_path) as w:
         await receive(w, tar())
         await w.work()
         async with w.engine.begin() as conn:
-            await conn.execute(text(f"UPDATE base_packs SET {gone}_at = now()"))
+            await conn.execute(text("UPDATE base_packs SET " + column + " = now()"))  # noqa: S608 - fixed names
         report = await status.status(w.engine, w.jobs, MATERIAL_SHA)
         assert report == {"status": gone, "converter_version": R3}
         async with client(w) as c:
@@ -216,7 +220,7 @@ async def test_status_of_a_gone_pack(pg: Pg, tmp_path: Path, gone: str) -> None:
 
 
 async def test_spans_route_returns_stable_span_ids(pg: Pg, tmp_path: Path) -> None:
-    """INV-INGEST-7 and FR-INGEST-15 revised: span ids are the locators, with quote hashes; never a legacy id."""
+    """INV-INGEST-7, FR-INGEST-15 revised: span ids are the locators, with quote hashes; never a legacy id."""
     locator = need("reader.ingest.locator")
     async with world(pg, tmp_path) as w:
         await receive(w, tar())

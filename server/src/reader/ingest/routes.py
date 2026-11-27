@@ -25,7 +25,6 @@ from reader.api.http import Ctx, Handler, Route, error
 from reader.config import ConfigError, load_config
 from reader.config.model import Material
 from reader.ingest import manage, manifest, params, store, upload, uploads
-from reader.ingest.artifact import span_id
 from reader.ingest.jobs import KIND, key_for
 from reader.jobs import audit
 from reader.jobs.queue import job_status_of
@@ -64,7 +63,7 @@ async def _imported(conn: AsyncConnection, owner: Any, sha: str) -> Any:
             text(
                 "SELECT i.id, i.converter_version, m.page_count, i.span_count, i.outline_count,"
                 " i.pages_without_text, m.deleted_at FROM ingests i JOIN materials m ON m.id = i.material_id"
-                " WHERE m.owner_id = :o AND m.sha256 = :s"
+                " WHERE m.owner_id = :o AND m.sha256 = :s ORDER BY i.imported_at DESC LIMIT 1"
             ),
             {"o": owner, "s": sha},
         )
@@ -79,9 +78,10 @@ async def _material_fields(conn: AsyncConnection, owner: Any, sha: str) -> dict[
     row = await _imported(conn, owner, sha)
     version = row[1] if row else ingest.CONVERTER_VERSION
     state = await _job_status(conn, key_for(sha, version))
+    pack = await store.pack_state(conn, sha, version) if row else "live"
     return {
         "sha256": sha,
-        "status": store.api_status(state, row is not None),
+        "status": store.api_status(state, row is not None, pack),
         "converter_version": row[1] if row else None,
         "page_count": row[2] if row else None,
         "span_count": row[3] if row else None,
@@ -205,14 +205,15 @@ async def get_spans(ctx: Ctx) -> Response:
         found = await _material_ingest(ctx, conn)
         if found is None:
             return error(404, "not_found")
-        sha, row = found
+        row = found[1]
         raw = ctx.request.query_params.get("page", "")
         valid = raw.isascii() and raw.isdecimal() and len(raw) <= PAGE_DIGITS
         if not valid or not 1 <= int(raw) <= int(row[2]):
             return error(400, "page")
         spans = await conn.execute(
             text(
-                "SELECT seq, page, kind, level, decoded, text, x0, y0, x1, y1 FROM material_spans"
+                "SELECT seq, page, kind, level, decoded, text, x0, y0, x1, y1, locator, quote_sha256"
+                " FROM material_spans"
                 " WHERE ingest_id = :i AND page = :p ORDER BY seq"
             ),
             {"i": row[0], "p": int(raw)},
@@ -221,7 +222,8 @@ async def get_spans(ctx: Ctx) -> Response:
             {
                 "spans": [
                     {
-                        "span_id": span_id(sha, s[0]),
+                        "span_id": s[10],  # FR-INGEST-15 revised: the locator (FR-INGEST-33)
+                        "quote_sha256": s[11],
                         "seq": s[0],
                         "page": s[1],
                         "kind": s[2],

@@ -478,6 +478,8 @@ def _status(deps: Deps, container: str, sha256: str, out: TextIO) -> str:
         out.write("import in progress\n")
     elif status == "dead":
         raise Stop("import_dead", 4, "run again with --requeue")
+    elif status in ("collected", "purged"):  # FR-INGEST-12 rev: back only with the next converter revision
+        raise Stop(status, 2)
     return status
 
 

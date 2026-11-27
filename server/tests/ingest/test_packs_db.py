@@ -24,8 +24,13 @@ PROFILE_SQL = "SELECT overlay_id FROM overlays WHERE kind = 'profile' AND state 
 
 async def imported(w: World, sha: str = MATERIAL_SHA) -> str:
     receive = need("reader.ingest.receive")
-    stream = io.BytesIO(tar_of(build_artifact(material_sha256=sha)))
-    await receive.receive(stream, config=w.config, engine=w.engine, jobs=w.jobs, blobs_root=w.blobs)
+    ingest = need("reader.ingest")
+    stream = io.BytesIO(tar_of(build_artifact(material_sha256=sha, converter_version=R2)))
+    current, ingest.CONVERTER_VERSION = ingest.CONVERTER_VERSION, R2  # the legacy pack these tests start from
+    try:
+        await receive.receive(stream, config=w.config, engine=w.engine, jobs=w.jobs, blobs_root=w.blobs)
+    finally:
+        ingest.CONVERTER_VERSION = current
     await w.work()
     return str(await w.scalar("SELECT pack_id FROM base_packs WHERE material_sha256 = :s", s=sha))
 

@@ -351,7 +351,7 @@ def test_import_status_skips_conversion(tmp_path: Path, status: str, code: int) 
     assert got == code and spawn.started == []
     if status == "dead":
         assert "import_dead" in err and "--requeue" in err
-    if status in ("collected", "purged"):  # FR-INGEST-12 revised: returns only with the next converter revision
+    if status in ("collected", "purged"):  # FR-INGEST-12 revised: back only with the next converter revision
         assert status in err
 
 

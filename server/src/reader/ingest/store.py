@@ -1,4 +1,4 @@
-"""Ingest rows: frozen versions, the import, and the api's status map (SRV-INGEST FR-INGEST-13..15, -17)."""
+"""Ingest rows: the newest version, the import, and the api's status map (SRV-INGEST FR-INGEST-12..15)."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from typing import Any, Final
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
-from reader.ingest import PARSE_CONFIGS, locator, overlays, packs
+from reader.ingest import PARSE_CONFIGS, overlays, packs
 from reader.ingest import manifest as manifests
 from reader.ingest.artifact import read_members, validate_members
 
@@ -26,17 +26,35 @@ async def owner_id(conn: AsyncConnection) -> uuid.UUID | None:
     return found[0] if len(found) == 1 else None
 
 
-async def frozen_version(conn: AsyncConnection, material_sha256: str) -> str | None:
-    """FR-INGEST-17: the converter version of the material's one `ingests` row, if any."""
+async def newest_version(conn: AsyncConnection, material_sha256: str) -> str | None:
+    """The converter version of the material's newest `ingests` row, if any (revision 3: none is frozen)."""
     row = await conn.execute(
         text(
             "SELECT i.converter_version FROM ingests i JOIN materials m ON m.id = i.material_id"
-            " WHERE m.sha256 = :s"
+            " WHERE m.sha256 = :s ORDER BY i.imported_at DESC LIMIT 1"
         ),
         {"s": material_sha256},
     )
     value = row.scalar()
     return None if value is None else str(value)
+
+
+async def pack_state(conn: AsyncConnection, material_sha256: str, converter_version: str) -> str:
+    """FR-INGEST-12 revised: the pack of (material, version) is `purged`, `collected` or `live` (or none)."""
+    if converter_version not in PARSE_CONFIGS:  # a bare ingest of another module's fixture: no pack
+        return "live"
+    row = (
+        await conn.execute(
+            text(
+                "SELECT bool_or(purged_at IS NOT NULL), bool_or(collected_at IS NOT NULL) FROM base_packs"
+                " WHERE pack_id = :p"
+            ),
+            {"p": packs.pack_id(material_sha256, converter_version)},
+        )
+    ).first()
+    if row is not None and row[0]:
+        return "purged"
+    return "collected" if row is not None and row[1] else "live"
 
 
 def read_artifact(root: Path) -> tuple[dict[str, Any], dict[str, bytes]]:
@@ -118,12 +136,7 @@ async def import_rows(
         ),
         {"o": owner, "p": pid, "s": sha, "i": ingest, "c": json.dumps(dict(PARSE_CONFIGS[version]))},
     )
-    # FR-INGEST-33/-34: a first pass keeps each page's span lengths (ints, not texts) for the locators.
-    lengths: dict[int, list[int]] = {}
-    for batch in span_batches(spans):
-        for s in batch:
-            lengths.setdefault(int(s["page"]), []).append(len(s["text"]))
-    ranges = {page: iter(locator.ranges_of_lengths(found)) for page, found in lengths.items()}
+    # FR-INGEST-33/-34: the locators and quote hashes come from the artifact, checked by its validator.
     span_sql = (
         "INSERT INTO material_spans (ingest_id, owner_id, seq, page, kind, level, decoded, text,"
         " x0, y0, x1, y1, locator, quote_sha256) VALUES (:i, :o, :seq, :page, :kind, :level, :decoded, :text,"
@@ -136,8 +149,8 @@ async def import_rows(
                 "o": owner,
                 **{k: s[k] for k in ("seq", "page", "kind", "level", "decoded", "text")},
                 **dict(zip(("x0", "y0", "x1", "y1"), s["bbox"], strict=True)),
-                "loc": locator.pdf_locator(sha, int(s["page"]), *next(ranges[int(s["page"])])),
-                "q": locator.quote_sha256(s["text"]),
+                "loc": s["locator"],
+                "q": s["quote_sha256"],
             }
             for s in batch
         ]
@@ -163,10 +176,11 @@ async def import_rows(
     return True
 
 
-def api_status(job_status: str, ingested: bool) -> str:
-    """VEC-INGEST-5: an `ingests` row means imported; otherwise the job status decides."""
+def api_status(job_status: str, ingested: bool, pack: str = "live") -> str:
+    """VEC-INGEST-5: an `ingests` row means imported (or its pack's `collected`/`purged`); otherwise the job
+    status decides."""
     if ingested:
-        return "imported"
+        return "imported" if pack == "live" else pack
     if job_status == "succeeded":
         log.warning("ingest status inconsistent: succeeded without an ingests row")
         return "dead"

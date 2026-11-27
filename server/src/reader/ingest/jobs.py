@@ -27,7 +27,6 @@ from reader.jobs.model import JobContext, JobKind, idempotency_key
 from reader.obs.spans import child_span
 
 KIND: Final = "ingest.import"
-VersionFrozen = import_error("version_frozen")
 ArtifactMissing = import_error("artifact_missing")
 ArtifactInvalid = import_error("artifact_invalid")
 NoOwner = import_error("no_owner")
@@ -88,7 +87,7 @@ async def _reanchor(args: ReanchorArgs, conn: AsyncConnection, ctx: JobContext) 
     await manifest.try_activate(conn, args.owner_id, args.to_pack_id)
 
 
-async def _enqueue_embed(conn: AsyncConnection, owner: uuid.UUID, material_sha256: str) -> None:
+async def _enqueue_embed(conn: AsyncConnection, owner: uuid.UUID, material_sha256: str, version: str) -> None:
     """FR-INGEST-13 (SRV-SEARCH FR-SEARCH-5 paired change): search.embed for the ingest this run wrote.
 
     The ingest id is read in the run session (its rows are not committed yet); the enqueue commits on its
@@ -104,9 +103,9 @@ async def _enqueue_embed(conn: AsyncConnection, owner: uuid.UUID, material_sha25
         await conn.execute(
             text(
                 "SELECT i.id FROM ingests i JOIN materials m ON m.id = i.material_id"
-                " WHERE m.owner_id = :o AND m.sha256 = :s"
+                " WHERE m.owner_id = :o AND m.sha256 = :s AND i.converter_version = :v"
             ),
-            {"o": owner, "s": material_sha256},
+            {"o": owner, "s": material_sha256, "v": version},
         )
     ).scalar_one()
     fts_config = await fts_config_of(conn, material_sha256, ingest_id)
@@ -146,9 +145,6 @@ def make_kinds(blobs_root: Path) -> tuple[JobKind, ...]:
             page_count = manifest.get("page_count")
             parsed.set({"reader.pages": page_count if isinstance(page_count, int) else None,
                         "reader.bytes": sum(len(v) for v in members.values())})
-        frozen = await store.frozen_version(conn, args.material_sha256)
-        if frozen is not None and frozen != args.converter_version:
-            raise VersionFrozen()
         if (
             artifact_id(members["manifest.json"]) != args.artifact_id
             or manifest["material_sha256"] != args.material_sha256
@@ -162,7 +158,7 @@ def make_kinds(blobs_root: Path) -> tuple[JobKind, ...]:
         await store.import_rows(
             conn, owner, args.material_id, args.artifact_id, manifest, members["spans.jsonl"], outline
         )
-        await _enqueue_embed(conn, owner, args.material_sha256)
+        await _enqueue_embed(conn, owner, args.material_sha256, args.converter_version)
 
     return (
         JobKind(

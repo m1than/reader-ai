@@ -76,8 +76,9 @@ def build_artifact(
 ) -> dict[str, bytes]:
     """The three artifact files, derived from VEC-INGEST-1 with optional replacements (hashes recomputed).
 
-    Locators, quote hashes, parse_config and pack_id (format 2) are recomputed by the independent generator for the
-    material and version in effect, unless `keep_locators` (spans as given) or the caller names them."""
+    Locators, quote hashes, parse_config and pack_id (format 2) are recomputed by the independent generator
+    for the material and version in effect, unless `keep_locators` (spans as given) or the caller names
+    them."""
     base = artifact_files()
     span_rows = spans if spans is not None else [json.loads(x) for x in base["spans.jsonl"].splitlines()]
     meta = json.loads(base["manifest.json"])

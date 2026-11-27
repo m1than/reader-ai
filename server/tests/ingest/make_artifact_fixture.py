@@ -61,8 +61,8 @@ def canonical(value: Any) -> bytes:
 
 def with_locators(spans: Sequence[Mapping[str, Any]], material_sha256: str) -> list[dict[str, Any]]:
     """Each span plus its locator and quote hash. Offsets count code points into the page text (the non-empty
-    texts joined by one newline); an empty span is a zero-length range where the next non-empty span starts (or the
-    page text ends), with #<ordinal> among the empty spans at that offset."""
+    texts joined by one newline); an empty span is a zero-length range where the next non-empty span starts
+    (or the page text ends), with #<ordinal> among the empty spans at that offset."""
     pages: dict[int, list[int]] = {}
     for i, span in enumerate(spans):
         pages.setdefault(int(span["page"]), []).append(i)

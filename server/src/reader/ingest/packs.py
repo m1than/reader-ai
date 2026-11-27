@@ -3,7 +3,6 @@ FR-INGEST-35, -36, -46; ADR-0039 B2, B7b)."""
 
 from __future__ import annotations
 
-import hashlib
 import logging
 import os
 import uuid
@@ -15,8 +14,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
 import reader.ingest as ingest
-from reader.ingest import overlays
-from reader.ingest.artifact import canonical
+from reader.ingest import artifact, overlays
 
 log = logging.getLogger("reader.ingest")
 LOCK_NAMESPACE: Final = 0x524B504B  # "RKPK", as SRV-LESSON's "RCPO"
@@ -41,8 +39,7 @@ class PackError(Exception):
 
 def pack_id(material_sha256: str, converter_version: str) -> str:
     """sha256 of the canonical {material_sha256, parse_config}; no owner (FR-INGEST-35)."""
-    config = dict(ingest.PARSE_CONFIGS[converter_version])
-    return hashlib.sha256(canonical({"material_sha256": material_sha256, "parse_config": config})).hexdigest()
+    return artifact.pack_id(material_sha256, ingest.PARSE_CONFIGS[converter_version])
 
 
 def version_rank(converter_version: str) -> int:
