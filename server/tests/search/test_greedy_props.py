@@ -67,6 +67,38 @@ def test_budgeted_pass_reaches_its_bound(inst: dict[str, Any]) -> None:
     assert f.value(frozenset(picked)) >= RATIO * best - 1e-9
 
 
+@st.composite
+def _costly_against_cheap(draw: st.DrawFn) -> dict[str, Any]:
+    """One or two costly high-value cards against many cheap low-value ones, relevance 0, the budget near the
+    costly card's cost: instances where a wrong order (gain, gain * cost, cheapest first) misses the bound."""
+    costly = draw(st.integers(1, 2))
+    cheap = draw(st.integers(4, 10))
+    ids = [f"k{i}" for i in range(costly)] + [f"c{i:02d}" for i in range(cheap)]
+    weights = {f"l:{i}": draw(st.floats(5, 20)) if i.startswith("k") else draw(st.floats(0.001, 2.5))
+               for i in ids}
+    covers = {i: frozenset({f"l:{i}"}) for i in ids}
+    big = draw(st.floats(3, 12))
+    cost = {i: big * draw(st.floats(0.8, 1.2)) if i.startswith("k") else draw(st.floats(0.3, 2.5))
+            for i in ids}
+    budget = big * draw(st.floats(0.9, 1.6))
+    return {"ids": ids, "weights": weights, "covers": covers, "cost": cost, "score": dict.fromkeys(ids, 0.0),
+            "budget": budget}
+
+
+@settings(max_examples=200, deadline=None)
+@given(_costly_against_cheap(), st.one_of(st.none(), st.integers(1, 4)))
+def test_bound_on_costly_against_cheap_instances(inst: dict[str, Any], k: int | None) -> None:
+    f = _objective(inst)
+    picked = _greedy().budgeted(inst["ids"], f.value, inst["cost"], inst["budget"], inst["score"], k=k)
+    assert sum(inst["cost"][c] for c in picked) <= inst["budget"] + 1e-9
+    if k is None:
+        best = _optimum(inst["ids"], f.value, inst["cost"], inst["budget"])
+        assert f.value(frozenset(picked)) >= RATIO * best - 1e-9
+    elif sum(sorted(inst["cost"].values(), reverse=True)[:k]) <= inst["budget"]:
+        best = _optimum(inst["ids"], f.value, inst["cost"], inst["budget"], k)
+        assert f.value(frozenset(picked)) >= CARDINALITY * best - 1e-9
+
+
 @settings(max_examples=150, deadline=None)
 @given(_instance(), st.data())
 def test_pass_two_reaches_its_bound_on_the_marginal_objective(inst: dict[str, Any], data: Any) -> None:

@@ -396,3 +396,90 @@ def test_unreviewed_findings_are_never_returned() -> None:
     caller = find.Caller(user_id=USER, roles=("owner",), provider=True)
     out = asyncio.run(find.find(caller, "owner", "q", deps=deps))
     assert [c["id"] for c in out["cards"]] == ["fnd:good"]
+
+
+# ---- code review of f573e0c: step 7 inside find, preselection without k, the copyright guard ----
+
+
+@dataclass
+class LexCorpus(Corpus):
+    lexemes: frozenset[str] = frozenset()
+
+    async def candidates(self, caller: Any, channel: str, route: Any, query: str, filters: Any,
+                         identifiers: Sequence[str]) -> Any:
+        return _find().Candidates(cards=list(self.cards), degraded=False, brain_version=BRAIN,
+                                  lexemes=self.lexemes, layers=frozenset({"L1"}))
+
+
+def _with(card: Any, *, license_: str = LICENSE, entitled: bool = True) -> Any:
+    from dataclasses import replace
+
+    return replace(card, source=replace(card.source, license=license_), entitled=entitled)
+
+
+def test_pass_two_runs_on_the_marginal_objective_inside_find() -> None:
+    """VEC-SEARCH-10's pass-2 step through find: kept A covers y1, y2; R1 adds only y1 (higher score), R2
+    adds x4; room for one more card after A: R2."""
+    find, cards = _find(), _cards()
+    estimate = need("reader.search.policy").estimate
+    body = "w " * 100
+    a = _card("A", 0.9, body, covers=["l:y1", "l:y2"])
+    r1 = _card("R1", 0.8, body, covers=["l:y1"])
+    r2 = _card("R2", 0.7, body, covers=["l:x4"])
+    from reader.agent.judges import render_find_input
+
+    cap = estimate(render_find_input("a query", [("A", body)]))
+    policy = _policy(gate={"mode": "always_judge", "margin": None}, judge__input_cap_tokens=cap,
+                     objective__relevance_weight=0.0)
+    envelope = estimate(cards.text_of(find._envelope(BRAIN, POLICY_V, 10500)))
+    budget = math.ceil(envelope + cards.cost(a) + 1.5 * cards.cost(r2))
+    out = _run(LexCorpus([a, r1, r2], lexemes=frozenset({"y1", "y2", "x4"})), policy=policy,
+               judge=Judge(kept=["A"]), budget=budget)
+    assert [(c["id"], c["judged"]) for c in out["cards"]] == [("A", True), ("R2", False)]
+
+
+def test_the_preselection_has_no_k() -> None:
+    policy = _policy(gate={"mode": "always_judge", "margin": None})
+    cards = [_card(x, s, x * 5, covers=[x]) for x, s in (("a", 0.9), ("b", 0.8))]
+    out = _run(Corpus(cards), policy=policy, judge=Judge(kept=["b"]), k=1)
+    assert [(c["id"], c["judged"]) for c in out["cards"]] == [("b", True)]
+
+
+@pytest.mark.parametrize(("channel", "entitled"), [("mcp", True), ("owner", False)])
+def test_personal_use_l1_never_reaches_the_response_or_the_judge(channel: str, entitled: bool) -> None:
+    policy = _policy(gate={"mode": "always_judge", "margin": None})
+    hidden = _with(_card("hidden", 0.95, "secret words", covers=["e1"]), entitled=entitled)
+    parent = _with(_card("sec:x", 0.9, "Chapter", covers=["e2"], layer="L2", nxt=["target"]),
+                   entitled=entitled)
+    target = _with(_card("target", 0.1, "target words", covers=["e3"]), entitled=entitled)
+    shared = _with(_card("open", 0.5, "shareable words", covers=["e4"]), license_="shareable",
+                   entitled=entitled)
+    judge = Judge()
+    out = _run(Corpus([hidden, parent, shared], neighbours_of={"sec:x": [target]}), policy=policy,
+               judge=judge, channel=channel)
+    assert {c["id"] for c in out["cards"]} == {"sec:x", "open"}
+    assert judge.calls and {i for call in judge.calls for i, _ in call.cards} <= {"sec:x", "open"}
+
+
+@pytest.mark.parametrize(("channel", "license_", "cut", "more"), [
+    ("owner", LICENSE, True, False), ("owner", "shareable", True, True), ("pipeline", LICENSE, False, False)])
+def test_long_l1_text_is_cut_by_channel(channel: str, license_: str, cut: bool, more: bool) -> None:
+    text = "word " * 400  # 2,000 characters, over the 1,200-character L1 card budget
+    out = _run(Corpus([_with(_card("long", 0.9, text, covers=["e1"]), license_=license_)]), channel=channel)
+    card = out["cards"][0]
+    assert (len(card["text"]) <= 1200 and text.startswith(card["text"])) if cut else card["text"] == text
+    assert card.get("more", False) is more
+
+
+def test_judge_input_cuts_l1_on_the_pipeline_and_the_slice_obeys_the_budget_factor() -> None:
+    policy = _policy(gate={"mode": "always_judge", "margin": None})
+    text = "word " * 400
+    judge = Judge()
+    out = _run(Corpus([_card("long", 0.9, text, covers=["e1"])]), policy=policy, judge=judge,
+               channel="pipeline")
+    assert out["cards"][0]["text"] == text  # the response is uncut on the pipeline
+    assert [len(t) <= 1200 for _, t in judge.calls[0].cards] == [True]
+    small = Judge()
+    many = [_card(f"c{i}", 0.9 - i / 100, "z " * 150, covers=[f"e{i}"]) for i in range(8)]
+    _run(Corpus(many), policy=policy, judge=small, budget=400)
+    assert 0 < len(small.calls[0].cards) < 8  # 1.5 x the cards' budget binds below the 3,000-token cap

@@ -78,3 +78,85 @@ cases:
     covers_base: {A: [a]}
     budget: 1
     expect: [C]
+  # Code review of f573e0c: cases that pin the Δ/cost rule and the k switch against wrong orders.
+  - name: ratio beats gain order
+    # Gain order takes big (2 > 1.9, cost 11 = B) and stops at f 2; Δ/cost takes the eleven smalls (f 20.9).
+    elements: {z: 2, e01: 1.9, e02: 1.9, e03: 1.9, e04: 1.9, e05: 1.9, e06: 1.9, e07: 1.9, e08: 1.9, e09: 1.9,
+               e10: 1.9, e11: 1.9}
+    cards:
+      big: {covers: [z], cost: 11, score: 0.9}
+      s01: {covers: [e01], cost: 1, score: 0.5}
+      s02: {covers: [e02], cost: 1, score: 0.5}
+      s03: {covers: [e03], cost: 1, score: 0.5}
+      s04: {covers: [e04], cost: 1, score: 0.5}
+      s05: {covers: [e05], cost: 1, score: 0.5}
+      s06: {covers: [e06], cost: 1, score: 0.5}
+      s07: {covers: [e07], cost: 1, score: 0.5}
+      s08: {covers: [e08], cost: 1, score: 0.5}
+      s09: {covers: [e09], cost: 1, score: 0.5}
+      s10: {covers: [e10], cost: 1, score: 0.5}
+      s11: {covers: [e11], cost: 1, score: 0.5}
+    budget: 11
+    expect: [s01, s02, s03, s04, s05, s06, s07, s08, s09, s10, s11]
+  - name: ratio beats gain times cost
+    # gain × cost ranks L (4.04) first and stops at f 1.01; Δ/cost takes p, q, r, s (f 4).
+    elements: {a: 1, b: 1, c: 1, d: 1, l: 1.01}
+    cards:
+      p: {covers: [a], cost: 1, score: 0.5}
+      q: {covers: [b], cost: 1, score: 0.5}
+      r: {covers: [c], cost: 1, score: 0.5}
+      s: {covers: [d], cost: 1, score: 0.5}
+      L: {covers: [l], cost: 4, score: 0.5}
+    budget: 4
+    expect: [p, q, r, s]
+  - name: ratio beats cheapest first
+    # Cheapest first spends 7 on the seven 0.001 cards, keeps the best single h1 and fills t1..t6 by score;
+    # Δ/cost takes the four 1-weight cards (cost 9, f 4) and nothing else fits.
+    elements: {t1: 0.001, t2: 0.001, t3: 0.001, t4: 0.001, t5: 0.001, t6: 0.001, t7: 0.001, h1: 1, h2: 1, h3: 1,
+               h4: 1}
+    cards:
+      t1: {covers: [t1], cost: 1, score: 0.9}
+      t2: {covers: [t2], cost: 1, score: 0.9}
+      t3: {covers: [t3], cost: 1, score: 0.9}
+      t4: {covers: [t4], cost: 1, score: 0.9}
+      t5: {covers: [t5], cost: 1, score: 0.9}
+      t6: {covers: [t6], cost: 1, score: 0.9}
+      t7: {covers: [t7], cost: 1, score: 0.9}
+      h1: {covers: [h1], cost: 2.25, score: 0.1}
+      h2: {covers: [h2], cost: 2.25, score: 0.1}
+      h3: {covers: [h3], cost: 2.25, score: 0.1}
+      h4: {covers: [h4], cost: 2.25, score: 0.1}
+    budget: 9
+    expect: [h1, h2, h3, h4]
+  - name: zero-gain cards wait for the fill
+    # The greedy never takes a zero-gain card; the fill adds U before W because `order` says so (W scores higher).
+    elements: {a: 1}
+    cards:
+      Y: {covers: [a], cost: 1, score: 0.5}
+      W: {covers: [], cost: 1, score: 0.9}
+      U: {covers: [], cost: 1, score: 0.1}
+    order: [Y, U, W]
+    budget: 2
+    expect: [Y, U]
+  - name: k with the k costliest fitting picks by gain
+    # X and Y (cost 5 each) fit B 10 together, so the pass orders by Δ: X, Y (f 10); Δ/cost would take a, b (f 2).
+    elements: {a: 1, b: 1, x: 5, y: 5}
+    cards:
+      a: {covers: [a], cost: 0.1, score: 0.9}
+      b: {covers: [b], cost: 0.1, score: 0.8}
+      X: {covers: [x], cost: 5, score: 0.1}
+      Y: {covers: [y], cost: 5, score: 0.1}
+    budget: 10
+    k: 2
+    expect: [X, Y]
+  - name: k with the k costliest not fitting keeps Δ/cost
+    # P1 + P2 cost 6 > B 4, so Δ/cost: Q1, Q2 (f 4); gain order would take P1 then Q1 (f 5).
+    elements: {p1: 3, p2: 3, q1: 2, q2: 2}
+    cards:
+      P1: {covers: [p1], cost: 3, score: 0.5}
+      P2: {covers: [p2], cost: 3, score: 0.5}
+      Q1: {covers: [q1], cost: 1, score: 0.5}
+      Q2: {covers: [q2], cost: 1, score: 0.5}
+    budget: 4
+    k: 2
+    expect: [Q1, Q2]
