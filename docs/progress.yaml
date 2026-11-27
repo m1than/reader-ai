@@ -20,10 +20,10 @@ budget:
   tutor_spike_by_agent: "owner 2026-11-22 ('Allow the agent'): the agent may run `bash spikes/tutor-call/run.sh`, which reads
     the Keychain item reader-ai/claude-oauth-token straight into the spike container (never printed), same pattern as
     compile-cost. Spend cap $0.60 from test_budget_usd, recorded in the ledger."
-  spent_usd: 13.5705     # total_cost_usd as reported by the CLI; not reconciled against the credit drawn
+  spent_usd: 13.8994     # total_cost_usd as reported by the CLI; not reconciled against the credit drawn
                          # (+ V.freshness live web-search call 0.012588, 2026-11-23)
                          # (+ V.spike.retrieval-ablation stage1 0.4493, 2026-11-26; prefixes run 1 2.1445 and
-                         #    run 2 2.1959, summaries run 1 0.0266, 2026-11-27)
+                         #    run 2 2.1959, summaries run 1 0.0266 and run 2 0.3289, 2026-11-27)
                          # = main's 5.4518 (agent-sdk-container 0.0568 + compile-cost 5.395) + trace-backend 0.0058
                          #   + tutor-call 0.0383 (from test_budget_usd) + V.live L02 compile 1.2587
                          #   + V.live tutor ≤ 0.90 (upper bound at the $0.30 cap: no allowed interface showed agent_spend)
@@ -69,6 +69,11 @@ budget:
         what: "paid arm summaries, run 1 (owner; exit 3, 10 consecutive failed calls): 23 leaf calls, 5 succeeded;
           18 answers ran past the 200-token output cap and were continued to 4 requests; SDK 0.02656115 = recompute;
           results/paid/summaries/" }
+    - { task: V.spike.retrieval-ablation, usd: 0.3289, date: 2026-11-27, funding: test_budget_usd,
+        what: "paid arm summaries, run 2 (owner; exit 3 at the $0.36 stage cap): 427 calls, 405 of 495 nodes done
+          (11 as no summary after a failed retry); 38 failed calls this run, all leaves (56 in the stage with run
+          1's 18); 45 retries;
+          SDK 0.32889036; stage total 0.35545151 = recompute 0.355473; results/paid/summaries/" }
 
 owner_review:            # stage exits waiting for the owner's live check and `implemented` flips
   pending: []
@@ -1936,11 +1941,14 @@ tasks:
         why: "stage-1 measured cost +15% from the CLI's cache writes of each span at 2x the input price; prefixes
           cap $4.01 -> $4.72 (re-projection $4.29 + 10%), other caps unchanged; 2026-11-27 later: summaries cap
           $0.19 -> $0.36 (re-projection $0.28 + 20% + run 1's $0.0266; input billed as 1-hour cache writes at 2x),
-          total unchanged at $12.51" },
+          total unchanged at $12.51; 2026-11-27 later: summaries cap $0.36 -> $0.50 after run 2 stopped at
+          $0.36 with 405 of 495 nodes (leaf answers averaged 251 output tokens against the asked 30 words, inner
+          848), total unchanged at $12.51" },
       ask: "The owner runs spikes/retrieval-ablation/paid.sh. Done: stage1 ($0.4493, 2026-11-26) and prefixes
-        (2026-11-27, two runs, $4.3404; all 9,104 spans, 30 as prefix: none). summaries run 1 stopped ($0.0266,
-        answers past the output cap; fixed; cap raised to $0.36 by the owner). Next: `paid.sh summaries` (owner);
-        then the agent runs v12.sh (free, local, no token); then `paid.sh judge` and `paid.sh factcheck` (owner)",
+        (2026-11-27, two runs, $4.3404; all 9,104 spans, 30 as prefix: none). summaries: run 1 $0.0266, run 2
+        $0.3289 (405 of 495 nodes, stopped at the $0.36 cap; cap now $0.50). Next: `paid.sh summaries` (owner; 90
+        calls left, ≈ $0.10 of the $0.1445 left); then the agent runs v12.sh (free, local, no token); then
+        `paid.sh judge` and `paid.sh factcheck` (owner)",
       note: "ADR-0039 B10 on SRV-INGEST spans.jsonl and the live search: V0 spans, +context prefix, +L2 summaries,
         +form filter, +RRF hybrid; the fact-check route against today's whole-section fact-check. Keep a step if its
         gain on its type is significant: exact McNemar p < 0.05 (at least a net 6 of 30, more with discordant losses);

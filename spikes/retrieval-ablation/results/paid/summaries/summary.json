@@ -2,27 +2,30 @@
  "concurrency": 4,
  "empty_returns_this_run": 0,
  "nodes": 495,
- "summaries": 23,
+ "summaries": 405,
+ "summary_none": 11,
+ "summary_none_this_run": 11,
+ "retried_this_run": 45,
  "coverage_complete": false,
  "stage": "summaries",
- "cap_usd": "0.19",
- "calls": 23,
- "calls_this_run": 23,
- "usd_stage_total": "0.02656115000000000241",
- "usd_this_run": "0.02656115000000000241",
- "usd_recomputed_total": "0.026565",
- "usd_reported_same_rows": "0.02656115000000000241",
- "stopped": "10 consecutive failed calls (last: ResultError)",
- "run_wall_s": 68.9,
+ "cap_usd": "0.36",
+ "calls": 450,
+ "calls_this_run": 427,
+ "usd_stage_total": "0.355451510000000016106",
+ "usd_this_run": "0.328890360000000013696",
+ "usd_recomputed_total": "0.355473",
+ "usd_reported_same_rows": "0.355451510000000016106",
+ "stopped": "stage cap 0.36 USD reached (spent 0.351606870000000016006, in flight 0.0063216000000000000)",
+ "run_wall_s": 465.4,
  "tokens": {
-  "input": 184,
-  "output": 15568,
-  "cache_write": 91292,
-  "cache_read": 50035
+  "input": 1580,
+  "output": 206745,
+  "cache_write": 1243938,
+  "cache_read": 313341
  },
- "wall_s_per_call_p50": 8.73,
- "wall_s_per_call_p95": 18.37,
- "failed_calls": 18,
+ "wall_s_per_call_p50": 1.97,
+ "wall_s_per_call_p95": 15.32,
+ "failed_calls": 56,
  "tmpfs_bytes": {
   "/home/worker": {
    "total": 536870912,
@@ -31,13 +34,13 @@
   },
   "/tmp": {
    "total": 536870912,
-   "used": 4096,
-   "free": 536866816
+   "used": 8192,
+   "free": 536862720
   }
  },
- "at": "2026-11-27T14:03:27+00:00",
- "home_bytes_per_call": 1425,
- "home_extrapolated_bytes_9104_calls": 12970429,
+ "at": "2026-11-27T15:12:34+00:00",
+ "home_bytes_per_call": 77,
+ "home_extrapolated_bytes_9104_calls": 698641,
  "home_tmpfs_ok": true,
- "ledger_row": "- { task: V.spike.retrieval-ablation, usd: 0.02656115000000000241, date: 2026-11-27, funding: test_budget_usd, what: \"paid arm summaries: 23 calls this run, 23 in total; spikes/retrieval-ablation/results/paid/summaries/\" }"
+ "ledger_row": "- { task: V.spike.retrieval-ablation, usd: 0.328890360000000013696, date: 2026-11-27, funding: test_budget_usd, what: \"paid arm summaries: 427 calls this run, 450 in total; spikes/retrieval-ablation/results/paid/summaries/\" }"
 }

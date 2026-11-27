@@ -307,6 +307,26 @@ $0.02656115 (recompute agrees), output 15,568 tokens, per call p50 8.73 s, p95 1
   `dry_run.sh` 40 of 40.
 - **Owner decision (2026-11-27):** the summaries cap is raised from $0.19 to **$0.36**; the total stays $12.51.
 
+## `summaries` run 2 (owner's run, 2026-11-27): stopped at the $0.36 cap
+
+| Measure | Value |
+| --- | --- |
+| Calls this run | 427 (372 leaf, 55 inner at level 3), 465.4 s at concurrency 4; per call p50 1.97 s, p95 15.32 s |
+| Nodes done | 405 of 495; 11 with no summary (leaf retries that failed again); 90 left (29 leaf and 33 inner at level 2, 27 level-1, the root) |
+| Failed calls | 38 this run, all leaves (answers past the 400-token cap, continued to 4 requests); 56 in the stage; 45 retries (run 1's 18 + 27 new) |
+| Output tokens | leaf mean 251 (asked: 30 words, ≈ 90), inner mean 848 (cap 1,200): the model does not keep to the asked length |
+| USD | run 2 **$0.32889036**; stage $0.35545151 (recompute 0.355473); mean per successful call: leaf $0.00061, inner $0.00084; a failed leaf $0.0021 |
+
+The re-projection ($0.28) assumed answers at the budgets; the answers are 2.5–3× longer, and 10% of leaves fail at
+4× cost. **Projection for the 90 remaining calls** (own text at 0.38 tokens per character + 500 overhead + the
+children's measured output tokens, written to the 1-hour cache; output at the measured inner mean of 848 tokens,
+leaves 251, root 1,500; plus ≈ 10% of leaves failing once): **≈ $0.10–0.11**, about 3 min at concurrency 4.
+Worst case, every non-leaf continued to 4 requests: ≈ $0.23 (none of run 2's 55 inner calls failed).
+**Owner decision (2026-11-27): the summaries cap is raised from $0.36 to $0.50**; it leaves $0.1445, so the
+projection fits with a margin of ≥ 30%; the total stays $12.51 (spent $5.1452 + summaries' $0.1445 left + judge
+$4.73 + factcheck $2.42 = $12.44). Whole-book L2 summaries then cost ≈ $0.46 per pack, an initial `index` cap of
+≈ $0.55.
+
 ## Paid runner (approved by the owner 2026-11-26, $12.00 staged; raised to $12.51 on 2026-11-27; the owner runs it)
 
 `paid.sh <stage> [concurrency]` follows `spikes/tutor-call/run.sh`: the Keychain item is piped on stdin into a
