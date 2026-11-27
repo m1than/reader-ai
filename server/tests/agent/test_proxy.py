@@ -12,7 +12,18 @@ from pathlib import Path
 import httpx
 import pytest
 
-from .conftest import DROP, TOKENS, Upstream, forward, issue, make_proxy, message_body, need, spec_bounds
+from .conftest import (
+    DROP,
+    TOKENS,
+    Upstream,
+    asgi,
+    forward,
+    issue,
+    make_proxy,
+    message_body,
+    need,
+    spec_bounds,
+)
 
 pytestmark = pytest.mark.anyio
 
@@ -105,7 +116,8 @@ async def test_expiry_and_eviction(tmp_path: Path) -> None:
         old = await issue(c)
         p.clock[0] += b["run_token_ttl_s"] + 1
         assert (await forward(c, old)).status_code == 401
-        tokens = [await issue(c) for _ in range(b["run_tokens_max"] + 1)]
+        # FR-AGENT-3 (revised): the worker evicts its own oldest token past its quota (28 of the 32)
+        tokens = [await issue(c) for _ in range(b["client_quota"]["worker"] + 1)]
         assert (await forward(c, tokens[0])).status_code == 401  # the oldest was evicted
         assert (await c.post("/run-tokens/revoke", json={"run_token": tokens[0]})).status_code == 404
         assert (await forward(c, tokens[-1])).status_code == 200
@@ -201,9 +213,7 @@ async def test_revoke_during_a_slow_upstream_counts_the_request_in_flight(tmp_pa
         proxy.ProxySettings(config_path=write_config(tmp_path), secrets_root=tmp_path / "s"),
         upstream_transport=httpx.MockTransport(slow),
     )
-    async with httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=app), base_url="http://agent-proxy:8080"
-    ) as c:
+    async with asgi(app) as c:
         token = await issue(c)
         pending = asyncio.ensure_future(forward(c, token))
         await entered.wait()
@@ -231,8 +241,7 @@ async def test_send_failure_after_the_request_was_written_counts_as_failed(tmp_p
             proxy.ProxySettings(config_path=write_config(tmp_path), secrets_root=tmp_path / "s"),
             upstream_transport=httpx.MockTransport(handler),
         )
-        transport = httpx.ASGITransport(app=app)
-        async with httpx.AsyncClient(transport=transport, base_url="http://agent-proxy:8080") as c:
+        async with asgi(app) as c:
             token = await issue(c)
             assert (await forward(c, token)).status_code == 502
             record = (await c.post("/run-tokens/revoke", json={"run_token": token})).json()
@@ -287,9 +296,7 @@ async def test_upstream_redirect_is_not_followed(tmp_path: Path) -> None:
         proxy.ProxySettings(config_path=write_config(tmp_path), secrets_root=tmp_path / "s"),
         upstream_transport=httpx.MockTransport(handler),
     )
-    async with httpx.AsyncClient(
-        transport=httpx.ASGITransport(app=app), base_url="http://agent-proxy:8080"
-    ) as c:
+    async with asgi(app) as c:
         token = await issue(c)
         r = await forward(c, token)
     assert r.status_code == 307

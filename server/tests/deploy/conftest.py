@@ -31,8 +31,11 @@ PROFILE_SETS: list[tuple[str, ...]] = [
     combo for n in range(len(PROFILES) + 1) for combo in itertools.combinations(PROFILES, n)
 ]
 KERNEL_PREFIX = "kernel-"
-SECRET_CONSUMERS = {"postgres", "api", "worker", "mcp", "agent-proxy"}
+# worker-judge: FR-DEPLOY-16
+SECRET_CONSUMERS = {"postgres", "api", "worker", "worker-judge", "mcp", "agent-proxy"}
 SERVER_ROLES = ("api", "worker", "mcp")
+LANE = "worker-judge"  # FR-DEPLOY-16: the worker role on the judge lane
+SERVER_SERVICES = (*SERVER_ROLES, LANE)  # every service running the server image
 
 requires_docker_cli = pytest.mark.skipif(shutil.which("docker") is None, reason="docker CLI not installed")
 

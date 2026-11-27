@@ -44,14 +44,21 @@ def _canonical(value: Any) -> str:
 
 
 def version_key(
-    *, prompt_set_sha256: str, stage_models: Mapping[str, str], pipeline_config_sha256: str
+    *,
+    prompt_set_sha256: str,
+    stage_models: Mapping[str, str],
+    pipeline_config_sha256: str,
+    policy_version: str | None = None,
 ) -> str:
-    """FR-OBS-21: sha256 of the canonical JSON of the three inputs."""
-    inputs = {
+    """FR-OBS-21: sha256 of the canonical JSON of the inputs; ADR-0039 adds `policy_version` once SRV-SEARCH's
+    policy exists (without it the key is the three-input key, so existing LoggedModels keep their key)."""
+    inputs: dict[str, Any] = {
         "prompt_set_sha256": prompt_set_sha256,
         "stage_models": dict(stage_models),
         "pipeline_config_sha256": pipeline_config_sha256,
     }
+    if policy_version is not None:
+        inputs["policy_version"] = policy_version
     return hashlib.sha256(_canonical(inputs).encode()).hexdigest()
 
 
@@ -81,7 +88,15 @@ def current_inputs() -> dict[str, Any]:
         stage_models = {}
     stages = Path(__file__).resolve().parents[1] / "pipeline" / "stages.yaml"
     pipeline = hashlib.sha256(stages.read_bytes()).hexdigest() if stages.is_file() else "0" * 64
-    return {"prompt_set_sha256": prompt_set, "stage_models": stage_models, "pipeline_config_sha256": pipeline}
+    found: dict[str, Any] = {
+        "prompt_set_sha256": prompt_set, "stage_models": stage_models, "pipeline_config_sha256": pipeline,
+    }
+    from reader.obs.versions import current_policy_version
+
+    policy = current_policy_version()
+    if policy is not None:  # ADR-0039 (FR-OBS-21 as amended): the LoggedModel params gain it too
+        found["policy_version"] = policy
+    return found
 
 
 def _tags(items: Any) -> dict[str, str]:

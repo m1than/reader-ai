@@ -122,4 +122,4 @@ async def test_jobs_0002_index_and_downgrade(pg: Pg) -> None:
         ]
         assert "job_keys_kind_outcome_finished" in names
         heads = [r[0] for r in await env.rows("SELECT version_num FROM alembic_version")]
-    assert "jobs_0003" in heads  # jobs_0002's index above; jobs_0003 (FR-EVENTS-30) is the branch head
+    assert "jobs_0004" in heads  # jobs_0002's index above; jobs_0004 (FR-EVENTS-33) is the branch head

@@ -127,8 +127,11 @@ async def label(ctx: Ctx) -> Response:
     except ValidationError:
         return error(400, "bad_request")
     mirror_on = phase2.tracing_on()
-    async with ctx.engine.begin() as conn:
-        got = await labels.record(conn, user.id, body, mirror_on=mirror_on)
+    try:
+        async with ctx.engine.begin() as conn:
+            got = await labels.record(conn, user.id, body, mirror_on=mirror_on)
+    except labels.NotLabelable:
+        return error(409, "not_labelable")
     if got is None:
         return error(404, "not_found")
     revision, label_id = got
@@ -137,9 +140,78 @@ async def label(ctx: Ctx) -> Response:
     return JSONResponse({"revision": revision, "mirror": "queued" if mirror_on else "off"})  # FR-OBS-24 (b)
 
 
+NO_STORE: Final = {"Cache-Control": "no-store"}
+LIMIT_TEXT: Final = re.compile(r"[0-9]{1,2}")
+MAX_EVAL_BYTES: Final = 262_144
+
+
+async def judge_queue(ctx: Ctx) -> Response:
+    """ADR-0039 FR-OBS-40: unlabelled judge items of one slot, in B7 item 3's order."""
+    from reader.obs import judge_labels, labels
+
+    user = ctx.signed_in
+    if user.role != "owner":
+        return error(403, "forbidden")
+    slot = ctx.request.query_params.get("slot", "")
+    raw = ctx.request.query_params.get("limit", str(judge_labels.QUEUE_MAX))
+    if slot not in labels.JUDGE_SLOTS or not LIMIT_TEXT.fullmatch(raw) or not 1 <= int(raw) <= 25:
+        return error(400, "bad_request")
+    async with ctx.engine.connect() as conn:
+        items = await judge_labels.queue(conn, user.id, slot, int(raw))
+    return JSONResponse({"items": items}, headers=NO_STORE)
+
+
+async def judge_item(ctx: Ctx) -> Response:
+    """ADR-0039 FR-OBS-40: one item with its query and the cards as the owner may read them under B8."""
+    from reader.obs import judge_labels
+
+    user = ctx.signed_in
+    if user.role != "owner":
+        return error(403, "forbidden")
+    async with ctx.engine.connect() as conn:
+        try:
+            found = await judge_labels.item(conn, user.id, str(ctx.request.path_params["item_id"]))
+        except judge_labels.NotLabelable:
+            return error(409, "not_labelable")
+    if found is None:
+        return error(404, "not_found")
+    return JSONResponse(found, headers=NO_STORE)
+
+
+async def eval_start(ctx: Ctx) -> Response:
+    """ADR-0039 FR-OBS-39 (a): start a local judge evaluation over a pinned set (202 {eval_id})."""
+    from reader.obs import eval as evaluation
+
+    user = ctx.signed_in
+    if user.role != "owner":
+        return error(403, "forbidden")
+    body, too_large = await _body(ctx, MAX_EVAL_BYTES)
+    if too_large:
+        return error(413, "too_large")
+    keys = set(body) if isinstance(body, dict) else set()
+    if not {"set", "budget_profile"} <= keys <= {"set", "budget_profile", "judges"}:
+        return error(400, "bad_request")
+    judges = body.get("judges", list(evaluation.EVAL_SLOTS))
+    ok = isinstance(body["set"], str) and isinstance(body["budget_profile"], str) and isinstance(judges, list)
+    if not ok or not all(isinstance(j, str) for j in judges):
+        return error(400, "bad_request")
+    cap, floors = evaluation.eval_budget()
+    try:
+        async with ctx.engine.begin() as conn:
+            eval_id = await evaluation.start(conn, user.id, body["budget_profile"], judges,
+                                             set_text=body["set"], cap_usd=cap, floors=floors)
+    except evaluation.StartRefused as refused:
+        return error(400, refused.code)
+    return JSONResponse({"eval_id": str(eval_id)}, status_code=202)
+
+
 ROUTES: Final[tuple[Route, ...]] = (
     Route("GET", "/api/obs/gate", "public", gate),
     Route("GET", "/api/obs/summary", "session", summary),
     Route("POST", "/api/obs/bench", "session", bench_upload),
     Route("POST", "/api/obs/labels", "session", label),
+    # ADR-0039 (FR-OBS-39, -40)
+    Route("GET", "/api/obs/judge-queue", "session", judge_queue),
+    Route("GET", "/api/obs/judge-items/{item_id}", "session", judge_item),
+    Route("POST", "/api/obs/eval", "session", eval_start),
 )

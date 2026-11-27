@@ -14,7 +14,8 @@ import httpx
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from reader.jobs.model import JobKind
-from reader.obs import bench, bootstrap, feedback, health, labels, prompts, runs
+from reader.obs import align, bench, bootstrap, feedback, health, labels, prompts, runs
+from reader.obs import eval as eval_jobs
 
 KIND: Final = "obs.retention"
 MLFLOW: Final = "http://mlflow:5000"
@@ -100,6 +101,8 @@ async def handle(args: RetentionArgs, conn: Any, ctx: Any) -> None:
 
     settings = await obs_setup.effective_settings(conn)  # the retention override per run (FR-CONFIG-26)
     now = datetime.now(UTC)
+    if conn is not None:  # ADR-0039 (FR-OBS-11 as amended): Postgres first, tracing on or off
+        await postgres_retention(conn, now, settings.retention_days)
     async with httpx.AsyncClient(trust_env=False) as client:
         await retain(
             args.day, jobs=running(), enabled=settings.enabled, retention_days=settings.retention_days,
@@ -115,8 +118,6 @@ async def handle(args: RetentionArgs, conn: Any, ctx: Any) -> None:
             except Exception as failure:
                 name = type(failure).__name__
                 logging.getLogger("reader.obs").warning("obs retention prune_failed error=%s", name)
-    if conn is not None:
-        await prune_starts(conn, now - timedelta(days=settings.retention_days))
     # FR-OBS-15: the daily run also enqueues the prompt registration (enqueue-only, never raises), so a worker
     # that runs for days retries a dead key and registers changed templates.
     try:
@@ -139,6 +140,45 @@ async def prune_starts(conn: Any, cutoff: datetime) -> None:
     from sqlalchemy import text
 
     await conn.execute(text(PRUNE_SQL), {"c": cutoff})
+
+
+# ADR-0039: alignment rows still running a day after their last step (FR-OBS-41), and refused or discarded
+# proposals past retention (FR-OBS-31 as amended; they hold no text).
+PROPOSALS_SQL: Final = (
+    "DELETE FROM judge_prompt_proposals WHERE state IN ('refused', 'discarded')"
+    " AND updated_at < now() - make_interval(days => :d)"
+)
+
+
+async def postgres_retention(conn: Any, now: datetime, retention_days: int) -> None:
+    """FR-OBS-11 as amended: the Postgres deletes, each in its own committed transaction (so neither a later
+    MLflow failure nor the next step's failure undoes it), before any MLflow request; a failure is logged by
+    code."""
+    from sqlalchemy import text
+
+    from reader.obs import judge_inputs
+
+    async def starts(c: Any) -> None:
+        await prune_starts(c, now - timedelta(days=retention_days))
+
+    async def inputs(c: Any) -> None:
+        await judge_inputs.delete_expired(c, retention_days)
+
+    async def lost(c: Any) -> None:
+        await align.mark_lost(c)
+
+    async def proposals(c: Any) -> None:
+        await c.execute(text(PROPOSALS_SQL), {"d": int(retention_days)})
+
+    for name, step in (("judge_inputs", inputs), ("starts", starts), ("step_lost", lost),
+                       ("proposals", proposals)):
+        try:
+            async with conn.engine.begin() as own:
+                await step(own)
+        except Exception as failure:
+            logging.getLogger("reader.obs").warning(
+                "obs retention postgres_failed step=%s error=%s", name, type(failure).__name__
+            )
 
 
 RECORD_START_SQL: Final = "INSERT INTO obs_tracing (started_at, enabled) VALUES (clock_timestamp(), :enabled)"
@@ -196,4 +236,7 @@ JOB_KINDS: Final = (
     bench.KIND_DECL,
     labels.KIND_DECL,
     health.KIND_DECL,
+    # ADR-0039 (kl_job_kinds): FR-OBS-39, -14, -41
+    *eval_jobs.JOB_KINDS,
+    align.KIND_DECL,
 )

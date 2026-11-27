@@ -14,7 +14,33 @@ from hypothesis import strategies as st
 from .conftest import FIXTURES, catalogs, load_yaml, require
 
 VEC = load_yaml(FIXTURES / "attributes.yaml")
+VEC7 = load_yaml(FIXTURES / "find-spans.yaml")
 CANARY = "bookcanary-7f3a9c"
+
+
+def _expand() -> tuple[dict[str, Any], dict[str, list[str]]]:
+    """VEC-OBS-1 with its `key_families` expanded into listed keys (FR-OBS-36), read independently of the module."""
+    attributes = dict(VEC["attributes"])
+    by_span = {k: list(v) for k, v in VEC["keys_by_span"].items()}
+    for family, spec in VEC.get("key_families", {}).items():
+        low, high = spec["i"]
+        for i in range(low, high + 1):
+            for part, rule in spec["keys"].items():
+                attributes[family.replace("<i>", str(i)) + "." + part] = rule
+        for span, parts in spec["spans"].items():
+            by_span[span] += [family.replace("<i>", str(i)) + "." + p for i in range(low, high + 1) for p in parts]
+    return attributes, by_span
+
+
+ATTRS, KEYS = _expand()
+
+
+def cats(**overrides: Any) -> Any:
+    """The test catalogs plus VEC-OBS-7's find routes, facet values and topic paths."""
+    c = VEC7["catalogs"]
+    return catalogs(find_routes=frozenset(c["find_routes"]),
+                    facet_values={k: frozenset(v) for k, v in c["facet_values"].items()},
+                    topic_paths=frozenset(c["topic_paths"]), **overrides)
 
 
 def _norm(rule: dict[str, Any]) -> dict[str, Any]:
@@ -23,11 +49,24 @@ def _norm(rule: dict[str, Any]) -> dict[str, Any]:
 
 def test_module_data_equals_vec_obs_1() -> None:
     attrs = require("reader.obs.attributes")
-    assert {k: _norm(v) for k, v in attrs.ATTRIBUTES.items()} == VEC["attributes"]
-    assert {k: list(v) for k, v in attrs.KEYS_BY_SPAN.items()} == VEC["keys_by_span"]
+    assert {k: _norm(v) for k, v in attrs.ATTRIBUTES.items()} == ATTRS
+    assert {k: list(v) for k, v in attrs.KEYS_BY_SPAN.items()} == KEYS
     assert {k: dict(v) for k, v in attrs.JOB_ARGS.items()} == VEC["job_args"]
+    assert len(ATTRS) > len(VEC["attributes"])  # the family was expanded: 25 x 4 doc keys
+    assert "reader.doc.24.judged" in ATTRS and "reader.doc.25.uri" not in ATTRS
+    assert sorted(attrs.JUDGE_SLOTS) == sorted(
+        ["judge.find", "judge.eval.relevance", "judge.eval.sufficiency", "judge.eval.groundedness",
+         "judge.eval.self_contained", "judge.eval.citation_supports_claim"])
     assert attrs.FALLBACK_NAME == VEC["fallback_name"] == "reader.unlisted"
     assert attrs.SCOPE == VEC["instrumentation_scope"]["name"] == "reader"
+
+
+def test_find_span_names() -> None:
+    allow = require("reader.obs.attributes").AllowList(cats())
+    for name in ("find", "find.route", "find.retrieve", "find.preselect", "find.judge_wait", "find.select",
+                 "pack.build", "link.run"):
+        assert allow.span_class(name) == name
+    assert allow.span_class("find.other") is None
 
 
 JOB_CODES = {
@@ -56,6 +95,7 @@ def test_error_codes_are_the_declared_catalogues() -> None:
 
 def _oracle_enums() -> dict[str, frozenset[str]]:
     """The `enum_from` sets as VEC-OBS-1 defines them, from the test catalogs and the specs, not the module."""
+    c = VEC7["catalogs"]
     cat = catalogs()
     return {
         "route_templates": frozenset(cat.route_templates) | {"other"},
@@ -64,14 +104,19 @@ def _oracle_enums() -> dict[str, frozenset[str]]:
         "tasks": frozenset(cat.tasks),
         "models": frozenset(cat.models),
         "error_codes": _declared_error_codes(),
+        "find_routes": frozenset(c["find_routes"]),
+        **{f"facet_values.{k}": frozenset(v) for k, v in c["facet_values"].items()},
+        "topic_paths": frozenset(c["topic_paths"]),
     }
 
 
 def oracle_valid(key: str, value: object, enums: dict[str, frozenset[str]]) -> bool:
     """VEC-OBS-1's value rule for `key`, read from the YAML (independent of reader.obs.attributes)."""
-    rule = VEC["attributes"].get(key)
+    rule = ATTRS.get(key)
     if rule is None:
         return False
+    if rule["type"] == "bool":
+        return type(value) is bool
     if rule["type"] == "string":
         if type(value) is not str or len(value) > 128:
             return False
@@ -89,7 +134,7 @@ def oracle_valid(key: str, value: object, enums: dict[str, frozenset[str]]) -> b
 
 def oracle_clean(span_class: str | None, attrs: dict[str, Any]) -> dict[str, Any]:
     enums = _oracle_enums()
-    allowed = VEC["keys_by_span"].get(span_class or "", [])
+    allowed = KEYS.get(span_class or "", [])
     return {k: v for k, v in attrs.items() if k in allowed and oracle_valid(k, v, enums)}
 
 
@@ -138,11 +183,33 @@ ROWS = [
     ("http.request.method", "get", False),
     ("http.route", "other", True),
     ("reader.stop_reason", "end_turn ", False),
+    # ADR-0039 (FR-OBS-36, -37)
+    ("reader.find.entitled", True, True),
+    ("reader.find.entitled", 1, False),
+    ("reader.find.entitled", "true", False),
+    ("reader.find.route", "exact_lookup", True),
+    ("reader.find.route", "exact lookup", False),
+    ("reader.find.filter.role", "definition", True),
+    ("reader.find.filter.role", "table", False),  # a form value, not a role
+    ("reader.find.filter.concept_uri", "reader://h/" + SHA, True),
+    ("reader.find.filter.concept_uri", "reader://con:term:x", False),  # never a clear concept id
+    ("reader.doc.0.uri", "reader://spn:" + SHA + ":p12:100-250#2", True),
+    ("reader.doc.24.uri", "reader://les:" + UUID, True),
+    ("reader.doc.0.uri", "reader://sec:Глава 3", False),
+    ("reader.doc.0.uri", "reader://spn:" + SHA + ":md:intro.md:1-2", False),
+    ("reader.doc.0.uri", "reader://h/" + SHA, True),
+    ("reader.doc.0.uri", "reader://h/" + SHA + "\n", False),
+    ("reader.doc.25.uri", "reader://h/" + SHA, False),  # past the cap: not a listed key
+    ("reader.doc.3.judged", False, True),
+    ("reader.build.usd", 0.5, True),
+    ("reader.pack.state", "sealed", True),
+    ("reader.policy_version", SHA, True),
+    ("reader.eval_id", UUID, True),
 ]
 
 
 def test_oracle_rows() -> None:
-    allow = require("reader.obs.attributes").AllowList(catalogs())
+    allow = require("reader.obs.attributes").AllowList(cats())
     enums = _oracle_enums()
     for key, value, valid in ROWS:
         assert oracle_valid(key, value, enums) is valid, (key, value)
@@ -150,17 +217,18 @@ def test_oracle_rows() -> None:
 
 
 def test_module_agrees_with_the_oracle_on_every_key() -> None:
-    allow = require("reader.obs.attributes").AllowList(catalogs())
+    allow = require("reader.obs.attributes").AllowList(cats())
     enums = _oracle_enums()
-    samples: list[object] = [None, True, 0, 1, -1, 1.5, "", "x" * 129, UUID, SHA, "GET", "other", "dead"]
+    samples: list[object] = [None, True, 0, 1, -1, 1.5, "", "x" * 129, UUID, SHA, "GET", "other", "dead",
+                             "reader://h/" + SHA, "reader://les:" + UUID, False]
     samples += sorted({v for values in enums.values() for v in values})
-    for key in VEC["attributes"]:
+    for key in ATTRS:
         for value in samples:
             assert allow.valid(key, value) is oracle_valid(key, value, enums), (key, value)
 
 
 def test_span_names_by_class() -> None:
-    allow = require("reader.obs.attributes").AllowList(catalogs())
+    allow = require("reader.obs.attributes").AllowList(cats())
     assert allow.span_class("GET /api/lessons/{lesson_id}") == "http"
     assert allow.span_class("GET other") == "http"
     assert allow.span_class("WS /api/kernel/sessions/{session_id}/channels") == "ws"
@@ -172,7 +240,7 @@ def test_span_names_by_class() -> None:
 
 
 def test_clean_keeps_only_listed_valid_values() -> None:
-    allow = require("reader.obs.attributes").AllowList(catalogs())
+    allow = require("reader.obs.attributes").AllowList(cats())
     kept = allow.clean(
         "http",
         {
@@ -278,7 +346,7 @@ class Capture:
 def _exporter(capture: Capture) -> Any:
     export = require("reader.obs.export")
     attrs = require("reader.obs.attributes")
-    return export.AllowListExporter(capture, attrs.AllowList(catalogs()), export.resource("api"))
+    return export.AllowListExporter(capture, attrs.AllowList(cats()), export.resource("api"))
 
 
 def _check_clean(out: Any, allowed: Any, given: dict[str, Any] | None = None) -> None:
@@ -331,7 +399,7 @@ def test_exporter_rebuilds_every_part() -> None:
         "mlflow.traceTag.mlflow.traceName": "job tutor.answer",
         "mlflow.traceTag.reader.job.kind": "tutor.answer",
     }
-    allowed = require("reader.obs.attributes").AllowList(catalogs())
+    allowed = require("reader.obs.attributes").AllowList(cats())
     for out in capture.spans:
         _check_clean(out, allowed)
 
@@ -367,8 +435,14 @@ _VALUE = st.one_of(
     st.floats(allow_nan=False),
     st.booleans(),
     st.sampled_from([CANARY, "GET", "tutor.answer", "/api/lessons/{lesson_id}", "end_turn"]),
+    # INV-OBS-1 as edited: hostile card ids and uris, clear and near-clear, beside valid ones (FR-OBS-36)
+    st.sampled_from([*(c["id"] for c in VEC7["cards"]), *(c["uri"] for c in VEC7["cards"]),
+                     "reader://h/" + SHA, f"reader://les:{UUID}\n", f"reader://con:term:{CANARY}",
+                     "reader://sec:" + CANARY, "exact_lookup", "definition", SHA, "L1", "separated"]),
 )
-_KEY = st.one_of(st.sampled_from(sorted(VEC["attributes"])), st.text(min_size=1, max_size=30))
+_KEY = st.one_of(st.sampled_from(sorted(ATTRS)), st.text(min_size=1, max_size=30),
+                 st.sampled_from(["reader.doc.25.uri", "reader.doc.-1.uri", "reader.doc.0.text", "reader.find.query",
+                                  "reader.find.filter.concept_id"]))
 _NAME = st.one_of(
     st.sampled_from(
         [
@@ -377,6 +451,8 @@ _NAME = st.one_of(
             "agent.call",
             "WS /api/kernel/sessions/{session_id}/channels",
             "GET other",
+            "find", "find.route", "find.retrieve", "find.preselect", "find.judge_wait", "find.select",
+            "pack.build", "link.run",
         ]
     ),
     st.text(max_size=40),
@@ -408,5 +484,5 @@ def test_inv_obs_1_property(
         ]
     )
     (out,) = capture.spans
-    allowed = require("reader.obs.attributes").AllowList(catalogs())
+    allowed = require("reader.obs.attributes").AllowList(cats())
     _check_clean(out, allowed, attrs)

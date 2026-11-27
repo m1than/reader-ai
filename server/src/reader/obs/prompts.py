@@ -194,3 +194,82 @@ KIND_DECL: Final = JobKind(
     transient=(httpx.TransportError, httpx.HTTPStatusError),
     timeout_s=60,
 )
+
+
+# --- FR-OBS-43: the judge.eval.* and judge.align files (a fixed frame plus one instructions section) ---
+
+# Not `prompts/`: a directory named like this module would shadow it for a single-file mypy run.
+PROMPT_DIR: Path = Path(__file__).resolve().parent / "judge_prompts"
+SLOT_FILES: Final[dict[str, str]] = {
+    "judge.eval.relevance": "judge_eval_relevance.md",
+    "judge.eval.sufficiency": "judge_eval_sufficiency.md",
+    "judge.eval.groundedness": "judge_eval_groundedness.md",
+    "judge.eval.self_contained": "judge_eval_self_contained.md",
+    "judge.eval.citation_supports_claim": "judge_eval_citation_supports_claim.md",
+    "judge.align": "judge_align.md",
+}
+# SRV-AGENT's file (paired change); usable here only once it carries the two delimiter lines.
+PAIRED_FILES: Final[dict[str, Path]] = {"judge.find": _PACKAGE / "agent" / "prompts" / "judge_find.md"}
+MARK: Final = "READER-INSTRUCTIONS"
+BEGIN: Final = "<<<" + MARK
+END: Final = MARK + ">>>"
+
+
+def slot_path(slot: str) -> Path:
+    if slot in SLOT_FILES:
+        return PROMPT_DIR / SLOT_FILES[slot]
+    if slot in PAIRED_FILES:
+        return PAIRED_FILES[slot]
+    raise LookupError(slot)
+
+
+def prompt_bytes(slot: str) -> bytes:
+    return slot_path(slot).read_bytes()
+
+
+def _parts(prompt: str) -> tuple[str, str, str]:
+    """(head through the opening delimiter line, section without its final newline, tail from the closing
+    delimiter line); LookupError unless each delimiter is a whole line, exactly once."""
+    lines = prompt.split("\n")
+    if lines.count(BEGIN) != 1 or lines.count(END) != 1 or prompt.count(MARK) != 2:
+        raise LookupError("no single instructions section")
+    head, rest = prompt.split(BEGIN + "\n", 1)
+    if "\n" + END not in rest:
+        raise LookupError("no single instructions section")
+    body, tail = rest.split("\n" + END, 1)
+    return head + BEGIN + "\n", body, END + tail
+
+
+def section(slot: str) -> str:
+    """The text between the delimiter lines (FR-OBS-43), without its final newline."""
+    return _parts(prompt_bytes(slot).decode("utf-8"))[1]
+
+
+def frame_of(prompt: str) -> str:
+    head, _, tail = _parts(prompt)
+    return hashlib.sha256((head + tail).encode("utf-8")).hexdigest()
+
+
+def frame_sha256(slot: str) -> str:
+    """The sha256 of the file with its section text removed."""
+    return frame_of(prompt_bytes(slot).decode("utf-8"))
+
+
+def section_sha256(slot: str) -> str:
+    return hashlib.sha256(section(slot).encode("utf-8")).hexdigest()
+
+
+def wrap(slot: str, instructions: str) -> str:
+    """The slot's file with only the section replaced: the instructions on their own lines, with one final
+    newline added when absent."""
+    head, _, tail = _parts(prompt_bytes(slot).decode("utf-8"))
+    body = instructions if instructions.endswith("\n") else instructions + "\n"
+    return head + body + tail
+
+
+def system_prompt(slot: str) -> str:
+    """The production system prompt: the wrap of the file's own section (byte-equal to the file), or the
+    file itself for `judge.align`, which has no section."""
+    if slot == "judge.align":
+        return prompt_bytes(slot).decode("utf-8")
+    return wrap(slot, section(slot))

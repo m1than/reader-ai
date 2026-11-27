@@ -1,4 +1,4 @@
-# @trace FR-DEPLOY-9, FR-DEPLOY-10, FR-DEPLOY-11, INV-DEPLOY-2
+# @trace FR-DEPLOY-9, FR-DEPLOY-10, FR-DEPLOY-11, INV-DEPLOY-2, FR-DEPLOY-16
 """OPS-DEPLOY [config]: process hardening, memory limits, the ADR-0026 secret mounts, health checks."""
 
 import re
@@ -9,6 +9,7 @@ from .conftest import (
     DEPLOY,
     SECRET_CONSUMERS,
     SERVER_ROLES,
+    SERVER_SERVICES,
     all_renders,
     full_render,
     requires_docker_cli,
@@ -19,7 +20,10 @@ pytestmark = requires_docker_cli
 
 NNP = "no-new-privileges:true"
 GIB = 1024**3
-LIMITS = {"postgres": GIB, "api": GIB, "mcp": GIB, "worker": 2 * GIB, "agent-proxy": 256 * 1024**2}
+LIMITS = {
+    "postgres": GIB, "api": GIB, "mcp": GIB, "worker": 2 * GIB, "agent-proxy": 256 * 1024**2,
+    "worker-judge": 2 * GIB,  # FR-DEPLOY-16 (b): initial value, judge-gate measures
+}
 
 
 def _uid(user: str) -> str:
@@ -28,7 +32,7 @@ def _uid(user: str) -> str:
 
 def test_server_roles_and_proxy_hardened() -> None:
     services = full_render()["services"]
-    for name in ("api", "worker", "mcp", "agent-proxy"):
+    for name in ("api", "worker", "worker-judge", "mcp", "agent-proxy"):
         svc = services[name]
         assert svc.get("user"), name
         assert _uid(svc["user"]) not in {"0", "root"}, name
@@ -101,7 +105,7 @@ def test_secret_tmpfs_on_exactly_the_consumers() -> None:
 
 def test_health_dependencies_on_postgres() -> None:
     services = full_render()["services"]
-    for name in SERVER_ROLES:
+    for name in SERVER_SERVICES:
         assert services[name]["depends_on"]["postgres"]["condition"] == "service_healthy", name
 
 
@@ -146,10 +150,16 @@ def test_every_service_has_a_healthcheck() -> None:
         "postgres": ["CMD", "pg_isready", "-h", "127.0.0.1", "-U", "postgres"],
         "caddy": ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:2019/config/"],
         "embed": ["CMD", "python", "-I", "-m", "reader.search.embed_service", "--healthcheck"],
-    } | {role: ["CMD", "reader-server", "--role", role, "--healthcheck"] for role in SERVER_ROLES}
+    } | {role: ["CMD", "reader-server", "--role", role, "--healthcheck"] for role in SERVER_ROLES} | {
+        "worker-judge": ["CMD", "reader-server", "--role", "worker", "--healthcheck"],  # FR-DEPLOY-16 (a)
+        "agent-proxy": [  # FR-DEPLOY-16 (d): the bound agentnet address, not loopback
+            "CMD", "python", "-I", "-c",
+            "import socket; socket.create_connection(('10.230.7.2', 8080), 2).close()",
+        ],
+    }
     for name, test in expected.items():
         assert services[name]["healthcheck"]["test"] == test, name
-    for name in ("postgres", "embed", *SERVER_ROLES):
+    for name in ("postgres", "embed", *SERVER_SERVICES):
         health = services[name]["healthcheck"]
         assert {k: health.get(k) for k in HEALTH_TIMING} == HEALTH_TIMING, name
 
@@ -164,7 +174,7 @@ def test_only_server_roles_have_environment() -> None:
     for model in all_renders():
         for name, svc in model["services"].items():
             env = svc.get("environment") or {}
-            if name in SERVER_ROLES:
+            if name in SERVER_SERVICES:
                 assert env == {"READER_CONFIG": "/etc/reader/reader.yaml"}, name
             elif name == "mlflow":  # FR-DEPLOY-15 (a), (g): SRV-OBS FR-OBS-27's six non-secret entries
                 assert env == {

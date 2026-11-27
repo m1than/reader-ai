@@ -26,7 +26,9 @@ def anyio_backend() -> str:
 def test_kind_declaration() -> None:
     jobs = require("reader.obs.jobs")
     assert [k.name for k in jobs.JOB_KINDS] == [  # FR-OBS-14, -15; phase 2: SRV-EVENTS FR-EVENTS-32
-        "obs.feedback", "obs.prompts", "obs.retention", "obs.setup", "obs.runs", "obs.bench", "obs.label", "obs.health"]
+        "obs.feedback", "obs.prompts", "obs.retention", "obs.setup", "obs.runs", "obs.bench", "obs.label", "obs.health",
+        # ADR-0039 (kl_job_kinds): FR-OBS-39, -14, -41
+        "obs.eval", "obs.eval_run", "obs.judge_score", "obs.eval_sample", "obs.align"]
     kind = jobs.JOB_KINDS[2]
     assert kind.name == "obs.retention"
     assert kind.key == ("day",)
@@ -121,6 +123,48 @@ async def test_disabled_enqueues_the_next_day_and_deletes_nothing() -> None:
             == 0
         )
     assert log == ["enqueue"]
+
+
+@pytest.mark.parametrize(("enabled", "mlflow_fails"), [(True, False), (True, True), (False, False)])
+async def test_postgres_deletes_run_first_whatever_mlflow_does(
+    enabled: bool, mlflow_fails: bool, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """ADR-0039 (FR-OBS-11 as amended): the Postgres deletes run before any MLflow request, with tracing on or off,
+    and an MLflow failure afterwards does not stop them."""
+    import reader.jobs
+    from reader.obs import setup
+
+    jobs = require("reader.obs.jobs")
+    order: list[str] = []
+
+    async def postgres(conn: Any, now: datetime, days: int) -> None:
+        order.append(f"postgres:{days}")
+
+    async def retain(day: str, **kwargs: Any) -> int:
+        order.append("mlflow")
+        if mlflow_fails:
+            raise jobs.RetentionFailed("status 500")
+        return 0
+
+    async def prune(client: Any, **kwargs: Any) -> None:
+        order.append("prune")
+
+    async def effective(conn: Any) -> Any:
+        return setup.Settings(enabled, 30)
+
+    monkeypatch.setattr(setup, "current_settings", lambda: setup.Settings(enabled, 30))
+    monkeypatch.setattr(setup, "effective_settings", effective)
+    monkeypatch.setattr(reader.jobs, "running", lambda: FakeJobs([]))
+    monkeypatch.setattr(jobs, "postgres_retention", postgres)
+    monkeypatch.setattr(jobs, "retain", retain)
+    monkeypatch.setattr(jobs.runs, "prune", prune)
+    conn = object()
+    if mlflow_fails:
+        with pytest.raises(jobs.RetentionFailed):
+            await jobs.handle(jobs.RetentionArgs(day="2026-11-24"), conn, None)
+    else:
+        await jobs.handle(jobs.RetentionArgs(day="2026-11-24"), conn, None)
+    assert order[0] == "postgres:30" and order[1] == "mlflow"
 
 
 @pytest.fixture(autouse=True)

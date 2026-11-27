@@ -1,0 +1,77 @@
+# VEC-AGENT-6: agent-proxy client sequences per FR-AGENT-3 (revised for ADR-0039 B7b), hand-derived.
+# Clients by source address (OPS-DEPLOY FR-DEPLOY-16): worker 10.230.7.10 (quota 28, TTL 1500 s, evicts its own
+# oldest), lane = worker-judge 10.230.7.11 (quota 4, TTL 30 s, refuses when full, no tools), unknown 10.230.7.200.
+# Steps: `from` (worker | lane | unknown), `op`:
+#   issue        POST /run-tokens for user ivan; `as` names the token for later steps
+#   issue_web    POST /run-tokens with task freshness_web and a web_search allowance
+#   revoke       POST /run-tokens/revoke of token `ref`
+#   revoke_all   POST /run-tokens/revoke-all
+#   forward      POST /v1/messages?beta=true with token `ref` (a plain body, no tools)
+#   advance      the proxy clock moves `seconds`
+# `expect` is the HTTP status, plus `error` or `revoked` when the body is checked. `live` after a step is the number
+# of live (unexpired, unrevoked) tokens per client, counted through the proxy's table.
+sequences:
+  - id: lane-quota-refuses-the-fifth
+    steps:
+      - { from: lane, op: issue, as: l1, expect: 200 }
+      - { from: lane, op: issue, as: l2, expect: 200 }
+      - { from: lane, op: issue, as: l3, expect: 200 }
+      - { from: lane, op: issue, as: l4, expect: 200 }
+      - { from: lane, op: issue, as: l5, expect: 429, error: client_quota, live: { worker: 0, lane: 4 } }
+      - { from: lane, op: forward, ref: l1, expect: 200 }
+  - id: lane-purge-by-clock-frees-the-slot
+    steps:
+      - { from: lane, op: issue, as: l1, expect: 200 }
+      - { from: lane, op: issue, as: l2, expect: 200 }
+      - { from: lane, op: issue, as: l3, expect: 200 }
+      - { from: lane, op: issue, as: l4, expect: 200 }
+      - { from: lane, op: advance, seconds: 31 }
+      - { from: lane, op: issue, as: l5, expect: 200, live: { worker: 0, lane: 1 } }
+      - { from: lane, op: revoke, ref: l1, expect: 404, error: run_token_unknown }
+      - { from: lane, op: forward, ref: l2, expect: 401 }
+  - id: saturated-lane-never-evicts-a-worker-token
+    steps:
+      - { from: worker, op: issue, as: w1, expect: 200 }
+      - { from: lane, op: issue, as: l1, expect: 200 }
+      - { from: lane, op: issue, as: l2, expect: 200 }
+      - { from: lane, op: issue, as: l3, expect: 200 }
+      - { from: lane, op: issue, as: l4, expect: 200 }
+      - { from: lane, op: issue, as: l5, expect: 429, error: client_quota }
+      - { from: worker, op: forward, ref: w1, expect: 200, live: { worker: 1, lane: 4 } }
+  - id: worker-past-its-quota-evicts-its-own-oldest
+    steps:
+      - { from: lane, op: issue, as: l1, expect: 200 }
+      - { from: worker, op: issue, as: w1, expect: 200 }
+      - { from: worker, op: issue_many, count: 28, expect: 200, live: { worker: 28, lane: 1 } }
+      - { from: worker, op: forward, ref: w1, expect: 401 }
+      - { from: lane, op: forward, ref: l1, expect: 200 }
+  - id: killed-lane-revoke-all
+    steps:
+      - { from: worker, op: issue, as: w1, expect: 200 }
+      - { from: lane, op: issue, as: l1, expect: 200 }
+      - { from: lane, op: issue, as: l2, expect: 200 }
+      - { from: lane, op: issue, as: l3, expect: 200 }
+      - { from: lane, op: issue, as: l4, expect: 200 }
+      - { from: lane, op: revoke_all, expect: 200, revoked: 4, live: { worker: 1, lane: 0 } }
+      - { from: worker, op: forward, ref: w1, expect: 200 }
+      - { from: lane, op: issue, as: l5, expect: 200 }
+  - id: no-cross-client-revoke-or-forward
+    steps:
+      - { from: worker, op: issue, as: w1, expect: 200 }
+      - { from: lane, op: issue, as: l1, expect: 200 }
+      - { from: lane, op: revoke, ref: w1, expect: 404, error: run_token_unknown }
+      - { from: worker, op: forward, ref: w1, expect: 200 }
+      - { from: worker, op: forward, ref: l1, expect: 401 }
+      - { from: worker, op: revoke, ref: l1, expect: 404, error: run_token_unknown }
+      - { from: lane, op: forward, ref: l1, expect: 200, live: { worker: 1, lane: 1 } }
+  - id: unknown-address-gets-nothing
+    steps:
+      - { from: worker, op: issue, as: w1, expect: 200 }
+      - { from: unknown, op: issue, as: u1, expect: 403, error: client_unknown }
+      - { from: unknown, op: forward, ref: w1, expect: 403, error: client_unknown }
+      - { from: unknown, op: revoke, ref: w1, expect: 403, error: client_unknown }
+      - { from: unknown, op: revoke_all, expect: 403, error: client_unknown, live: { worker: 1, lane: 0 } }
+  - id: lane-is-never-given-tools
+    steps:
+      - { from: lane, op: issue_web, as: l1, expect: 400, error: tools_not_allowed, live: { worker: 0, lane: 0 } }
+      - { from: worker, op: issue_web, as: w1, expect: 200 }

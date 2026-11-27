@@ -1953,8 +1953,36 @@ tasks:
       note: "Promotion order (deep-reviewer round 1): FR-AGENT-3 revised (agent-proxy client identity), INV-AGENT-7 and
         VEC-AGENT-6 go Green only in the same integration merge as V.kl-deploy-judge-lane's OPS-DEPLOY agentnet subnet
         and fixed addresses, never before (else every worker issue is 403 client_unknown); the rest may merge earlier" }
-  - { id: V.kl-deploy-judge-lane, stage: V, kind: module, track: engineering, status: todo,
+  - { id: V.kl-deploy-judge-lane, stage: V, kind: module, track: engineering, status: done,
       needs: [V.owner.adr-0039, V.kl-agent-judges],
+      branch: V/kl-deploy-judge-lane,
+      code_review: "deep-reviewer (Fable) round 1 changes (2 blockers: lane hand-off untested; stage-1 live checks
+        missing), round 2 approve (2026-11-27; 31/33 mutants killed in round 1, lane mutant killed in round 2;
+        search/jobs suites pass under load). Merged into V/slice-integration. Open non-blocking: stage-1 loopback
+        probe tightening and SKIP line, NaN run_cap_usd and NUL in pack_ids validation. Stage-1 live check not run
+        (needs the owner's stack: judge slots in reader.yaml, reader down then reader up)",
+      review: "spec: deep-reviewer (Fable) round 1 changes (4 blockers), round 2 changes (1 blocker), round 3
+        approve (2026-11-26); code review by the coordinator before the merge into V/slice-integration (pending)",
+      done_here: "merged origin/V/kl-agent-judges and origin/V/slice-integration; promoted OPS-DEPLOY FR-DEPLOY-16,
+        INV-DEPLOY-11, VEC-DEPLOY-2/-3; SRV-EVENTS FR-EVENTS-1/-9/-11/-15 amended, FR-EVENTS-33/-34, INV-EVENTS-8/-9;
+        OPS-CLI FR-CLI-4/-5/-17/-18 amended, FR-CLI-25, VEC-CLI-2/-3; OPS-SANDBOX INV-SANDBOX-3 amended, INV-SANDBOX-7,
+        VEC-SANDBOX-1; SRV-AGENT's deferred FR-AGENT-3 (client identity, --bind), INV-AGENT-1/-6 amended, INV-AGENT-7,
+        VEC-AGENT-6; paired SRV-AUTH FR-AUTH-2 (--lane) and SRV-OBS FR-OBS-8 (otel) amendments. Red then Green:
+        compose.yaml (worker-judge, agentnet ipam and fixed addresses, judge-db, otel, agent-proxy agentnet bind),
+        proxy.py (CLIENTS, quotas, TTLs, revoke-all, no cross-client revoke, --bind), jobs lanes, judge_requests +
+        jobs_0004, judge_reap/judge_gc, the reserved periodic tasks in the sweep (also fixes a todo `<kind>.tick` being
+        cancelled), lane.py JOB_KINDS, CLI lists and doctor judge_slots, the example's judge slots, sandbox and
+        live tests for worker-judge. No paid call; no `reader up`; [live] tests skip without READER_LIVE=1 and the
+        [image] network test without READER_TEST_IMAGE_BUILD=1",
+      left: "SRV-OBS: the judge lane's own tracing service name (it traces as `worker` now); SRV-SEARCH: the waiter
+        (put, LISTEN judge_done, enqueue, wait, re-read); the stage live check of FR-DEPLOY-16 / INV-SANDBOX-7 / the
+        ipam-less agentnet upgrade (needs `reader up`, the owner's run); the memory limit from judge-gate",
+      ask: "Before the live check runs `reader doctor`: the owner adds the judge slots to his reader.yaml
+        (`tasks.judge.find: {model: haiku}` at least; v1 bindings in deploy/reader.example.yaml); FR-CLI-25 fails
+        while judge.find is unbound with agents on. After pulling this change, `reader down` (volumes kept) then
+        `reader up` once, so Compose recreates agentnet with its subnet. The first jobs.judge_gc deletes the weeks of
+        old succeeded sweep-queue rows in one statement (expected, a one-off). e2e/live/stage-1.sh has the lane checks
+        (code review round 1); the owner runs it",
       what: "OPS-DEPLOY, SRV-EVENTS, OPS-SANDBOX, OPS-CLI and SRV-CONFIG revision (~340–600 lines): the worker-judge
         Compose service from the worker image with the worker's hardening and DB DSN delivery (ADR-0026), on agentnet,
         core and otel only, with an initial memory limit; a judge.find queue keyed by request id, consumed only by
@@ -1964,7 +1992,46 @@ tasks:
         judge task classes and the new caps in the config schema. FR-DEPLOY-3, VEC-DEPLOY-2; FR-EVENTS-9, -10, -11;
         INV-SANDBOX-3; FR-CLI-4, -5, -17, -18; SRV-CONFIG schema rows (FR-CONFIG-25, -26 only if the caps join the UI
         allow-list)" }
-  - { id: V.kl-obs-spans, stage: V, kind: module, track: engineering, status: todo, needs: [V.owner.adr-0039],
+  - { id: V.kl-obs-spans, stage: V, kind: module, track: engineering, status: done, needs: [V.owner.adr-0039],
+      branch: V/kl-obs-spans,
+      code_review: "deep-reviewer (Fable) code rounds 1-3 changes (3, 3, 1 blockers: run close outside MLflow, real
+        MLflow-half and canary tests, dataset fallback/early return), round 4 approve (2026-11-27; mutants killed).
+        Spec: 8 design rounds (owner-allowed exception, ADR-0039 amendment note). Merged into V/slice-integration
+        after resolving conflicts with the deploy lane (judge.find copies input_sha256 only). Open: VEC-OBS-5
+        body-key check, image/live checks moved to V.kl-live, two pre-existing load flakes recorded",
+      notes: "2026-11-26: SRV-OBS revision approved (deep-reviewer Fable design rounds 1-8, round 8 VERDICT approve on
+        bf94c6f), promoted (FR-OBS-36..43, INV-OBS-6..8, VEC-OBS-7/8; amendments to FR-OBS-7, 8, 11-16, 20-24, 26,
+        31, INV-OBS-1/2, VEC-OBS-1/4/5/6), Red then Green: migration obs_0003; find/pack span helpers and
+        allow-list (find.py, spans.py); judge_inputs sink (JudgeInputsSink); obs.eval/obs.eval_run/obs.judge_score/
+        obs.eval_sample with reader.obs.eval.start; judge labels, queue and item routes; obs.align with the guard
+        and the proposals export; judge prompts (judge_prompts/) and parsers; policy_version; retention's Postgres
+        deletes first. Waiting: the coordinator's code review before merge into V/slice-integration. Not wired on
+        this branch (ports default to NotWired): SRV-SEARCH find/card reader/policy, SRV-AGENT eval-line Provider and
+        judge.find worker capability (FR-OBS-41's judge.find half stays slot_unsupported), SRV-INGEST material
+        reader; budgets.eval_usd_per_run absent (eval starts refuse cap_missing); brain-eval-v1 pin null. Not done
+        here: the [image] tests of FR-OBS-36/-37/-39/-16 (opt-in, not written), the [live] obs_live.py find check,
+        WEB-MANAGE FR-MANAGE-6 tab, OPS-CLI `reader obs eval` / `reader obs proposals`, the per-job version key and
+        obs.setup enqueue on an unseen key (needs SRV-SEARCH's policy). Mismatch for SRV-AGENT: its lane calls
+        sink.copy(write, request, output) without the judge string; the sink reads it from judge_outputs in the same
+        transaction. Review model: Fable (deep-reviewer). Process note (code review round 1): during Red a real
+        spec wording fix was kept uncommitted so the H2 hook allowed the test writes; the coordinator judged it
+        legitimate in substance, and it is not to be repeated: a test change goes with its own spec change in the
+        same commit. Code review round 1 fixes: obs.eval_run closes in its own transaction before MLflow, the
+        [0, bench] dataset fallback, tests with the in-test MLflow (bodies, 400/503, retry), the sampler, the
+        INV-OBS-6 end-to-end canary; image levels of FR-OBS-36/-37/-39 and FR-OBS-16's image check, and
+        FR-OBS-36's live check, moved to V.kl-live (listed in its `what`). Code review round 2 fixes: the fallback
+        dataset is reused (found by name in experiment 0) and a job that finds the Run complete writes nothing.
+        For the brain-eval-v1 pin task: spec/fixtures/eval/pilot-eval-v1.yaml (accepted 2026-11-26) names its
+        fields `type` (eval.py reads `question_type`), uses `fact-check`-style values to check against
+        VEC-OBS-5's `fact_check`, and gives `gold_pages` as strings and ranges (\"33-35\"), which eval.py does
+        not send (it sends integers only, never invented); the pin needs a mapping or a set rewrite, decided
+        there. Pre-existing flake seen in local CI: tests/obs/test_tracing_db.py::
+        test_worker_start_rows_and_their_pruning compares the database clock with the host clock (passed on
+        rerun); to fix later by reading the time from the database, with its spec. A second pre-existing,
+        load-sensitive flake: tests/sandbox/test_supervisor.py::test_eviction_under_flood_keeps_pid1 (OPS-SANDBOX;
+        failed once in a full local CI run, passed alone and on the rerun; untouched by this branch). Code review
+        round 3: a complete Run without its dataset input gets only the input (FR-OBS-39 c amended); the
+        VEC-OBS-5 body-key check of the eval writes stays for V.kl-live or the pin task",
       what: "SRV-OBS and WEB-MANAGE revision (~500–800 lines): TOOL/ROUTER/RETRIEVER spans with ids, counts, brain_version,
         policy_version and hashes only (INV-OBS-1/2 kept; question-derived filters as concept ids or hashes); the
         judge.find job as its own linked trace; a local judge-evaluation job kind obs.eval writing scores only
@@ -2023,7 +2090,15 @@ tasks:
   - { id: V.kl-live, stage: V, kind: live, status: todo, needs: [V.kl-pipeline-checks, V.kl-tutor-find],
       what: "upload -> one manifest entry; a BIP-32 question -> cards with locators; remove the pack -> search no longer
         sees it; restore -> the same cards; MLflow stopped -> search still answers; Haiku evaluation meets the brain/v1
-        targets (90% sufficiency, median <= 3 calls, <= 2,000 tokens, find p95 < 2.5 s)" }
+        targets (90% sufficiency, median <= 3 calls, <= 2,000 tokens, find p95 < 2.5 s); moved here from
+        V.kl-obs-spans (code review round 1), in server/tests/obs/test_images_kl.py (opt-in READER_TEST_IMAGE_BUILD=1)
+        and e2e/live/lib/obs_live.py: [image] FR-OBS-36 (find.route stored as ROUTER, RETRIEVER/RERANKER documents
+        rendered, the judge.find job trace linked from find.judge_wait, ?q=<policy_version>, the stored size of one
+        find), [image] FR-OBS-37 (a pack.build span with an agent.call child: MLflow's span cost sum equals the
+        ledger amount only), [image] FR-OBS-39 (LLM_JUDGE assessments on the Quality dashboard, the eval Run lists
+        its record traces, the cross-experiment dataset input pinned or its fallback exercised), [image] FR-OBS-16
+        (Evaluation runs lists the eval Run; the saved view ?q=<policy_version>), and [live] FR-OBS-36 (a
+        zero-credit owner-channel find gives a find subtree with documents and no text canary in the trace JSON)" }
 
   # Stage 3 — ingestion and search
   - { id: S3.SRV-INGEST, stage: 3, kind: module, track: engineering, status: todo, needs: [S2.live, S0.spike.ingest-docling] }

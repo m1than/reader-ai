@@ -583,6 +583,23 @@ operations:
       observability: { missing: "no spec requires a log line for an upload or a label" }
       recovery: { items: [INV-OBS-3] }
 
+  # Added 2026-11-26 (SRV-OBS, ADR-0039): the owner labels judge outputs and starts a local judge evaluation.
+  - id: obs.judge
+    title: Label judge outputs and start a judge evaluation
+    surface: [web]
+    specs: [SRV-OBS]
+    routes: ["GET /api/obs/judge-queue", "GET /api/obs/judge-items/{item_id}", "POST /api/obs/eval"]
+    gate: tracked
+    criteria:
+      functional: { items: [FR-OBS-39, FR-OBS-40, FR-OBS-24] }
+      security: { items: [FR-OBS-40, FR-OBS-39] }
+      privacy: { items: [INV-OBS-6, INV-OBS-2] }
+      a11y: { missing: "the WEB-MANAGE judge tab (FR-MANAGE-6, paired) is not built yet" }
+      latency: { missing: "no sourced budget" }
+      cost: { missing: "the eval cap budgets.eval_usd_per_run is set from judge-gate's measured run cost" }
+      observability: { missing: "no spec requires a log line for a judge label or an eval start" }
+      recovery: { items: [INV-OBS-3] }
+
   - id: stack.backup
     title: Back up the stack (reader backup DIR)
     surface: [cli]

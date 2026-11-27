@@ -208,7 +208,7 @@ def _serve_api(bind: str, env: Env) -> None:
     asyncio.run(run())
 
 
-def _run_worker(env: Env) -> None:
+def _run_worker(env: Env, lane: str = "main") -> None:
     _settings(env)
     target = _target(env)
     last_report = [-WORKER_ERROR_EVERY_S]
@@ -235,7 +235,7 @@ def _run_worker(env: Env) -> None:
                 obs: Any = None
                 try:
                     obs = start_obs("worker", env)  # FR-AUTH-33 (SRV-OBS FR-OBS-1), inside the try
-                    code = await run_jobs(engine, target, stop, secret_values=held)
+                    code = await run_jobs(engine, target, stop, secret_values=held, lane=lane)
                 finally:
                     if obs is not None:
                         obs.shutdown()
@@ -269,6 +269,8 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--role", choices=("api", "worker", "mcp"))
     parser.add_argument("--bind", default="0.0.0.0:8000")
     parser.add_argument("--healthcheck", action="store_true")
+    # FR-AUTH-2 (paired SRV-EVENTS FR-EVENTS-9, ADR-0039 B7b): the worker's lane; `judge` is worker-judge.
+    parser.add_argument("--lane", choices=("main", "judge"))
     return parser
 
 
@@ -282,6 +284,8 @@ def run(argv: list[str], environ: Mapping[str, str]) -> int:
     args = _parser().parse_args(argv)
     if args.role is None:
         _parser().error("--role is required")
+    if args.lane is not None and args.role != "worker":
+        _parser().error("--lane is only for --role worker")
     if args.role == "mcp":
         _line("mcp role arrives with SRV-MCP")
         return 2
@@ -291,7 +295,7 @@ def run(argv: list[str], environ: Mapping[str, str]) -> int:
     elif args.role == "api":
         _serve_api(args.bind, env)
     else:
-        _run_worker(env)
+        _run_worker(env, args.lane or "main")
     return 0
 
 

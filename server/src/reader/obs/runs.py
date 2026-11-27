@@ -32,7 +32,9 @@ LINK_BATCH: Final = 100
 TRACE_PAGE: Final = 500
 RUNS_PAGE: Final = 1000  # runs/search's largest page (FR-OBS-31)
 EXPERIMENT: Final = "0"
-ID_TAG: Final = {"compile": "reader.run_id", "ingest": "reader.ingest_id"}
+# ADR-0039 (FR-OBS-20 as amended): `obs.eval_run` writes kind `eval` through the same steps; FR-OBS-31's prune
+# searches every kind listed here.
+ID_TAG: Final = {"compile": "reader.run_id", "ingest": "reader.ingest_id", "eval": "reader.eval_id"}
 
 
 class ObsRunsDuplicate(Exception):

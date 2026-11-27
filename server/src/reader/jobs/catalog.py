@@ -11,7 +11,15 @@ import re
 from collections.abc import Awaitable, Callable, Iterable, Iterator, Mapping
 from typing import Any, Final
 
-from reader.jobs.model import NAME_PATTERN, SWEEP_TASK, JobError, JobKind, model_has_secret_field
+from reader.jobs.lanes import JUDGE_KINDS, JUDGE_QUEUE, LANES, Lane, check_served
+from reader.jobs.model import (
+    NAME_PATTERN,
+    RESERVED_TASKS,
+    TICK_SUFFIX,
+    JobError,
+    JobKind,
+    model_has_secret_field,
+)
 
 SWEEP_PRIORITY: Final = 1_000_000  # jobs.sweep runs before every kind; a kind's priority stays below it
 
@@ -22,6 +30,7 @@ KIND_MODULES: Final[tuple[str, ...]] = (
     "reader.tutor.jobs",  # SRV-TUTOR paired change (FR-EVENTS-1)
     "reader.obs.jobs",  # SRV-OBS paired change (FR-EVENTS-19): obs.retention
     "reader.freshness.jobs",  # SRV-FRESH paired change (FR-EVENTS-1)
+    "reader.agent.lane",  # SRV-AGENT FR-AGENT-21: judge.find on the judge lane (FR-EVENTS-9 amended)
 )
 StartHook = Callable[[Any], Awaitable[None]]
 
@@ -32,7 +41,7 @@ class Catalog(Mapping[str, JobKind]):
         for kind in kinds:
             if not re.fullmatch(NAME_PATTERN, kind.name):
                 raise JobError("kind_name_invalid")
-            if kind.name == SWEEP_TASK:
+            if kind.name in RESERVED_TASKS or kind.name.endswith(TICK_SUFFIX):  # periodic task names
                 raise JobError("kind_name_reserved")
             if kind.name in by_name:
                 raise JobError("kind_name_duplicate")
@@ -44,6 +53,10 @@ class Catalog(Mapping[str, JobKind]):
                 raise JobError("secret_in_payload")
             if kind.max_attempts < 1 or kind.timeout_s <= 0 or not 0 <= kind.priority < SWEEP_PRIORITY:
                 raise JobError("kind_bounds_invalid")
+            if kind.key_retention_s is not None and kind.key_retention_s <= 0:
+                raise JobError("kind_bounds_invalid")
+            if kind.queue == JUDGE_QUEUE and kind.name not in JUDGE_KINDS:
+                raise JobError("queue_reserved")
             by_name[kind.name] = kind
         self._kinds = by_name
 
@@ -60,12 +73,19 @@ class Catalog(Mapping[str, JobKind]):
     def queues(self) -> list[str]:
         return sorted({k.queue for k in self._kinds.values()})
 
+    @property
+    def periodic_tasks(self) -> frozenset[str]:
+        """The reserved periodic task names this catalog registers besides the fixed ones (FR-EVENTS-15)."""
+        return frozenset(f"{k.name}{TICK_SUFFIX}" for k in self._kinds.values() if k.periodic is not None)
 
-def load_kinds(modules: Iterable[str] = KIND_MODULES) -> Catalog:
+
+def load_kinds(modules: Iterable[str] = KIND_MODULES, lanes: Mapping[str, Lane] = LANES) -> Catalog:
     kinds: list[JobKind] = []
     for name in modules:
         kinds.extend(importlib.import_module(name).JOB_KINDS)
-    return Catalog(kinds)
+    catalog = Catalog(kinds)
+    check_served(catalog.queues, lanes)  # FR-EVENTS-9: every queue has a lane
+    return catalog
 
 
 def start_hooks(modules: Iterable[str] = KIND_MODULES) -> list[StartHook]:
