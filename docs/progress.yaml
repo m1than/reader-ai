@@ -2267,7 +2267,11 @@ tasks:
         the sent sources (a) search(k=8) 21, (b) find primaries 28, (c) +next 28, (d) +previous+next 28 of 40;
         mean L1 card cost 400.6 tokens (estimate 437); the 29,000-byte drop never bound for (c). Build threshold
         met (28 >= 21 and >= 26): promote and build. P1 threshold not met (28 of 40, not 40): P1 waits for the
-        owner's go",
+        owner's go. SRV-TUTOR kl_revision approved by agent (1e8e1ef). Built: unit 1 SRV-INGEST
+        views.active_span_rows (INV-INGEST-16, Red 2762f06, Green a753dfa); unit 2 policy.json tutor
+        budget_default 10,500 (Red 8e53a2f, Green 6e7bd41). Next: unit 3, SRV-TUTOR retrieval through find
+        (FR-TUTOR-1/-3/-5/-8/-22, INV-TUTOR-2/-4, VEC-TUTOR-1/-9, the never_judge pin, legacy-id drop, NFC length,
+        web citation shape and bench gold_in_find), then the block for the owner's P1 go",
       what: "SRV-TUTOR revision (~100–200 lines): retrieval through find on the tutor channel with its own maximum in
         policy, starting at today's 21,000-byte source budget, full span text for personal-use cards, NFR-TUTOR-3
         grounding re-measured as a gate; L5 boost once learner
