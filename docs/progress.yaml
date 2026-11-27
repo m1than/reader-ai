@@ -1992,8 +1992,13 @@ tasks:
         judge task classes and the new caps in the config schema. FR-DEPLOY-3, VEC-DEPLOY-2; FR-EVENTS-9, -10, -11;
         INV-SANDBOX-3; FR-CLI-4, -5, -17, -18; SRV-CONFIG schema rows (FR-CONFIG-25, -26 only if the caps join the UI
         allow-list)" }
-  - { id: V.kl-obs-spans, stage: V, kind: module, track: engineering, status: in_progress, needs: [V.owner.adr-0039],
+  - { id: V.kl-obs-spans, stage: V, kind: module, track: engineering, status: done, needs: [V.owner.adr-0039],
       branch: V/kl-obs-spans,
+      code_review: "deep-reviewer (Fable) code rounds 1-3 changes (3, 3, 1 blockers: run close outside MLflow, real
+        MLflow-half and canary tests, dataset fallback/early return), round 4 approve (2026-11-27; mutants killed).
+        Spec: 8 design rounds (owner-allowed exception, ADR-0039 amendment note). Merged into V/slice-integration
+        after resolving conflicts with the deploy lane (judge.find copies input_sha256 only). Open: VEC-OBS-5
+        body-key check, image/live checks moved to V.kl-live, two pre-existing load flakes recorded",
       notes: "2026-11-26: SRV-OBS revision approved (deep-reviewer Fable design rounds 1-8, round 8 VERDICT approve on
         bf94c6f), promoted (FR-OBS-36..43, INV-OBS-6..8, VEC-OBS-7/8; amendments to FR-OBS-7, 8, 11-16, 20-24, 26,
         31, INV-OBS-1/2, VEC-OBS-1/4/5/6), Red then Green: migration obs_0003; find/pack span helpers and
