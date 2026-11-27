@@ -63,6 +63,20 @@ for line in sys.stdin:
         # STUB_FAIL_SHA: comma-separated sha256 prefixes (16 hex) of the span texts whose calls always fail
         fail_set = set(filter(None, os.environ.get("STUB_FAIL_SHA", "").split(",")))
         fail = span is not None and hashlib.sha256(span.encode()).hexdigest()[:16] in fail_set
+        # STUB_ANSWER_TOKENS=n: summary answers are n tokens long; above the output cap the real CLI continues the
+        # call to 4 requests (4 x cap output tokens) and fails it (summaries run 1: 18 of 23 at a 200 cap)
+        cap = int(os.environ.get("CLAUDE_CODE_MAX_OUTPUT_TOKENS") or 32000)
+        answer = int(os.environ.get("STUB_ANSWER_TOKENS") or 0)
+        if "<section>" in prompt and answer > cap:
+            send({"type": "assistant", "message": {"role": "assistant", "model": "stub", "content": [
+                {"type": "text", "text": "stub: output token maximum exceeded"}]},
+                  "parent_tool_use_id": None, "session_id": "stub"})
+            send({"type": "result", "subtype": "error_max_turns", "duration_ms": 1, "duration_api_ms": 1,
+                  "is_error": True, "num_turns": 1, "session_id": "stub",
+                  "total_cost_usd": float(os.environ.get("STUB_USD", "0.0004")),
+                  "usage": {"input_tokens": 8, "output_tokens": 4 * cap, "cache_creation_input_tokens": size,
+                            "cache_read_input_tokens": 0}, "result": ""})
+            break
         if fail:  # like run 1's 54 failures: a billed call that ends in an error result without an answer
             send({"type": "result", "subtype": "error_max_turns", "duration_ms": 1, "duration_api_ms": 1,
                   "is_error": True, "num_turns": 1, "session_id": "stub",

@@ -107,9 +107,17 @@ check "retry: prefixes completes in one run despite spans that always fail" \
   '[[ $rc == 0 && $(sum .coverage_complete retry prefixes) == true && $(sum .book_spans_prefix_none retry prefixes) -ge 50 ]]'
 check "retry: in the final run every last try comes after every first try" \
   'jq -s "(to_entries | map(select(.value.retry == true)) | map(.key) | min) as \$a | (to_entries | map(select(.value.retry == false)) | map(.key) | max) as \$b | (\$a == null or \$b == null or \$a > \$b)" <(tail -n $(sum .calls_this_run retry prefixes) "$S/retry/num/prefixes/calls.jsonl") | grep -q true'
-# empty answers: counted, coverage incomplete, exit 3
+# empty answers: failed calls; all empty is systemic, so the stage stops (exit 3) with coverage incomplete
 rc=$(run empty summaries 12.00 -e STUB_USD=0.0004 -e STUB_EMPTY=1)
 check "empty answers fail coverage" '[[ $rc == 3 && $(sum .coverage_complete empty summaries) == false ]]'
+# summaries run 1's failure shape: answers longer than the output cap are continued to 4 requests and fail.
+# 210-token answers (run 1's 70 words) failed under the old 200 cap; under the leaf cap of 400 they finish
+rc=$(run sum-210 summaries 12.00 -e STUB_USD=0.0004 -e STUB_ANSWER_TOKENS=210)
+check "summaries: 210-token answers finish under the new caps" \
+  '[[ $rc == 0 && $(sum .coverage_complete sum-210 summaries) == true && $(sum .failed_calls sum-210 summaries) == 0 ]]'
+# answers over every leaf cap (450 > 400): every leaf fails, so the stage stops after 10 in a row (exit 3)
+rc=$(run sum-450 summaries 12.00 -e STUB_USD=0.0004 -e STUB_ANSWER_TOKENS=450)
+check "summaries: answers over the cap stop the stage" '[[ $rc == 3 && $(sum .stopped sum-450 summaries) == 10\ consecutive* ]]'
 # files left in HOME: 100 kB per call extrapolates past the 512 MB tmpfs over 9,104 calls, so stage1 fails
 rc=$(run home stage1 12.00 -e STUB_USD=0.0004 -e STUB_HOME_BYTES=100000)
 check "home tmpfs: stage1 fails when HOME grows per call" '[[ $rc == 3 && $(sum .home_tmpfs_ok home stage1) == false ]]'

@@ -271,6 +271,41 @@ sequential at the measured p50 that is about 4.2 h. Initial `index` cap per pack
 embedding in the embed image with `--network none`, no token, no model call); then the owner runs `paid.sh judge`
 and `paid.sh factcheck`.
 
+## `summaries` run 1 (owner's run, 2026-11-27; `results/paid/summaries/`): stopped, diagnosed, fixed
+
+Exit 3, "10 consecutive failed calls", after 23 calls, all leaves (level 4 runs first): 5 succeeded, 18 failed,
+$0.02656115 (recompute agrees), output 15,568 tokens, per call p50 8.73 s, p95 18.37 s.
+
+- **What failed:** every failure is `ResultError` with exactly 800 output tokens = 4 × the 200-token output cap
+  (`TOKENS["leaf"] × 2`). The answers ran past the cap and the CLI continued each call to 4 requests, then failed it;
+  the long wall times are those 4 sequential generations (thinking is off), not thinking. The successes used 158–195
+  output tokens (one 476, continued and finished). The text stored for a failure is the CLI's 155-character error
+  message (19 words, ASCII, not an answer in the book's language), identical up to its digits (the cap) to the text
+  stored for the 54 prefix failures of `prefixes` run 1 (compared by hash, digits masked), whose 1,200 output tokens
+  are 4 × that stage's 300 cap: those were the same output-cap continuation, which settles the cause item 2 above
+  left unmeasured; the code no longer stores any text of a call whose result is
+  not a success.
+- **Cause:** the prompt asked for 70 words; this model writes about 3 tokens per Russian word (57 words = 171
+  tokens), so a leaf answer of ≈ 210 tokens needed more than the 200-token cap and more than B1's leaf budget of
+  100. The runner's caps did not match B1: 200 / 600 / 600 / 1,000 output tokens against budgets of
+  100 / 300 / 300 / 500 for leaf / inner / chapter / root, with prompts asking for ≈ 2× the budget.
+- **Fix:** the prompt asks for 30 / 90 / 90 / 150 words (≈ 90 / 270 / 270 / 450 tokens, inside the budgets); the
+  output cap is 4× the budget (400 / 1,200 / 1,200 / 2,000), so an answer that overruns the asked length still ends
+  in one request (the budget is enforced at read time, B1); a node's first failure is retried once after the rest
+  of its level (children still before parents), a second failure records no summary (the node is not indexed in
+  V2); an empty answer counts as a failed call. `dry_run.sh` reproduces the shape (stub answers longer than the
+  cap are continued to 4 requests and fail): 210-token answers fail under the old 200 cap and finish under the new
+  caps; answers over every leaf cap stop the stage after 10 in a row.
+- **Re-projection:** the original $0.16 priced the input as plain input; the CLI writes it to the 1-hour cache at
+  2× (as stage 1 showed), and the measured prompt is ≈ 0.38 tokens per character of a node's text + ≈ 500 tokens of
+  overhead. For the 490 remaining calls (1.22 M prompt tokens with the children's summaries, ≈ 72,000 output
+  tokens at the budgets): **≈ $0.28**, about 15 min at concurrency 4. The stage cap of $0.19 leaves $0.163, which
+  does not fit. **Needed: a summaries cap of $0.36** ($0.28 + 20% + the $0.0266 spent). It fits the $12.51 total:
+  spent $4.8163 + summaries $0.36 + judge $4.73 + factcheck $2.42 = $12.33 (prefixes finished $0.38 under its cap).
+  Checked without spend: the fixed `paid.py` resumed a copy of run 1's rows against the stub (171-token answers,
+  `--network none`): 490 calls (472 new + run 1's 18 failures retried), all 495 nodes summarised, exit 0;
+  `dry_run.sh` 40 of 40. The cap in `paid.sh` stays $0.19 until the owner decides.
+
 ## Paid runner (approved by the owner 2026-11-26, $12.00 staged; raised to $12.51 on 2026-11-27; the owner runs it)
 
 `paid.sh <stage> [concurrency]` follows `spikes/tutor-call/run.sh`: the Keychain item is piped on stdin into a

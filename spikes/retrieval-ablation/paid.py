@@ -236,6 +236,12 @@ async def call(model: str, system: str, prompt: str, max_usd: float, max_out: in
         "cache_read": usage.get("cache_read_input_tokens", 0) or 0}
 
 
+def ok(row: dict) -> bool:
+    """A call whose answer may be stored: no exception and a successful result (an error result's text is the
+    CLI's error message, never an answer)."""
+    return not row.get("error") and row.get("subtype") == "success"
+
+
 def append_text(path: Path, row: dict) -> None:
     with path.open("a", encoding="utf-8") as f:
         f.write(json.dumps(row, ensure_ascii=False) + "\n")
@@ -279,12 +285,12 @@ async def prefixes(led: Ledger, chapters: list[int], conc: int) -> dict:
     out = TXT / "prefixes.jsonl"
 
     def failed_before() -> set[int]:
-        return {r["id"] for r in led.rows if r.get("error")}
+        return {r["id"] for r in led.rows if not ok(r)}
 
     def done() -> set[int]:
         """Spans with a prefix or an explicit `prefix: none`; a span whose latest call failed is not done."""
         latest = {r["id"]: r for r in led.rows}
-        return {i for i, p in prefix_texts().items() if p is None or not (i in latest and latest[i].get("error"))}
+        return {i for i, p in prefix_texts().items() if p is None or not (i in latest and not ok(latest[i]))}
 
     have = done()
     retry = failed_before() - have        # spans whose call failed in an earlier run: they run last
@@ -298,7 +304,7 @@ async def prefixes(led: Ledger, chapters: list[int], conc: int) -> dict:
         later calls. Usage is summed over the CLI's continuation requests, so a continued call reads it k times;
         the mode is the single-request value (group 0: 41,839-42,231; chapter 11: 19,669)."""
         reads = [r["cache_read"] for r in led.rows
-                 if r.get("chapter") == n and not r.get("error") and r.get("ctx_expected") and r["cache_read"] > 0]
+                 if r.get("chapter") == n and ok(r) and r.get("ctx_expected") and r["cache_read"] > 0]
         return modal(reads) if reads else None
 
     async def one(n: int, system: str, s: dict, ctx: int, misses: list[int], last_try: bool) -> dict | None:
@@ -314,7 +320,9 @@ async def prefixes(led: Ledger, chapters: list[int], conc: int) -> dict:
             # cap would have no basis
             text, got = await call(HAIKU, system, PREFIX_USER.format(span=s["text"]), 0.05, 300)
             row = got | {"id": s["seq"], "chapter": n, "ctx_expected": ctx, "empty": not text, "retry": last_try}
-            if text and not row["error"]:
+            if not text and not row["error"]:
+                row["error"] = "EmptyAnswer"   # counts as a failed call (retried, and towards the stop)
+            if text and ok(row):
                 append_text(out, {"id": s["seq"], "prefix": text})
             elif last_try:  # failed twice: titles-only context, recorded, never retried again
                 append_text(out, {"id": s["seq"], "prefix": None})
@@ -325,7 +333,7 @@ async def prefixes(led: Ledger, chapters: list[int], conc: int) -> dict:
                     empty += 1
         finally:
             led.add(row, res, count_errors=not last_try)
-        if ctx and not row.get("error"):  # a later call of the chapter: its context should come from cache
+        if ctx and ok(row):  # a later call of the chapter: its context should come from cache
             misses.append(1 if row["cache_read"] < CACHE_RULE * ctx else 0)
             if sum(misses[-STOP_AFTER:]) == STOP_AFTER and not led.stopped:
                 led.stopped = (f"cache rule: {STOP_AFTER} consecutive calls in chapter {n} read < 80% of the "
@@ -342,7 +350,7 @@ async def prefixes(led: Ledger, chapters: list[int], conc: int) -> dict:
             first = await one(n, system, todo[0], 0, misses, last_try)
         rest = todo[1:]
         ctx = known_ctx(n)
-        if ctx is None and first and not first.get("error"):
+        if ctx is None and first and ok(first):
             if first["cache_write"] >= COLD_SHARE * TOK_PER_CHAR * len(text):
                 ctx = first["cache_write"]   # cold: only the first request writes, whatever the continuations
             else:                            # warm (or unclear): probe a few later calls, unchecked
@@ -350,7 +358,7 @@ async def prefixes(led: Ledger, chapters: list[int], conc: int) -> dict:
                 for s in rest[:PROBE]:
                     async with sem:
                         r = await one(n, system, s, 0, misses, last_try)
-                    if r and not r.get("error") and r["cache_read"] > 0:
+                    if r and ok(r) and r["cache_read"] > 0:
                         probes.append(r["cache_read"])
                 rest = rest[PROBE:]
                 ctx = modal(probes) if probes else 0
@@ -390,16 +398,28 @@ async def prefixes(led: Ledger, chapters: list[int], conc: int) -> dict:
 
 
 # ---------------------------------------------------------------- L2 summaries (V2)
-WORDS = {"leaf": 70, "inner": 200, "chapter": 200, "root": 350}  # about the B1 token budgets 100/300/500
+# B1 card budgets (tokens): leaf 100, chapter 300, root 500; inner nodes take the chapter's. The word limits in the
+# prompt follow the measured ≈ 3 tokens per Russian word of this model's answers (summaries run 1: 57 words =
+# 171 tokens), so leaf 30 words ≈ 90 tokens. Run 1 asked for 70 words (≈ 210 tokens) under a 200-token output cap:
+# 18 of 23 answers hit the cap, the CLI continued each to 4 requests (4 x 200 = 800 output tokens, 8-23 s) and then
+# failed the call. The output cap is now 4x the budget, so an answer that overruns the asked length still ends in
+# one request; the budget itself is enforced at read time (B1: a card larger than its budget is cut).
+WORDS = {"leaf": 30, "inner": 90, "chapter": 90, "root": 150}
 TOKENS = {"leaf": 100, "inner": 300, "chapter": 300, "root": 500}
+OUT_CAP = {k: 4 * v for k, v in TOKENS.items()}
 
 
 async def summaries(led: Ledger, conc: int) -> dict:
     spans, outline, _ = book()
     out = TXT / "summaries.jsonl"
-    have = {str(r["id"]): r["summary"] for r in read_jsonl(out)}
+    latest = {str(r["id"]): r for r in led.rows}
+    # last row per id wins; a node whose latest call failed is not done (run 1 stored the CLI's error text as a
+    # summary for its 18 failures; those lines are ignored); None = no summary after a failed retry
+    have = {i: s for i, s in ((str(r["id"]), r["summary"]) for r in read_jsonl(out))
+            if not (i in latest and not ok(latest[i]))}
     sem = asyncio.Semaphore(conc)
     empty = 0
+    none = 0
     nodes = outline_nodes(outline)
     by_page: dict[int, list[str]] = {}
     for s in spans:
@@ -421,8 +441,11 @@ async def summaries(led: Ledger, conc: int) -> dict:
     def kind(o: dict) -> str:
         return "chapter" if o["level"] == 1 else ("inner" if kids[o["seq"]] else "leaf")
 
-    async def one(node_id: str, k: str, own_text: str, children: list[str]) -> None:
-        nonlocal empty
+    failed_before = {i for i, r in latest.items() if not ok(r)}
+    failed_now: set[str] = set()
+
+    async def one(node_id: str, k: str, own_text: str, children: list[str], last_try: bool) -> None:
+        nonlocal empty, none
         if node_id in have:
             return
         async with sem:
@@ -433,23 +456,41 @@ async def summaries(led: Ledger, conc: int) -> dict:
             try:
                 text, got = await call(HAIKU, SUMMARY_SYSTEM.format(words=WORDS[k]),
                                        SUMMARY_USER.format(own=own_text, children="\n\n".join(children)), 0.1,
-                                       TOKENS[k] * 2)
-                row = got | {"id": node_id, "kind": k, "empty": not text}
-                if text:
+                                       OUT_CAP[k])
+                row = got | {"id": node_id, "kind": k, "empty": not text, "retry": last_try}
+                if not text and not row["error"]:
+                    row["error"] = "EmptyAnswer"   # counts as a failed call (retried, and towards the stop)
+                if text and ok(row):
                     have[node_id] = text
                     append_text(out, {"id": node_id, "kind": k, "summary": text})
-                else:
-                    empty += 1
+                elif last_try:  # failed twice: the node gets no summary (not indexed in V2), never retried again
+                    have[node_id] = None
+                    append_text(out, {"id": node_id, "kind": k, "summary": None})
+                    none += 1
+                else:           # first failure: retried once after the rest of its level
+                    failed_now.add(node_id)
+                    if not text:
+                        empty += 1
             finally:
-                led.add(row, res)
+                led.add(row, res, count_errors=not last_try)
 
-    for level in (4, 3, 2, 1):  # children before parents
-        await asyncio.gather(*(one(str(o["seq"]), kind(o), own[o["seq"]],
-                                   [have[str(c)] for c in kids[o["seq"]] if str(c) in have])
-                               for o in nodes if o["level"] == level))
+    def kids_text(o: dict) -> list[str]:
+        return [t for c in kids[o["seq"]] if (t := have.get(str(c)))]
+
+    for level in (4, 3, 2, 1):  # children before parents; a level's failures are retried before its parents run
+        level_nodes = [o for o in nodes if o["level"] == level]
+        await asyncio.gather(*(one(str(o["seq"]), kind(o), own[o["seq"]], kids_text(o), False)
+                               for o in level_nodes if str(o["seq"]) not in failed_before))
+        await asyncio.gather(*(one(str(o["seq"]), kind(o), own[o["seq"]], kids_text(o), True)
+                               for o in level_nodes if str(o["seq"]) in failed_before | failed_now))
     if not led.stopped:
-        await one("root", "root", "", [have[str(o["seq"])] for o in nodes if o["level"] == 1 and str(o["seq"]) in have])
-    return {"concurrency": conc, "empty_returns_this_run": empty, "nodes": len(nodes) + 1, "summaries": len(have),
+        tops = [t for o in nodes if o["level"] == 1 and (t := have.get(str(o["seq"])))]
+        await one("root", "root", "", tops, "root" in failed_before)
+        if "root" in failed_now and not led.stopped:
+            await one("root", "root", "", tops, True)
+    return {"concurrency": conc, "empty_returns_this_run": empty, "nodes": len(nodes) + 1,
+            "summaries": len(have), "summary_none": sum(1 for v in have.values() if v is None),
+            "summary_none_this_run": none, "retried_this_run": len(failed_before | failed_now),
             "coverage_complete": len(have) == len(nodes) + 1}
 
 
@@ -511,7 +552,7 @@ def cards_for_variants() -> list[tuple[str, dict, list[str]]]:
     chunking = load_chunking()
     chunks = chunking.chunk_spans([chunking.Span(s["seq"], s["page"], s["text"]) for s in spans], 1200, 200, 80)
     pre = prefix_texts()  # last row per id; None = titles-only context, the card is the span alone
-    summ = {str(r["id"]): r["summary"] for r in read_jsonl(TXT / "summaries.jsonl")}
+    summ = {str(r["id"]): r["summary"] for r in read_jsonl(TXT / "summaries.jsonl")}  # last row per id wins
     topk = json.loads((WORK / "topk.json").read_text())  # variant -> qid -> card ids ("c<i>", "s<seq>", "n<seq>")
     eval_q = {q["id"]: q for q in json.loads(Path("/in/eval.json").read_text())}
     prefixed = {"V1_prefix", "V2_summaries"}

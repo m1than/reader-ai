@@ -39,7 +39,10 @@ def main() -> None:
     # last row per id wins (append-only file); a None prefix ("prefix: none") leaves the span's own text
     rows = map(json.loads, Path(a.text, "prefixes.jsonl").read_text().splitlines())
     pre = {i: p for i, p in {r["id"]: r["prefix"] for r in rows}.items() if p}
-    summ = {str(r["id"]): r["summary"] for r in map(json.loads, Path(a.text, "summaries.jsonl").read_text().splitlines())}
+    # last row per id wins; a None summary (failed twice) is not indexed. The gate (gates.sh) guarantees every
+    # node's latest call succeeded or ended as None, so no stored error text survives as a last row.
+    rows = map(json.loads, Path(a.text, "summaries.jsonl").read_text().splitlines())
+    summ = {i: t for i, t in {str(r["id"]): r["summary"] for r in rows}.items() if t}
     outline = json.loads(Path(a.outline).read_text(encoding="utf-8"))
     nodes = sorted((o for o in outline if o["level"] <= 4 and o["page"]), key=lambda o: (o["page"], o["seq"]))
     last_page = max(s["page"] for s in spans)
