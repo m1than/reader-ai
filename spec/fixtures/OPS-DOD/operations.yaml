@@ -235,6 +235,22 @@ operations:
       observability: { items: [FR-INGEST-41] }
       recovery: { items: [INV-INGEST-15] }
 
+  - id: material.purge_pack
+    title: List a material's packs and purge one (owner)
+    surface: [api]
+    specs: [SRV-INGEST]
+    routes: ["GET /api/materials/{material_id}/packs", "POST /api/materials/{material_id}/packs/{pack_id}/purge"]
+    gate: tracked
+    criteria:
+      functional: { items: [FR-INGEST-45] }
+      security: { items: [FR-INGEST-45, INV-INGEST-14] }
+      privacy: { items: [FR-INGEST-45] }
+      a11y: { na: no web surface yet (a WEB-MANAGE control is not specified) }
+      latency: { missing: "no sourced budget" }
+      cost: { na: no provider call }
+      observability: { missing: "the purge job logs `ingest purged` only; no span or job_args catalogue entry yet" }
+      recovery: { items: [FR-INGEST-44] }
+
   # Added 2026-11-23 (V/onboarding) from the items of SRV-INGEST revision 2 and WEB-IMPORT (ADR-0029, accepted by
   # the owner); cells filled on V/upload-impl when the items were promoted with their tests. Routes and commands are
   # named here in the Green commit that adds them to the registry.
