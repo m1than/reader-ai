@@ -275,6 +275,7 @@ def make_kinds(blobs_root: Path) -> tuple[JobKind, ...]:
         JobKind(name=REANCHOR_KIND, queue="ingest", args=ReanchorArgs,
                 key=("owner_id", "from_pack_id", "to_pack_id"), handler=_reanchor, transient=_TRANSIENT),
         *_gc_kinds(blobs_root),
+        _RECONCILE,
     )
 
 
@@ -337,10 +338,15 @@ async def enqueue_followups(conn: AsyncConnection, owner: uuid.UUID, pid: str) -
 
 
 async def enqueue_known(kind: str, args: Mapping[str, Any]) -> bool:
-    """Enqueue `kind` when the running catalog serves it; else log `ingest kind_unwired <kind>`."""
-    from reader.jobs import running
+    """Enqueue `kind` when a worker runs and its catalog serves it; else log and return False (the
+    worker-start sweep enqueues the follow-up again, FR-INGEST-40)."""
+    from reader.jobs import JobError, running
 
-    jobs = running()
+    try:
+        jobs = running()
+    except JobError:  # the api (a restore route): no worker runs in this process
+        store.log.info("ingest enqueue_skipped no_worker %s", kind)
+        return False
     if jobs.catalog.get(kind) is None:
         store.log.warning("ingest kind_unwired %s", kind)
         return False
@@ -348,20 +354,37 @@ async def enqueue_known(kind: str, args: Mapping[str, Any]) -> bool:
     return True
 
 
-_ALL_KINDS: Final = make_kinds(ingest.BLOBS_DIR)
-JOB_KINDS: Final = _ALL_KINDS[:1]
-# FR-INGEST-40, -43: declared for SRV-EVENTS' paired KIND_MODULES change (and SRV-OBS's span list); until it
-# lands the worker does not serve them and `enqueue_known` skips them (the activation then waits, logged).
-PACK_KINDS: Final = _ALL_KINDS[1:]
+class ReconcileArgs(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    started: str = Field(pattern=r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,6})?\+00:00$")
+
+
+async def _reconcile(args: ReconcileArgs, conn: AsyncConnection, ctx: JobContext) -> None:
+    """FR-INGEST-40's gate (b): the worker-start reconcile and sweep, each pack in its own transaction."""
+    from reader.jobs import running
+
+    del args, conn, ctx
+    await start_reconcile(running())
+
+
+RECONCILE_KIND: Final = "ingest.reconcile"
+_RECONCILE: Final = JobKind(
+    name=RECONCILE_KIND, queue="ingest", args=ReconcileArgs, key=("started",), handler=_reconcile,
+    transient=_TRANSIENT, priority=100, key_retention_s=7 * 86_400,
+)
+JOB_KINDS: Final = make_kinds(ingest.BLOBS_DIR)  # SRV-EVENTS KIND_MODULES (FR-EVENTS-1's paired note)
+
+
+async def on_worker_start(jobs: Any) -> None:
+    """SRV-EVENTS FR-EVENTS-1's start hook: it only enqueues `ingest.reconcile` for this start."""
+    await jobs.enqueue(RECONCILE_KIND, {"started": datetime.now(UTC).isoformat()})
 
 
 async def start_reconcile(jobs: Any) -> None:
     """FR-INGEST-36, -39: the profile reconcile per owner with a manifest, then the pending-activation sweep.
 
-    Not yet `on_worker_start`: SRV-EVENTS FR-EVENTS-1's test pins the declared hooks (ingest exports none), so
-    the wiring is the paired SRV-EVENTS change of the revision block's KIND_MODULES note.
-
-    Rule work only (0 model calls); a failure is logged by code and never stops the worker.
+    Run by `ingest.reconcile` at worker start. Rule work only (0 model calls); a failure is logged by type and
+    never fails the job.
     """
     from reader.ingest import manifest, packs
 

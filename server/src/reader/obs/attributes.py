@@ -274,6 +274,14 @@ JOB_ARGS: Final[Mapping[str, Mapping[str, str]]] = {
     "obs.eval_sample": {},
     "obs.judge_score": {},
     "obs.align": {},
+    # SRV-INGEST revision 3 (V.kl-ingest-packs, VEC-OBS-1's paired note): the pack kinds copy nothing.
+    "ingest.seqmap": {},
+    "ingest.reanchor": {},
+    "ingest.gc": {},
+    "ingest.gc_pack": {},
+    "ingest.gc_overlay": {},
+    "ingest.purge": {},
+    "ingest.reconcile": {},
 }
 
 # The declared error catalogues: the `errors` lists of SRV-AGENT, SRV-TUTOR and SRV-PIPELINE (a test compares

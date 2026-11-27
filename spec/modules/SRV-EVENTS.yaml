@@ -155,7 +155,8 @@ requirements:
       `ingest.gc.tick`), `ingest.gc_pack`, `ingest.gc_overlay`, `ingest.purge` and `ingest.reconcile` after
       `ingest.import`, all on the `ingest` queue (the main lane), and the module exports `on_worker_start`, which only
       enqueues `ingest.reconcile` (this contract); the start hooks become ingest, search, pipeline, obs, agent in
-      KIND_MODULES order. [unit] test_jobs_unit.py: the catalog's kind list and the start-hook list.
+      KIND_MODULES order. [unit] test_jobs_unit.py: the catalog's kind list and the start-hook list (Green: the
+      kind list wrapped for ruff, no oracle change).
     tests_planned:
       - "change server/tests/jobs/test_jobs_unit.py [unit]: key_retention_s accepted when positive or None, refused at 0 and below (kind_bounds_invalid); kind_name_reserved for jobs.judge_reap, jobs.judge_gc and a name ending in .tick"
       - "test_lanes_db.py [db]: a judge.find stub handler that writes through its own connection and then raises leaves its write committed and the key dead"

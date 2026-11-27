@@ -148,8 +148,8 @@ def test_kind_modules_are_a_declared_list() -> None:
     assert list(jobs.load_kinds()) == [
         "ingest.import",
         # SRV-INGEST revision 3 (FR-EVENTS-1's paired note, V.kl-ingest-packs)
-        "ingest.seqmap", "ingest.reanchor", "ingest.gc", "ingest.gc_pack", "ingest.gc_overlay", "ingest.purge",
-        "ingest.reconcile",
+        "ingest.seqmap", "ingest.reanchor", "ingest.gc", "ingest.gc_pack", "ingest.gc_overlay",
+        "ingest.purge", "ingest.reconcile",
         "search.embed", "pipeline.stage", "pipeline.verify", "tutor.answer",
         "obs.feedback", "obs.prompts", "obs.retention",  # SRV-OBS FR-OBS-14, -15 (V.obs-analytics)
         "obs.setup", "obs.runs", "obs.bench", "obs.label", "obs.health",  # SRV-OBS phase 2 (FR-EVENTS-32)
