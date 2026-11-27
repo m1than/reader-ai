@@ -2042,6 +2042,11 @@ tasks:
         by the agent through review. FR-OBS-14, -21, -22, -23, -24; VEC-OBS-1/4/5; FR-MANAGE-6" }
   - { id: V.kl-ingest-packs, stage: V, kind: module, track: engineering, status: in_progress,
       needs: [V.owner.adr-0039, V.spike.retrieval-ablation],
+      merged: "2026-11-27: merged into V/slice-integration together with V.kl-active-view-readers, CONVERTER_VERSION
+        held at r2 (r3 code present, gated by FR-INGEST-40/INV-INGEST-16 (e)-(i)). Code reviews: deep-reviewer (Fable)
+        units 1-2 round 1 changes (7), fixes + unit A changes (6), fixes + unit B changes (3), units C-E changes (5),
+        final fixes approve (ffc86d4). Open in this task: the conditional overlays (prefixes FR-INGEST-47, L2
+        summaries FR-INGEST-48) after the retrieval ablation decides; the r3 bump after gates (e)-(i)",
       branch: V/kl-ingest-packs,
       notes: "Phase 2 on V/kl-ingest-packs. Unit 1 done: locator ids and quote hashes (FR-INGEST-33, -34,
         VEC-INGEST-8). Unit 2 done: base packs, overlays, manifest with CAS, request_activation/try_activate,
@@ -2103,6 +2108,9 @@ tasks:
         FR-TUTOR-5/8; INV-SEARCH-2; VEC-LESSON-3; FR-NOTEBOOK-2, INV-NOTEBOOK-2; FR-FRESH-3, -8, -10, VEC-FRESH-7" }
   - { id: V.kl-active-view-readers, stage: V, kind: module, track: engineering, status: in_progress,
       needs: [V.kl-ingest-packs],
+      merged: "2026-11-27: merged into V/slice-integration (code review: deep-reviewer (Fable) round 1 changes (2:
+        r3 bump held, FR-TUTOR-5 resolver cases), round 2 approve on b155076). Status stays in_progress only because
+        V.kl-ingest-packs is (its conditional overlays); the readers' work is complete",
       branch: V/kl-active-view-readers,
       notes: "Paired readers for FR-INGEST-40 gate (d), INV-INGEST-16 (promoted, test_readers_scan_unit.py
         passes). Read helpers in reader.ingest.views (active_pack(s), pack_of_ingest, live_packs, pack_spans,
