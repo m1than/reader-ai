@@ -52,25 +52,30 @@ def page_text(texts: Sequence[str]) -> str:
 
 def page_ranges(texts: Sequence[str]) -> list[tuple[int, int, int | None]]:
     """(start, end, ordinal) per span: offsets in code points; an ordinal only for empty spans."""
+    return ranges_of_lengths([len(t) for t in texts])
+
+
+def ranges_of_lengths(lengths: Sequence[int]) -> list[tuple[int, int, int | None]]:
+    """page_ranges from the spans' code-point lengths alone (the import keeps lengths, not texts)."""
     starts: list[int | None] = []
     offset = 0
     first = True
-    for text in texts:
-        if text:
+    for length in lengths:
+        if length:
             if not first:
                 offset += 1
             starts.append(offset)
-            offset += len(text)
+            offset += length
             first = False
         else:
             starts.append(None)
     total = offset
     ranges: list[tuple[int, int, int | None]] = []
     seen: Counter[int] = Counter()
-    for i, text in enumerate(texts):
+    for i, length in enumerate(lengths):
         start = starts[i]
         if start is not None:
-            ranges.append((start, start + len(text), None))
+            ranges.append((start, start + length, None))
             continue
         at = next((s for s in starts[i + 1 :] if s is not None), total)
         ranges.append((at, at, seen[at]))

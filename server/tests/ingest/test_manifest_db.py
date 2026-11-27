@@ -45,6 +45,11 @@ async def r3_pack(w: World) -> str:
     return str(need("reader.ingest.packs").pack_id(MATERIAL_SHA, R3))
 
 
+async def sql(w: World, statement: str, **params: Any) -> None:
+    async with w.engine.begin() as conn:
+        await conn.execute(text(statement), params)
+
+
 async def code_of(w: World, parent: int, content: dict[str, Any]) -> str:
     manifest = need("reader.ingest.manifest")
     async with w.engine.begin() as conn:
@@ -81,22 +86,19 @@ async def test_chain_refusals_and_append_only(pg: Pg, tmp_path: Path) -> None:
         assert await code_of(w, 0, entry(base, (b, {"vectors": vb}))) == "manifest_conflict"
         r3 = await r3_pack(w)
         assert await code_of(w, 1, entry(base, (r3, {}))) == "material_twice"
-        async with w.engine.begin() as conn:
-            await conn.execute(text("UPDATE overlays SET collected_at = now() WHERE overlay_id = :i"), {"i": vb})
+        await sql(w, "UPDATE overlays SET collected_at = now() WHERE overlay_id = :i", i=vb)
         assert await code_of(w, 1, entry(base, (b, {"vectors": vb}))) == "overlay_collected"
-        async with w.engine.begin() as conn:
-            await conn.execute(text("UPDATE base_packs SET collected_at = now() WHERE pack_id = :p"), {"p": b})
+        await sql(w, "UPDATE base_packs SET collected_at = now() WHERE pack_id = :p", p=b)
         assert await code_of(w, 1, entry(base, (b, {}))) == "pack_collected"
-        async with w.engine.begin() as conn:
-            await conn.execute(text("UPDATE base_packs SET purged_at = now() WHERE pack_id = :p"), {"p": r3})
+        await sql(w, "UPDATE base_packs SET purged_at = now() WHERE pack_id = :p", p=r3)
         assert await code_of(w, 1, entry((r3, {}))) == "pack_purged"
         assert await w.scalar("SELECT count(*) FROM manifest_entries") == 1
-        for sql in ("UPDATE manifest_entries SET reason = 'x'", "DELETE FROM manifest_entries",
-                    "TRUNCATE manifest_entries"):
+        for statement in ("UPDATE manifest_entries SET reason = 'x'", "DELETE FROM manifest_entries",
+                          "TRUNCATE manifest_entries"):
             async with w.engine.connect() as conn:
                 await conn.begin()
                 with pytest.raises(DBAPIError):
-                    await conn.execute(text(sql))
+                    await conn.execute(text(statement))
                 await conn.rollback()
         async with w.engine.connect() as conn:  # another owner's manifest is its own
             assert (await manifest.active_view(conn, w.users["anna"])).seq == 0
@@ -121,7 +123,8 @@ async def test_concurrent_appenders_never_fork(pg: Pg, tmp_path: Path) -> None:
 
         results = await asyncio.gather(*(one(v) for v in ids))
         assert sorted(results) == ["manifest_conflict"] * 7 + ["won"]
-        rows = await w.rows("SELECT seq, parent_seq FROM manifest_entries WHERE owner_id = :o ORDER BY seq", o=owner)
+        rows = await w.rows("SELECT seq, parent_seq FROM manifest_entries WHERE owner_id = :o ORDER BY seq",
+                            o=owner)
         assert [tuple(r) for r in rows] == [(1, 0)]
 
 
@@ -139,7 +142,9 @@ async def _blocks(w: World, held: str, parent: int, content: dict[str, Any]) -> 
             try:
                 await manifest.append(conn, w.users["ivan"], parent, content, "probe")
             except DBAPIError as error:
-                assert "lock timeout" in str(error)
+                timed_out = "lock timeout" in str(error)
+                if not timed_out:
+                    raise
                 return True
             finally:
                 await conn.rollback()
@@ -191,14 +196,17 @@ async def test_activation_contract(pg: Pg, tmp_path: Path) -> None:
             v3 = await vectors(conn, owner, r3)
             await manifest.request_activation(conn, owner, r3, {"vectors": v3})
             assert await manifest.try_activate(conn, owner, r3) == "seqmap_missing"
-        assert await w.scalar("SELECT reason FROM pending_activations WHERE pack_id = :p", p=r3) == "seqmap_missing"
+        reason = await w.scalar("SELECT reason FROM pending_activations WHERE pack_id = :p", p=r3)
+        assert reason == "seqmap_missing"
         assert await w.scalar("SELECT count(*) FROM manifest_entries") == 1
         legacy = await w.scalar("SELECT ingest_id FROM base_packs WHERE pack_id = :p", p=a)
         async with w.engine.begin() as conn:  # the seq map and the anchor run, as unit 3's jobs write them
-            await conn.execute(text("INSERT INTO seq_maps (owner_id, from_ingest_id, to_pack_id, state, span_count)"
-                                    " VALUES (:o, :i, :p, 'accepted', 8)"), {"o": owner, "i": legacy, "p": r3})
-            await conn.execute(text("INSERT INTO anchor_runs (owner_id, from_pack_id, to_pack_id, mapped, orphaned,"
-                                    " finished_at) VALUES (:o, :f, :t, 8, 0, now())"),
+            await conn.execute(text(
+                "INSERT INTO seq_maps (owner_id, from_ingest_id, to_pack_id, state, span_count)"
+                " VALUES (:o, :i, :p, 'accepted', 8)"), {"o": owner, "i": legacy, "p": r3})
+            await conn.execute(text(
+                "INSERT INTO anchor_runs (owner_id, from_pack_id, to_pack_id, mapped, orphaned,"
+                " finished_at) VALUES (:o, :f, :t, 8, 0, now())"),
                                {"o": owner, "f": a, "t": r3})
             assert await manifest.try_activate(conn, owner, r3) == "appended"
             await manifest.request_activation(conn, owner, a, {"vectors": older})
@@ -209,10 +217,9 @@ async def test_activation_contract(pg: Pg, tmp_path: Path) -> None:
 
         b = await imported(w, OTHER)
         async with w.engine.begin() as conn:
-            await conn.execute(text("UPDATE materials SET deleted_at = now() WHERE sha256 = :s"), {"s": OTHER})
+            await conn.execute(text("UPDATE materials SET deleted_at = now() WHERE sha256 = :s"),
+                               {"s": OTHER})
             assert await manifest.try_activate(conn, owner, b) == "deleted"
-        async with w.engine.begin() as conn:
-            await conn.execute(text("UPDATE materials SET deleted_at = NULL WHERE sha256 = :s"), {"s": OTHER})
 
 
 async def test_conflict_is_stored_and_the_sweep_appends(pg: Pg, tmp_path: Path, monkeypatch: Any) -> None:

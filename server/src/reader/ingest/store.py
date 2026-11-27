@@ -12,6 +12,8 @@ from typing import Any, Final
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from reader.ingest import PARSE_CONFIGS, locator, overlays, packs
+from reader.ingest import manifest as manifests
 from reader.ingest.artifact import read_members, validate_members
 
 log = logging.getLogger("reader.ingest")
@@ -90,7 +92,7 @@ async def import_rows(
                 "INSERT INTO ingests (owner_id, material_id, converter_version, artifact_id, span_count,"
                 " outline_count, outline_source, pages_without_text)"
                 " VALUES (:o, :m, :v, :a, :sc, :oc, :src, :pwt)"
-                " ON CONFLICT (material_id) DO NOTHING RETURNING id"
+                " ON CONFLICT (material_id, converter_version) DO NOTHING RETURNING id"
             ),
             {
                 "o": owner,
@@ -106,9 +108,26 @@ async def import_rows(
     ).scalar()
     if ingest is None:
         return False
+    sha = str(manifest["material_sha256"])
+    version = str(manifest["converter_version"])
+    pid = packs.pack_id(sha, version)
+    await conn.execute(
+        text(
+            "INSERT INTO base_packs (owner_id, pack_id, material_sha256, ingest_id, parse_config, state)"
+            " VALUES (:o, :p, :s, :i, CAST(:c AS jsonb), 'building')"
+        ),
+        {"o": owner, "p": pid, "s": sha, "i": ingest, "c": json.dumps(dict(PARSE_CONFIGS[version]))},
+    )
+    # FR-INGEST-33/-34: a first pass keeps each page's span lengths (ints, not texts) for the locators.
+    lengths: dict[int, list[int]] = {}
+    for batch in span_batches(spans):
+        for s in batch:
+            lengths.setdefault(int(s["page"]), []).append(len(s["text"]))
+    ranges = {page: iter(locator.ranges_of_lengths(found)) for page, found in lengths.items()}
     span_sql = (
         "INSERT INTO material_spans (ingest_id, owner_id, seq, page, kind, level, decoded, text,"
-        " x0, y0, x1, y1) VALUES (:i, :o, :seq, :page, :kind, :level, :decoded, :text, :x0, :y0, :x1, :y1)"
+        " x0, y0, x1, y1, locator, quote_sha256) VALUES (:i, :o, :seq, :page, :kind, :level, :decoded, :text,"
+        " :x0, :y0, :x1, :y1, :loc, :q)"
     )
     for batch in span_batches(spans):
         rows = [
@@ -117,6 +136,8 @@ async def import_rows(
                 "o": owner,
                 **{k: s[k] for k in ("seq", "page", "kind", "level", "decoded", "text")},
                 **dict(zip(("x0", "y0", "x1", "y1"), s["bbox"], strict=True)),
+                "loc": locator.pdf_locator(sha, int(s["page"]), *next(ranges[int(s["page"])])),
+                "q": locator.quote_sha256(s["text"]),
             }
             for s in batch
         ]
@@ -130,6 +151,15 @@ async def import_rows(
             for e in outline
         ],
     )
+    # FR-INGEST-35, -36, -39: seal, build the profile overlay, request the activation (no try_activate).
+    await conn.execute(
+        text("UPDATE base_packs SET state = 'sealed', sealed_at = now()"
+             " WHERE owner_id = :o AND pack_id = :p"),
+        {"o": owner, "p": pid},
+    )
+    rule = await packs.rule_values(conn, sha, packs.load_materials())
+    profile = await overlays.build_profile(conn, owner, pid, rule or {})
+    await manifests.request_activation(conn, owner, pid, {"profile": profile})
     return True
 
 

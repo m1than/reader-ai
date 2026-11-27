@@ -1,4 +1,4 @@
-"""Overlays: ids, states, the profile overlay, profile_for_pack and the worker-start reconcile (SRV-INGEST [db]).
+"""Overlays: ids, states, the profile overlay, profile_for_pack and the worker-start reconcile ([db]).
 
 @trace FR-INGEST-36 FR-INGEST-35 INV-INGEST-11
 """
@@ -27,14 +27,16 @@ def test_overlay_id_is_the_canonical_formula() -> None:
         expected = hashlib.sha256(canonical({"kind": kind, "pack_id": "a" * 64, "inputs": inputs,
                                              "builder_version": "b/1"})).hexdigest()
         assert overlays.overlay_id(kind, "a" * 64, inputs, "b/1") == expected
-    assert overlays.overlay_id("tags", "a" * 64, {}, "b/1") != overlays.overlay_id("tags", "a" * 64, {}, "b/2")
+    first, raised = (overlays.overlay_id("tags", "a" * 64, {}, b) for b in ("b/1", "b/2"))
+    assert first != raised
 
 
 async def vectors(conn: Any, owner: Any, pack: str, model: str = "m", builder: str = "test/1") -> str:
     overlays = need("reader.ingest.overlays")
     inputs = {"model": model, "params_sha256": "0" * 64}
     oid = overlays.overlay_id("vectors", pack, inputs, builder)
-    await overlays.begin(conn, owner, oid, kind="vectors", pack_id=pack, inputs=inputs, builder_version=builder)
+    await overlays.begin(conn, owner, oid, kind="vectors", pack_id=pack, inputs=inputs,
+                         builder_version=builder)
     await overlays.seal(conn, owner, oid)
     return str(oid)
 
@@ -65,10 +67,12 @@ async def test_states_and_the_collected_refusal(pg: Pg, tmp_path: Path) -> None:
             await conn.begin()
             with pytest.raises(DBAPIError):
                 await conn.execute(text("UPDATE pack_profiles SET license = 'shareable'"
-                                        " WHERE owner_id = :o AND overlay_id = :p"), {"o": owner, "p": profile})
+                                        " WHERE owner_id = :o AND overlay_id = :p"),
+                                   {"o": owner, "p": profile})
             await conn.rollback()
         async with w.engine.begin() as conn:
-            await conn.execute(text("UPDATE overlays SET collected_at = now() WHERE overlay_id = :i"), {"i": oid})
+            await conn.execute(text("UPDATE overlays SET collected_at = now() WHERE overlay_id = :i"),
+                               {"i": oid})
         inputs = {"model": "m", "params_sha256": "0" * 64}
         async with w.engine.begin() as conn:
             with pytest.raises(overlays.OverlayError) as gone:
@@ -107,7 +111,8 @@ def write_config(w: World, tmp: Path, language: str | None, *, broken: bool = Fa
     path = tmp / "reader.yaml"
     body = textwrap.dedent(CONFIG.format(sha=MATERIAL_SHA, other="b" * 64))
     if language is not None:
-        body = body.replace("license: personal-use, language: ru", f"license: personal-use, language: {language}")
+        body = body.replace("license: personal-use, language: ru",
+                            f"license: personal-use, language: {language}")
     else:
         body = body.replace(f'sha256: "{MATERIAL_SHA}"', f'sha256: "{"c" * 64}"')
     path.write_text("::: not yaml" if broken else body, encoding="utf-8")
@@ -136,19 +141,20 @@ async def test_reconcile_reuses_overlays_and_keeps_vectors(pg: Pg, tmp_path: Pat
                 return await need("reader.ingest.manifest").active_view(conn, owner)
 
         first = await run("ru")  # unchanged: nothing appended, no ensure
-        assert first.seq == 2 and calls == []
+        assert first.seq == 1 and calls == []  # the embed side's entry only
         a = first.entry["packs"][0]["overlays"]["profile"]
         b_view = await run("en")
         b = b_view.entry["packs"][0]["overlays"]["profile"]
-        assert b != a and b_view.seq == 3 and calls == [MATERIAL_SHA]
+        assert b != a and b_view.seq == 2 and calls == [MATERIAL_SHA]
         assert b_view.entry["packs"][0]["overlays"]["vectors"] == vec
         assert (await run("ru")).entry["packs"][0]["overlays"]["profile"] == a
         last = await run("en")
-        assert last.entry["packs"][0]["overlays"]["profile"] == b and last.seq == 5
+        assert last.entry["packs"][0]["overlays"]["profile"] == b and last.seq == 4
         assert await w.scalar("SELECT count(*) FROM overlays WHERE kind = 'profile'") == 2  # A and B, reused
-        assert (await run("en")).seq == 5  # no_change
+        assert (await run("en")).seq == 4  # no_change
 
         for config in (None, load_config(write_config(w, tmp_path, None))):
             async with w.engine.begin() as conn:  # unreadable reader.yaml, or no entry for the material
-                await packs.reconcile(conn, owner, None if config is None else config.materials, ensure=ensure)
-        assert await w.scalar("SELECT max(seq) FROM manifest_entries") == 5
+                materials = None if config is None else config.materials
+                await packs.reconcile(conn, owner, materials, ensure=ensure)
+        assert await w.scalar("SELECT max(seq) FROM manifest_entries") == 4

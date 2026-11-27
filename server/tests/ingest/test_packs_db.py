@@ -19,6 +19,7 @@ from .conftest import MATERIAL_SHA, Pg, World, build_artifact, canonical, need, 
 
 pytestmark = pytest.mark.anyio
 R2 = "docling-2.151.1+r2"
+PROFILE_SQL = "SELECT overlay_id FROM overlays WHERE kind = 'profile' AND state = 'sealed'"
 
 
 async def imported(w: World, sha: str = MATERIAL_SHA) -> str:
@@ -58,10 +59,11 @@ async def test_pack_id_and_the_import_seal(pg: Pg, tmp_path: Path) -> None:
                              " ORDER BY page, seq")
         for page in {s[0] for s in spans}:
             on_page = [s for s in spans if s[0] == page]
-            assert [s[3] for s in on_page] == locator.page_locators(MATERIAL_SHA, page, [s[2] for s in on_page])
+            texts = [s[2] for s in on_page]
+            assert [s[3] for s in on_page] == locator.page_locators(MATERIAL_SHA, page, texts)
         assert all(s[4] == s[5] == locator.quote_sha256(s[2]) for s in spans)
         # FR-INGEST-13 revision 3 first part: sealed profile overlay, a pending row desiring it, no entry
-        profile = await w.scalar("SELECT overlay_id FROM overlays WHERE kind = 'profile' AND state = 'sealed'")
+        profile = await w.scalar(PROFILE_SQL)
         assert profile is not None
         assert await w.scalar("SELECT count(*) FROM overlays") == 1
         pending = await w.rows("SELECT pack_id, overlays FROM pending_activations")
@@ -76,8 +78,9 @@ async def test_triggers_keep_sealed_packs_immutable(pg: Pg, tmp_path: Path) -> N
         ingest = await w.scalar("SELECT ingest_id FROM base_packs")
         await refused(w, "UPDATE base_packs SET parse_config = '{}'::jsonb WHERE pack_id = :p", p=pack)
         await refused(w, "UPDATE base_packs SET state = 'building' WHERE pack_id = :p", p=pack)
-        await refused(w, "INSERT INTO material_spans (ingest_id, owner_id, seq, page, kind, text, x0, y0, x1, y1,"
-                      " locator, quote_sha256) SELECT ingest_id, owner_id, 99, 1, 'text', 'x', 0, 0, 1, 1,"
+        await refused(w, "INSERT INTO material_spans (ingest_id, owner_id, seq, page, kind, text, x0, y0, x1,"
+                      " y1, locator, quote_sha256) SELECT ingest_id, owner_id, 99, 1, 'text', 'x', 0, 0, 1,"
+                      " 1,"
                       " 'spn:' || :s || ':p1:900-901', repeat('0', 64) FROM base_packs", s=MATERIAL_SHA)
         await refused(w, "UPDATE material_spans SET text = 'y' WHERE ingest_id = :i", i=ingest)
         await refused(w, "DELETE FROM material_spans WHERE ingest_id = :i", i=ingest)
@@ -88,10 +91,12 @@ async def test_triggers_keep_sealed_packs_immutable(pg: Pg, tmp_path: Path) -> N
         async with w.engine.begin() as conn:  # the deleters' path: allowed with the setting
             await conn.execute(text("SET LOCAL reader.pack_delete = 'on'"))
             await conn.execute(text("DELETE FROM material_spans WHERE ingest_id = :i"), {"i": ingest})
-            await conn.execute(text("UPDATE base_packs SET collected_at = now() WHERE pack_id = :p"), {"p": pack})
+            await conn.execute(text("UPDATE base_packs SET collected_at = now() WHERE pack_id = :p"),
+                               {"p": pack})
         await refused(w, "UPDATE base_packs SET collected_at = now() WHERE pack_id = :p", p=pack)
         async with w.engine.begin() as conn:
-            await conn.execute(text("UPDATE base_packs SET purged_at = now() WHERE pack_id = :p"), {"p": pack})
+            await conn.execute(text("UPDATE base_packs SET purged_at = now() WHERE pack_id = :p"),
+                               {"p": pack})
         await refused(w, "UPDATE base_packs SET purged_at = now() WHERE pack_id = :p", p=pack)
         assert await w.scalar("SELECT count(*) FROM ingests") == 1
 
@@ -140,8 +145,9 @@ async def test_migration_registers_the_legacy_ingest(pg: Pg, tmp_path: Path) -> 
         owner = w.users["ivan"]
         async with w.engine.begin() as conn:
             material = (await conn.execute(text(
-                "INSERT INTO materials (owner_id, sha256, config_id, page_count) VALUES (:o, :s, 'synthetic', 2)"
-                " RETURNING id"), {"o": owner, "s": MATERIAL_SHA})).scalar_one()
+                "INSERT INTO materials (owner_id, sha256, config_id, page_count)"
+                " VALUES (:o, :s, 'synthetic', 2) RETURNING id"),
+                {"o": owner, "s": MATERIAL_SHA})).scalar_one()
             ingest = (await conn.execute(text(
                 "INSERT INTO ingests (owner_id, material_id, converter_version, artifact_id, span_count,"
                 " outline_count, outline_source, pages_without_text) VALUES (:o, :m, :v, :a, :n, 0,"
@@ -150,7 +156,8 @@ async def test_migration_registers_the_legacy_ingest(pg: Pg, tmp_path: Path) -> 
             for s in spans:
                 await conn.execute(text(
                     "INSERT INTO material_spans (ingest_id, owner_id, seq, page, kind, level, decoded, text,"
-                    " x0, y0, x1, y1) VALUES (:i, :o, :seq, :page, :kind, :level, :decoded, :text, 0, 0, 1, 1)"),
+                    " x0, y0, x1, y1) VALUES (:i, :o, :seq, :page, :kind, :level, :decoded, :text,"
+                    " 0, 0, 1, 1)"),
                     {"i": ingest, "o": owner, **{k: s[k] for k in ("seq", "page", "kind", "level", "decoded",
                                                                    "text")}})
         async with w.engine.connect() as conn:
@@ -158,20 +165,39 @@ async def test_migration_registers_the_legacy_ingest(pg: Pg, tmp_path: Path) -> 
             await conn.commit()
         rows = await w.rows("SELECT pack_id, state, ingest_id FROM base_packs")
         assert [tuple(r) for r in rows] == [(expected_pack_id(MATERIAL_SHA, R2), "sealed", ingest)]
-        stored = await w.rows("SELECT page, text, locator, quote_sha256 FROM material_spans ORDER BY page, seq")
+        stored = await w.rows("SELECT page, text, locator, quote_sha256 FROM material_spans"
+                              " ORDER BY page, seq")
         for page in {s[0] for s in stored}:
             on_page = [s for s in stored if s[0] == page]
-            assert [s[2] for s in on_page] == locator.page_locators(MATERIAL_SHA, page, [s[1] for s in on_page])
+            texts = [s[1] for s in on_page]
+            assert [s[2] for s in on_page] == locator.page_locators(MATERIAL_SHA, page, texts)
         assert all(s[3] == locator.quote_sha256(s[1]) for s in stored)
         entries = await w.rows("SELECT seq, parent_seq, entry FROM manifest_entries")
-        profile = await w.scalar("SELECT overlay_id FROM overlays WHERE kind = 'profile' AND state = 'sealed'")
+        profile = await w.scalar(PROFILE_SQL)
         assert [tuple(e) for e in entries] == [(1, 0, {"packs": [{"pack_id": rows[0][0],
                                                                     "overlays": {"profile": profile}}],
                                                          "registry_view": None})]
         assert await w.scalar("SELECT count(*) FROM pending_activations") == 0
-        nulls = await w.scalar("SELECT count(*) FROM information_schema.columns WHERE table_name = 'material_spans'"
-                               " AND column_name IN ('locator', 'quote_sha256') AND is_nullable = 'NO'")
-        assert nulls == 2
+        missing = "SELECT count(*) FROM material_spans WHERE locator IS NULL OR quote_sha256 IS NULL"
+        assert await w.scalar(missing) == 0
+        async with w.engine.begin() as conn:  # a pack whose spans lack a locator cannot seal
+            m = (await conn.execute(text(
+                "INSERT INTO materials (owner_id, sha256, config_id, page_count) VALUES (:o, :s, 'other', 1)"
+                " RETURNING id"), {"o": owner, "s": "b" * 64})).scalar_one()
+            i = (await conn.execute(text(
+                "INSERT INTO ingests (owner_id, material_id, converter_version, artifact_id, span_count,"
+                " outline_count, outline_source, pages_without_text)"
+                " VALUES (:o, :m, :v, :a, 1, 0, 'headings', '{}') RETURNING id"),
+                {"o": owner, "m": m, "v": R2, "a": "d" * 64})).scalar_one()
+            await conn.execute(text(
+                "INSERT INTO material_spans (ingest_id, owner_id, seq, page, kind, text, x0, y0, x1, y1)"
+                " VALUES (:i, :o, 0, 1, 'text', 'x', 0, 0, 1, 1)"), {"i": i, "o": owner})
+            await conn.execute(text(
+                "INSERT INTO base_packs (owner_id, pack_id, material_sha256, ingest_id, parse_config, state)"
+                " VALUES (:o, :p, :s, :i, '{}'::jsonb, 'building')"),
+                {"o": owner, "p": "b" * 64, "s": "b" * 64, "i": i})
+        await refused(w, "UPDATE base_packs SET state = 'sealed', sealed_at = now() WHERE pack_id = :p",
+                      p="b" * 64)
         unique = await w.scalar("SELECT count(*) FROM pg_indexes WHERE tablename = 'ingests'"
                                 " AND indexdef LIKE '%UNIQUE%(material_id, converter_version)%'")
         assert unique == 1

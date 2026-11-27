@@ -19,13 +19,13 @@ RKPK = 0x524B504B
 
 
 def _ids(n: int, seed: int = 7) -> list[str]:
-    rnd = random.Random(seed)
+    rnd = random.Random(seed)  # noqa: S311 — reproducible test ids, not secrets
     return sorted(f"{rnd.getrandbits(256):064x}" for _ in range(n))
 
 
 def test_key_is_monotone_in_the_hex_id() -> None:
     packs = need("reader.ingest.packs")
-    ids = _ids(500) + ["0" * 64, "f" * 64, "12345678" + "0" * 56, "12345678" + "f" * 56]
+    ids = [*_ids(500), "0" * 64, "f" * 64, "12345678" + "0" * 56, "12345678" + "f" * 56]
     ids.sort()
     keys = [packs.lock_key(i) for i in ids]
     assert keys == sorted(keys)
@@ -35,10 +35,10 @@ def test_key_is_monotone_in_the_hex_id() -> None:
     assert packs.LOCK_NAMESPACE == RKPK
 
 
-async def _awaited(w: object, timeout: float = 5.0) -> int:
-    """Number of advisory locks in the RKPK namespace that some backend waits for."""
+async def _awaited(w: object) -> int:
+    """Number of advisory locks in the RKPK namespace that some backend waits for (polled up to 5 s)."""
     loop = asyncio.get_running_loop()
-    end = loop.time() + timeout
+    end = loop.time() + 5.0
     while loop.time() < end:
         n = int(await w.scalar(  # type: ignore[attr-defined]
             "SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' AND NOT granted AND classid = :ns",
@@ -74,8 +74,8 @@ async def test_later_calls_reenter_and_refuse_smaller_new_keys(pg: Pg, tmp_path:
 
     packs = need("reader.ingest.packs")
     low, mid, high = "1" * 64, "5" * 64, "9" * 64
-    async with world(pg, tmp_path) as w:
-        async with w.engine.begin() as conn:
+    async with world(pg, tmp_path) as w, w.engine.begin() as conn:
+        if True:
             await packs.lock_packs(conn, [mid])
             await packs.lock_packs(conn, [mid])  # held: granted at once
             await packs.lock_packs(conn, [mid, high])  # greater new key

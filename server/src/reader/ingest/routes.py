@@ -24,7 +24,7 @@ import reader.ingest as ingest
 from reader.api.http import Ctx, Handler, Route, error
 from reader.config import ConfigError, load_config
 from reader.config.model import Material
-from reader.ingest import manage, params, store, upload, uploads
+from reader.ingest import manage, manifest, params, store, upload, uploads
 from reader.ingest.artifact import span_id
 from reader.ingest.jobs import KIND, key_for
 from reader.jobs import audit
@@ -485,6 +485,7 @@ async def delete_material(ctx: Ctx) -> Response:
             await manage.delete_courses(conn, owner, courses, material_id)
         sql = "UPDATE materials SET deleted_at = now() WHERE id = :i RETURNING deleted_at"
         deleted_at = (await conn.execute(text(sql), {"i": row.id})).scalar_one()
+        await manifest.remove_material(conn, owner, sha)  # FR-INGEST-39: one entry when the head names it
         await audit.record(conn, owner, "material.delete", material_id, {"courses": len(courses)})
         return JSONResponse(await _deleted_body(conn, owner, material_id, sha, deleted_at))
 

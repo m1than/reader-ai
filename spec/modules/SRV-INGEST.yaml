@@ -586,8 +586,12 @@ requirements:
       `version int NOT NULL DEFAULT 1`. [db]
       **Revision 3** (ADR-0039), migration `ingest_0004_packs`: `ingests` drops UNIQUE (material_id) for UNIQUE
       (material_id, converter_version) (one pack per material and converter version, FR-INGEST-35); `material_spans`
-      adds `locator text`, `quote_sha256 text` (NOT NULL after the backfill of FR-INGEST-40's legacy registration)
-      and UNIQUE (ingest_id, locator); the unconditional tables of the revision block's `proposed_tables` (base_packs,
+      adds `locator text`, `quote_sha256 text` and UNIQUE (ingest_id, locator); both are filled by the backfill of
+      FR-INGEST-40's legacy registration and by every import, and the seal trigger refuses `building → sealed` while
+      a span of the pack lacks either (Green deviation from "NOT NULL after the backfill": the [db] fixtures of
+      SRV-PIPELINE, SRV-PLAN, SRV-SEARCH, SRV-TUTOR, SRV-FRESH and SRV-OBS write span rows of a bare `ingests` row
+      with no pack; they move to the pack helpers with their paired readers, INV-INGEST-16, and a later migration
+      then sets NOT NULL); the unconditional tables of the revision block's `proposed_tables` (base_packs,
       overlays, pack_profiles, span_tags, manifest_entries, pending_activations, seq_maps, span_seq_map,
       anchor_maps, anchor_runs, citation_migrations; listed in `tables`) with their triggers (FR-INGEST-35, -36,
       -38). It registers each existing `ingests` row as a sealed base pack of its converter version with a sealed
@@ -1358,7 +1362,7 @@ requirements:
       with B in the head, a second run with no change appends nothing, a language change activates the new profile
       at once and calls the ensure seam once while the head keeps its vectors overlay, a material with no reader.yaml
       entry and an unreadable reader.yaml leave the head profile unchanged. The replacing pack's carried owner
-      values (two packs) are tested with the seq map and re-anchoring (unit 3), the tags reconcile with the facets
+      values (two packs) are tested with the seq map and re-anchoring (unit 4), the tags reconcile with the facets
       file (unit 6).
   - id: FR-INGEST-38
     text: >-
@@ -1495,7 +1499,7 @@ requirements:
       version with a legacy pack of the material and no accepted map → seqmap_missing; the CAS lost on every retry
       stores manifest_conflict and keeps the row, and the worker-start sweep then appends it; delete → one entry
       without the material, and a delete of a material the head does not name appends none. The restore, rollback,
-      anchors_missing and run-through cases need re-anchoring and the seq map and are tested with them (unit 3:
+      anchors_missing and run-through cases need re-anchoring and the seq map and are tested with them (unit 4:
       test_manifest_db.py, test_gc_db.py, test_manage_db.py per FR-INGEST-31 revised).
   - id: FR-INGEST-46
     text: >-
@@ -2050,7 +2054,7 @@ proposed_requirements:
       - "add to test_facets_unit.py [unit]: every consumer resolves — a requirement id is declared in spec/modules/*.yaml or a view name is in manifest.VIEWS; every enabled facet's consumer resolves; `form` is disabled in the committed file"
       - "add to test_packs_db.py [db]: an import with the committed facets file writes no span_tags row"
       - "add to test_overlays_db.py [db]: a tag write with an unknown facet or value → tag_value_unknown, nothing written"
-  # FR-INGEST-39's planned tests not yet written (restore, rollback, run-through; with unit 3):
+  # FR-INGEST-39's planned tests not yet written (restore, rollback, run-through; with unit 4):
   - id: FR-INGEST-39-tests
     tests_planned:
       - "add to test_manifest_db.py [db]: import (request_activation {profile}) → embed seal (request_activation {vectors}, try_activate) → one entry naming the pack with exactly that profile id and that vectors id; a tags reconcile switches only tags and keeps the head's vectors id; two sealed vector overlays where the older is named → the older is activated (no sealed_at choice); try_activate twice → one entry, the second no_change; a replacing pack with no sealed vectors → vectors_missing, nothing appended, the head unchanged; delete → one entry without it; restore → one entry with the same pack and overlays and the same brain_version as before the delete; restore with a pending row that already desires a newer vectors id keeps that id (merge under); restore of a never-activated material with no pending row appends nothing"
@@ -2562,6 +2566,10 @@ proposed_owner_notes:
 #   Review record: deep-reviewer (Fable) rounds 1–5 changes; owner-approved with the round-5 fixes (2026-11-26, as
 #   relayed by the coordinator), no further round. `approved_by` stays as written until the owner sets it: the agent
 #   does not record an owner approval itself. FR-INGEST-41 still waits for the owner's ADR-0039 amendment note.
+#
+# Phase 2 Green corrections (test data only, no oracle weakened), paired with this note:
+#   unit 2: the reconcile test counted the import as an entry; the import appends none (FR-INGEST-39), so the
+#   expected seqs are 1..4, not 2..5.
 #
 # Open points:
 #   1. FR-INGEST-41 runs as a one-shot command, not an Alembic migration (P2 (4) wording): startup migrations would

@@ -133,6 +133,7 @@ def test_parse_configs_are_pinned_literals() -> None:
     for version, config in configs.items():
         assert config["converter_version"] == version
         assert (config["docling"], config["batch_pages"]) == ("2.151.1", 50)
-        assert config["pipeline"] == {"do_ocr": False, "do_table_structure": True, "do_formula_enrichment": True,
-                                      "do_code_enrichment": False, "device": "cpu"}
+        assert config["pipeline"] == {"do_ocr": False, "do_table_structure": True,
+                                      "do_formula_enrichment": True, "do_code_enrichment": False,
+                                      "device": "cpu"}
     assert ingest.LEGACY_VERSIONS == ("docling-2.151.1+r2",)

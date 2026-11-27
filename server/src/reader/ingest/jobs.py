@@ -163,6 +163,26 @@ async def after_end(engine: Any, payload: Mapping[str, Any], outcome: str) -> No
 JOB_KINDS: Final = make_kinds(ingest.BLOBS_DIR)
 
 
+async def on_worker_start(jobs: Any) -> None:
+    """FR-INGEST-36, -39: the profile reconcile per owner with a manifest, then the pending-activation sweep.
+
+    Rule work only (0 model calls); a failure is logged by code and never stops the worker.
+    """
+    from reader.ingest import manifest, packs
+
+    try:
+        materials = packs.load_materials()
+        async with jobs.engine.connect() as conn:
+            found = await conn.execute(text("SELECT DISTINCT owner_id FROM manifest_entries"))
+            owners = [r[0] for r in found]
+        for owner in owners:
+            async with jobs.engine.begin() as conn:
+                await packs.reconcile(conn, owner, materials)
+        await manifest.sweep(jobs.engine)
+    except Exception as error:  # logged by type; the worker serves jobs anyway
+        store.log.warning("ingest start_reconcile_failed %s", type(error).__name__)
+
+
 def key_for(material_sha256: str, converter_version: str) -> str:
     """The SRV-EVENTS idempotency key of the import of one material under one converter version."""
     payload: dict[str, Any] = {"material_sha256": material_sha256, "converter_version": converter_version}

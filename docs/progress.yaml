@@ -1973,8 +1973,20 @@ tasks:
         consent-gated, filled from judge_requests) and the labelling screen as a new owner tab on /settings; judge.align
         proposals refused at write by a runtime 8-word guard, read through the reader obs proposals export and committed
         by the agent through review. FR-OBS-14, -21, -22, -23, -24; VEC-OBS-1/4/5; FR-MANAGE-6" }
-  - { id: V.kl-ingest-packs, stage: V, kind: module, track: engineering, status: todo,
+  - { id: V.kl-ingest-packs, stage: V, kind: module, track: engineering, status: in_progress,
       needs: [V.owner.adr-0039, V.spike.retrieval-ablation],
+      branch: V/kl-ingest-packs,
+      notes: "Phase 2 on V/kl-ingest-packs. Unit 1 done: locator ids and quote hashes (FR-INGEST-33, -34,
+        VEC-INGEST-8). Unit 2 done: base packs, overlays, manifest with CAS, request_activation/try_activate,
+        pending_activations, the worker-start reconcile and sweep, lock_packs, migration ingest_0004_packs with the
+        legacy registration (FR-INGEST-35, -36, -38, -39, -46, INV-INGEST-11, -13, FR-INGEST-14 rev, FR-INGEST-13
+        rev first part). Green deviations recorded in SRV-INGEST: span locator columns are nullable with a seal
+        trigger check (other modules' [db] fixtures write bare ingests); the migration's reader.yaml profiles start
+        with null license/language until the reconcile; SRV-SEARCH ensure is a declared no-op seam
+        (packs.SEARCH_ENSURE). Not built yet: restore, rollback, anchors-missing and run-through cases of
+        FR-INGEST-39 (with unit 3), PackGuard (waits for SRV-AGENT). Remaining: unit 3 converter r3 and artifact
+        format 2; unit 4 seq map, re-anchoring, resolver, FR-INGEST-41 (owner's ADR-0039 amendment note landed);
+        unit 5 GC and purge; unit 6 facets.",
       what: "SRV-INGEST revision (~1,200–1,850 lines with the citation readers): span identity = ADR-0039 P2 locator
         (offsets into the page's canonical span text; empty text as a zero-length range with an ordinal; file and
         line range for non-PDF) + quote hash. Order: converter revision -> re-conversion -> seq-to-locator map, 1:1
