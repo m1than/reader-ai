@@ -495,8 +495,10 @@ requirements:
       channel → `channel_invalid`. Interface (phase 2): `reader.search.find.find(caller, channel, query, *, …,
       deps)` with `Deps(corpus, judge, policy, policy_version, links, findings)` ports; `cards.Card`, `cards.cost`,
       `cards.cut`, `cards.l1_text`, `cards.l2_text`, `cards.l2_budget`. find also drops any L1 card the channel may
-      not serve (FR-SEARCH-30's eligibility), as a second guard behind the SQL filter. [unit, db]
-      test_find_unit.py.
+      not serve (FR-SEARCH-30's eligibility), as a second guard behind the SQL filter. `budget_min` (400) ≥ the
+      largest envelope's estimate plus the cost of the smallest card (an L2 card with empty text, one citation, a
+      64-hex source id), pinned by a unit test. [unit, db] test_find_unit.py (Green: the boundary test's cards were
+      shortened to 20 characters so a 400-token response holds one; no rule changed).
   - id: FR-SEARCH-23   # ADR-0039 revision, promoted in phase 2 (unit 2)
     text: >-
       **Step 1, route by rules (0 model calls).** Question type: the caller's `question_type` when given (only

@@ -159,11 +159,21 @@ def test_response_shape_and_degraded_rules() -> None:
 
 
 def test_the_whole_response_fits_the_budget_at_the_boundary() -> None:
-    cards = [_card(f"c{i:02d}", 1 - i / 100, "w" * 200 + f" {i}", covers=[f"e{i}"]) for i in range(40)]
+    cards = [_card(f"c{i:02d}", 1 - i / 100, "w" * 20 + f" {i}", covers=[f"e{i}"]) for i in range(40)]
     for budget in (400, 401, 555, 1000, 2000):
         out = _run(Corpus(cards), budget=budget)
         assert _estimate(out) <= budget
         assert out["cards"], budget  # the cards' budget is used, not left empty
+        one_more = _estimate(out) + _cards().cost(_card("c99", 0.0, "w" * 20 + " 99", covers=["e99"]))
+        assert one_more > budget - 1 or len(out["cards"]) == len(cards)  # the budget binds near its limit
+
+
+def test_budget_min_holds_the_envelope_and_the_smallest_card() -> None:
+    find, cards = _find(), _cards()
+    policy = _policy()
+    envelope = find._envelope("b" * 64, "p" * 64, 150000)
+    smallest = _card("sec:" + "a" * 64, 0.0, "", layer="L2")
+    assert _estimate(envelope) + cards.cost(smallest) <= policy.data["budget_min"]
 
 
 def test_a_cards_cost_is_its_whole_json() -> None:
