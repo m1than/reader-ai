@@ -218,6 +218,14 @@ requirements:
         1..`page_count`: `sum(char_length(text))` and `count(*)` of its spans, 0 for a page without spans), and the
         outline, `outline_entries(conn, owner_id, ingest_id) -> ((level, page | None, title), ...)` in seq order;
         both read only the owner's rows.
+        **Paired change, ADR-0039 / SRV-INGEST INV-INGEST-16, V.kl-active-view-readers:** "imported" means the
+        material (not deleted) has a pack in the owner's head manifest entry; `page_chars`, `outline_entries` and
+        FR-PLAN-13's `lesson_chars` read that pack through `reader.ingest.views` (`active_pack`, `page_stats`,
+        `pack_outline`, `span_chars`), never the `ingests` join, and the `ingest_id` returned and stored in
+        `study_plans` is the active pack's. A material with two packs (r2 and r3) is planned from one pack, never
+        their sum; with no active pack, preview and confirm are 404 and `lesson_chars` is None. The [db] fixtures
+        seal their ingest as an active r2 pack (server/tests/ingest/packseed.py). [db]
+        test_plan_active_pack_db.py.
         `fixed` and the stored `start_date` come from the material's existing plan course, if any (FR-PLAN-6). `today`
         outside the server's UTC date ± `today_skew_days` is 400 `today`. `no_text` is 422 with that code.
       - `POST /api/plans/confirm` with the same fields plus `plan_sha256` and `compile_first: bool`. The course is
