@@ -1461,7 +1461,7 @@ kl_open_points:
   - "2. Until SRV-AGENT sends `<request_id>:<code>`, budget, saturated and quota_refused degrade as error (interim parse rule, FR-SEARCH-28)."
   - "3. When k binds together with the budget, no approximation bound is claimed (FR-SEARCH-27); B8 keeps k optional."
   - "4. Unmeasured values are marked initial in policy (expand_decay, objective weights, thresholds, quotes_per_card_max, walk_quote_fraction_max, owner_judge_run_cap_usd); the evaluation reports their effect, none gates a merge; judge-gate and the paid ablation arms replace the ones they measure."
-  - "5. The owner channel's judge context has no daily budget (`daily_budget_usd` null) until a per-user daily judge budget for the `mcp` line exists (SRV-MCP, stage 7); each owner request is capped by owner_judge_run_cap_usd and the shipped gate (never_judge) makes no judge call until judge-gate (FR-SEARCH-28, unit 5). Ship gate (code review of unit 5, round 4): a `gate.mode` other than `never_judge` may not ship until (a) the owner channel has a daily judge budget passed to `Waiter(daily_budget_usd=…)` by the routes — the amount is the owner's decision, not the agent's — and (b) policy_version tracks judge-slot changes within a process (done: FR-SEARCH-34 `current()` re-binds when the effective slots differ from the bound ones)."
+  - "5. The owner channel's judge context has no daily budget (`daily_budget_usd` null) until a per-user daily judge budget for the `mcp` line exists (SRV-MCP, stage 7); each owner request is capped by owner_judge_run_cap_usd and the shipped gate (never_judge) makes no judge call until judge-gate (FR-SEARCH-28, unit 5). Ship gate (code review of unit 5, round 4): a `gate.mode` other than `never_judge` may not ship until (a) the owner channel has a daily judge budget passed to `Waiter(daily_budget_usd=…)` by the routes — the amount is the owner's decision, not the agent's — and (b) policy_version tracks judge-slot changes within a process (done: FR-SEARCH-34 `current()` re-binds when the effective slots differ from the bound ones). Draft (V.kl-tutor-find): (c) the tutor's worker-side Waiter and its cost in SRV-TUTOR VEC-TUTOR-3 (kl_tutor_find.judge_ship_condition)."
 
 proposed_owner_notes:
   - "Spans vs chunks (spikes/retrieval-ablation): at 10 cards, spans hit 71 of 90 against today's chunks' 76; the difference is not significant (thematic 17 vs 20, exact 25 vs 27, fact-check equal), and spans carry 3.8× less text. With the same amount of text spans hit 83. find selects under a token budget, not 10 cards, so the thematic route should not lose in practice; NFR-SEARCH-2's floor is 68 (the spike's 71 minus a margin of 3)."
@@ -1483,19 +1483,29 @@ kl_tutor_find:
     text: >-
       FR-SEARCH-7's `StoreCorpus(conn, policy, material_sha256=None)`: an internal caller (the tutor) may scope the
       candidates to one material; the value is passed to `store.candidates(material_sha256=…)`, which already takes
-      it. Not a request field and not in the request hash (SRV-TUTOR kl_open_points 3); routes never set it.
+      it. A scoped corpus also skips every active pack of another material before loading its Book or computing its
+      entitlement. Not a request field and not in the request hash (SRV-TUTOR kl_open_points 3: the scope must
+      enter the hash before Links are non-empty or any response cache is keyed by it); routes never set it.
     tests_planned:
-      - "add to server/tests/search/test_find_db.py or test_search_db.py [db]: with two active materials, a StoreCorpus scoped to one returns only that material's cards; unscoped returns both"
+      - "add to server/tests/search/test_find_db.py or test_search_db.py [db]: with two active materials, a StoreCorpus scoped to one returns only that material's cards and loads no Book of the other (spy); unscoped returns both"
   policy_change:
     text: >-
       `policy.json` `channels.tutor.budget_default` 5,250 → 10,500 (= `budget_max`, unchanged; the owner channel's
       maximum stays equal to it). proposed_bounds.channel_budgets' "5,250 tokens ≈ 21,000 bytes" counted span text only;
-      a card's JSON costs about 330 tokens before its text (`cards.cost`, SRV-TUTOR proposed_bounds find_budget), so
+      a card's JSON costs about 330 tokens before its title and text (`cards.cost`, SRV-TUTOR proposed_bounds find_budget), so
       the tutor's source budget needs the maximum. This moves `policy_version` (FR-OBS-21 over `declared()`): judge
       outputs recorded under the old version are not replayed for new requests (none exist while the gate is
       `never_judge`). Initial until SRV-TUTOR's M1.
     tests_planned:
       - "change server/tests/search/test_policy_unit.py [unit]: tutor budget_default == budget_max == the owner channel's budget_max"
+      - "change server/tests/search/test_find_unit.py:133 [unit]: the tutor channel's default budget is 10500 (was 5250)"
+  judge_ship_condition:
+    text: >-
+      kl_open_points 5 gains condition (c): a `gate.mode` other than `never_judge` may not ship until the tutor has a
+      worker-side Waiter (SRV-EVENTS Jobs reachable from its job) with its judge_ctx {line tutor, the question's run}
+      and SRV-TUTOR VEC-TUTOR-3 asserts question_cap_usd ≥ attempts_max × (tutor reserve + judge_find_floor_usd)
+      (today 2 × (0.148 + 0.002) = $0.30, no headroom). Until then the tutor's find runs with no judge (SRV-TUTOR
+      FR-TUTOR-5), pinned by SRV-TUTOR's [unit] test on the shipped gate and the tutor's default deps.
   legacy_search:
     text: >-
       FR-SEARCH-7's "it is removed with that task" is narrowed: V.kl-tutor-find removes the **tutor's** call path (the

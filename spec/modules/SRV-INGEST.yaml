@@ -2867,3 +2867,19 @@ proposed_owner_notes:
 #   4. L2 summaries need an `ingest.summary` slot that SRV-AGENT lacks (only if the ablation keeps summaries).
 #   5. Outline ids use sibling-ordinal paths (`sec:<sha>:3/2/1`), not title slugs (ADR-0039 B8's example).
 #   6. The test-vector rule is measured on the pilot span dump before promotion.
+
+# ---- Paired with SRV-TUTOR's ADR-0039 revision (V.kl-tutor-find), DRAFT, not approved; lands with that revision's
+# Red tests (FR-TUTOR-8, FR-INGEST-40 gate (g)).
+kl_tutor_find:
+  span_rows:
+    text: >-
+      `reader.ingest.views.active_span_rows(conn: AsyncConnection, owner_id: uuid.UUID, ids: Sequence[str]) ->
+      dict[str, tuple[int, str, str]]`: span id → (page, text, quote_sha256), under exactly the rules of
+      `active_span_texts` (the owner's active packs only; a locator reads the active pack's span with that locator; a
+      legacy id reads its seq in a legacy active pack, else goes through FR-INGEST-42's resolver, `active` or
+      `reanchored` only, taking the mapped span's page, text and `Resolved.quote_sha256`). `quote_sha256` is the
+      stored column; where it is null, `locator.quote_sha256(text)` of the stored text, as `opening.load_book` does
+      (FR-INGEST-34's formula). `active_span_texts` becomes its projection to (page, text), so SRV-SEARCH's callers
+      do not change; it stays under INV-INGEST-16's reader scan. [db]
+    tests_planned:
+      - "add to server/tests/ingest/test_views_db.py (or the existing views test) [db]: on an r3 pack the hash equals material_spans.quote_sha256; on a legacy r2 pack with a null stored hash it equals sha256 of the stored text; a legacy id mapped to an r3 pack returns the mapped span's hash; another owner's span and an inactive pack's span are absent; active_span_texts returns the same (page, text) as before"

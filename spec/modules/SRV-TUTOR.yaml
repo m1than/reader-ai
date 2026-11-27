@@ -528,41 +528,54 @@ kl_revision:
   task: V.kl-tutor-find
   adr: [ADR-0039, ADR-0008, ADR-0005, ADR-0010]
   status: draft
-  revised_ids: [FR-TUTOR-1, FR-TUTOR-3, FR-TUTOR-5, FR-TUTOR-8, INV-TUTOR-2, NFR-TUTOR-1, NFR-TUTOR-2, NFR-TUTOR-3,
-    VEC-TUTOR-1, VEC-TUTOR-7, VEC-TUTOR-8]
+  revised_ids: [FR-TUTOR-1, FR-TUTOR-3, FR-TUTOR-5, FR-TUTOR-8, INV-TUTOR-2, INV-TUTOR-4, NFR-TUTOR-1, NFR-TUTOR-2,
+    NFR-TUTOR-3, VEC-TUTOR-1, VEC-TUTOR-7, VEC-TUTOR-8]
   new_ids: [FR-TUTOR-22, VEC-TUTOR-9]
   kept_unchanged: "FR-TUTOR-6's prompt, aliases and byte drop rule; FR-TUTOR-7's call; prompt_bytes_max 29,000, so VEC-TUTOR-3's reserve ($0.148 per attempt) and the caps are unchanged while no judge call is made (kl_open_points 2)"
-  supersedes: "V.tutor-retrieval where both change tutor retrieval; its 2026-11-23 bench (grounded 0.625, 0.808 given a gold page in the top 8, 26 of 40 with one) is this revision's baseline"
+  supersedes: "V.tutor-retrieval where both change tutor retrieval; its 2026-11-23 bench (grounded 25 of 40 = 0.625; 21 of 26 with a gold page in the top 8 chunks, 4 of 14 without) is this revision's baseline"
+  gates: >-
+    Deviation from the plan's "NFR-TUTOR-3 re-measured as a gate before approval": P1 needs the built handler, and
+    H1 needs an approved spec to build it, so that order cannot be met. **M1** (free, with the threshold below)
+    gates the promotion of this revision with its Red tests; **P1** (paid) gates done, the merge and
+    `implemented`; a P1 miss reopens retrieval, not the threshold. Stated in proposed_owner_notes.
   measurement_plan:
     free: >-
-      (M1, before Red, [local], 0 model calls, own containers, never the owner's stack) over the 40 VEC-TUTOR-7
-      questions on the pilot's pack (the local PDF, never committed): run the revised FR-TUTOR-5 through the real
-      StoreCorpus and FR-TUTOR-6's drop rule and record per question the cards returned, the sources sent (primaries,
-      neighbours), the source bytes sent and `gold_in_sources` (a gold page among the sent sources' pages); report
-      the share against the chunk baseline (26 of 40). It replaces the `initial` mark on the tutor budget
-      (proposed_bounds) and predicts NFR-TUTOR-3 before any spend: at the baseline's conditional rates (0.808 with
-      gold, 4 of 14 without) the 0.8 gate needs gold in the sources for about 38 of 40 questions. Result in
-      spikes/tutor-find/RESULT.md. (M2, free) the [db] and [unit] Red tests below.
+      (M1, before promotion, [local], 0 model calls, own containers, never the owner's stack) over the 40
+      VEC-TUTOR-7 questions on the pilot's pack (the local PDF, never committed). A necessary-condition screen and
+      a like-for-like comparison, not a point prediction (a page hit by a span is not a page hit by a chunk). One
+      run computes, for each variant, (a) today's merged path, search(k=8) with span_ids = [span_id] (8 single
+      spans, the second baseline), (b) the find primaries only, (c) primaries + next (this revision), (d) primaries
+      + previous + next, each after FR-TUTOR-6's 29,000-byte drop rule: per question the cards returned, the
+      sources sent, the source bytes, `gold_in_sources` (a gold page among the sent sources' pages) and a span-level
+      measure (the count and bytes of sent spans on gold pages); and the mean L1 card cost (`cards.cost`) of the
+      responses, which replaces the `initial` mark on the tutor budget. **Threshold:** from the baseline's
+      conditional rates, 21/26 · g + 4/14 · (40 − g) ≥ 32 needs g ≥ 39.4 (g = 38 → 0.78, 39 → 0.795, 40 →
+      0.808), so P1 is run only if variant (c) has `gold_in_sources` for **40 of 40** questions; otherwise the task
+      blocks for the owner with M1's table (a larger budget, variant (d), the judge, or the gate). That is the
+      likely path: chunks reached 26 of 40. spikes/tutor-find/RESULT.md holds ids, counts and bytes only, never
+      span text; its statistic is re-run against the Green function before P1. (M2, free) the [db] and [unit] Red
+      tests below.
     paid: >-
-      (P1) the NFR-TUTOR-1..3 bench, 40 questions through the owner slice suite's step `tutor-bench`: expected about
-      40 x $0.046 = $1.84, bounded by 40 x question_cap_usd = $12.00, from budget.test_budget_usd. Left for the
-      owner's go; run after M1 only if M1's predicted share is not already below the gate (else retrieval reopens
-      first, as NFR-TUTOR-3 says). No other paid measurement: the L5-boost sufficiency comparison waits for
-      S6.SRV-RECALL.
+      (P1) the NFR-TUTOR-1..3 bench, 40 questions through the owner slice suite's step `tutor-bench`: the last run
+      cost $1.087 in all, mean $0.0267 per question (V.live, 2026-11-23), against the bound 40 x question_cap_usd =
+      $12.00, from budget.test_budget_usd. Left for the owner's go, and only after M1 meets its threshold. No other
+      paid measurement: the L5-boost sufficiency comparison waits for S6.SRV-RECALL.
 
 proposed_bounds:
   retrieve_k: "removed: the tutor calls find on channel `tutor` with no budget and no k, so SRV-SEARCH policy `channels.tutor.budget_default` sets the response size (data, not code)"
-  find_budget: "policy channels.tutor budget_default = budget_max = 10,500 estimator tokens (paired SRV-SEARCH change, from 5,250). Initial until M1. Derivation: an L1 card's JSON costs 327.5 tokens with an empty text and 439.5 with a 223-character span (reader.search.cards.cost, computed 2026-11-28), so 10,500 tokens hold about 23 mean spans, about 9.7 KB of Cyrillic text; their next spans (FR-TUTOR-5) about as much again, together near the 21,000-byte source budget, which FR-TUTOR-6 still enforces. At 5,250 the tutor would get about 11 spans, about 5 KB: the halving ADR-0039 B8 forbids without a measurement"
-  sources_max: "88, kept: at most candidates_max 50 cards plus one neighbour each; the byte budget binds first"
-  span_bytes_max: "2000, kept: tighter than the card's L1 cut (600 tokens, 1,200 characters, about 2,300 bytes of Cyrillic)"
+  find_budget: "policy channels.tutor budget_default = budget_max = 10,500 estimator tokens (paired SRV-SEARCH change, from 5,250). Initial until M1, which records the real mean card cost. Estimate: an L1 card costs about 327.5 tokens with an empty title and text, plus (title + text characters) / 2 (reader.search.cards.cost, computed 2026-11-28; a 40-character section path makes it 347.5); the envelope about 142. With ADR-0039's measured span mean (342 bytes, about 180 Cyrillic characters, 90 tokens) and a short section path a card is about 437 tokens, so 10,500 tokens hold about 23 spans, about 7.9 KB; their next spans (FR-TUTOR-5) about as much again, about 16 KB, below the 21,000-byte source budget FR-TUTOR-6 still enforces. At 5,250 the tutor would get about 11 spans, about 4 KB: the cut ADR-0039 B8 forbids without a measurement"
+  sources_max: "88, kept, never binds: with empty texts at most floor((10,500 − 142) / 337.5) = 30 cards fit, plus one neighbour each, 60 sources; the byte budget binds first"
+  span_bytes_max: "2000, kept. The sent text is the stored span (FR-TUTOR-5), not the card's text, so the card's L1 cut (1,200 characters) does not apply to it; for Cyrillic text 2,000 bytes is about 1,000 characters, for ASCII 2,000"
 
 proposed_revisions:
   - id: FR-TUTOR-1
     text: >-
-      As approved, plus: a question holding a lone surrogate (U+D800–U+DFFF) → 400 `question_invalid`, the same input
-      rule as SRV-SEARCH FR-SEARCH-22, so a question the api accepts is never refused by `find`.
+      As approved, plus: the question's NFC form must also be 1..`question_chars_max` code points, else 400
+      `question_invalid`, because `find` normalises to NFC before its 1,000-character check (FR-SEARCH-22) and NFC can
+      lengthen text (1,000 × U+0958 become 2,000 code points). With that and the lone-surrogate refusal already in
+      the ask validation (routes.py), a question the api accepts passes find's input check.
     tests_planned:
-      - "change server/tests/tutor/test_tutor_db.py [db]: a question with a lone surrogate (JSON \\ud800) → 400 question_invalid, no row"
+      - "change server/tests/tutor/test_tutor_db.py [db]: 1,000 × U+0958 → 400 question_invalid, no row (Red); a lone surrogate → 400 question_invalid (already enforced, pinned, not Red)"
   - id: FR-TUTOR-3
     text: >-
       As approved, except the `tutor.retrieve` child's `candidates` counts the cards `find` returned (no longer
@@ -573,51 +586,75 @@ proposed_revisions:
     text: >-
       **Retrieval through `find`** (ADR-0039 B6, B8). The handler loads the revision and the course's
       `material_sha256`; with none the row is `failed` / `sources_unavailable` and no model is called. Otherwise it
-      calls SRV-SEARCH `find(caller, "tutor", question, judge_ctx=…, deps=Deps(corpus=StoreCorpus(conn, policy,
-      material_sha256)))` with no budget and no k (the channel's default from policy), where caller = (the question's
-      owner, the owner's role, provider presence from the question's handle) and judge_ctx = {line `tutor`, run_id
-      the question id, run_cap_usd `question_cap_usd`, lesson_id, daily_budget_usd `daily_cap_usd`}; `Deps.judge` is
-      None in this revision (kl_open_points 2), so a judge is never called. The candidate spans are the ids of the
+      takes one (policy, version) pair from SRV-SEARCH `policy.current()` and calls `find(caller, "tutor", question,
+      deps=Deps(corpus=StoreCorpus(conn, policy, material_sha256), policy=policy, policy_version=version))` with no
+      budget, no k and no judge_ctx (the channel's default budget from policy), where caller = (the question's
+      owner, the owner's role, provider presence from the question's handle); `Deps.judge` is None in this revision
+      (kl_open_points 2), so no judge is called and nothing is spent on the judge line, whatever the gate. The
+      judge context the Waiter will need ({line `tutor`, run_id the question id, run_cap_usd, lesson_id,
+      daily_budget_usd}) is contract-only until then. A `PolicyError` from `current()` or a `FindError` →
+      `failed` / `tutor_failed`, no model call. The candidate spans are the ids of the
       response's L1 cards in response order, then, in the same order, each such card's first `next` id that is a span
       locator (`spn:`; the next span in reading order), a span already taken not repeated (VEC-TUTOR-9); so FR-TUTOR-6's
       drop rule drops neighbours before any primary, as with chunks (the 2026-11-23 live run's fact sat in a
       neighbouring span). Non-L1 cards are ignored. Each candidate is loaded (page, text, quote_sha256) through
-      `store.spans_by_ids` (active packs only, as approved) and cut to `span_bytes_max`; the card's own text is not
-      sent, so the database stays the only source of what is sent and cited. No card, or no loadable candidate →
-      `failed` / `sources_unavailable`, no model call. A `FindError` → `failed` / `tutor_failed`, no model call.
-      `degraded: true` → `retrieval: "degraded"`. The owner's material is `personal-use` and the asker owns it, so
+      `store.spans_by_ids`, now over SRV-INGEST's `views.active_span_rows` (active packs only, as approved), and cut to `span_bytes_max`; the card's own text is not
+      sent, so the database stays the only source of what is sent and cited. find returns locators only, so the
+      legacy-id branch of `spans_by_ids` is unreachable from the handler; it stays for FR-TUTOR-22's never-run case
+      and is removed after FR-INGEST-41 has run. No card, or no loadable candidate → `failed` /
+      `sources_unavailable`, no model call. `degraded: true` (embed down, or a judge skip such as `error` under a
+      test gate) → `retrieval: "degraded"`. The owner's material is `personal-use` and the asker owns it, so
       FR-SEARCH-30 gives the tutor channel full L1 cards cut only at the card budget. The tutor no longer imports
-      `reader.search.store`; its `Hit` Protocol and `candidate_span_ids` are removed. [unit, db]
+      `reader.search.store`; its `Hit` Protocol, `candidate_span_ids` and `params.RETRIEVE_K` are removed. [unit, db]
     tests_planned:
       - "change server/tests/tutor/test_tutor_unit.py [unit]: VEC-TUTOR-9 (cards → candidate ids: order, dedupe, L0/L2 cards ignored, a `sec:` next ignored, a card without next)"
-      - "add server/tests/tutor/test_tutor_find_db.py [db] (fake embed service, packseed.py): the handler's find call (channel tutor, no budget, no k, the judge_ctx above, judge None); a nearer span of the owner's second material is never sent; a span of another owner never sent; empty cards → sources_unavailable with no provider call; FindError(policy_invalid) → tutor_failed with no provider call; embed down → retrieval degraded; with 29,000 bytes binding, a neighbour is dropped before the last primary; end to end over a sealed r2 pack and over an r3 pack with a fake provider"
+      - "change server/tests/tutor/test_tutor_unit.py:50 [unit]: the bounds test drops RETRIEVE_K (retrieve_k removed from bounds)"
+      - "change server/tests/tutor/test_tutor_db.py:72 [db]: the asserted call is the fake find's (owner, channel tutor, question, no budget, no k, material scope), not search(…, RETRIEVE_K, …)"
+      - "add server/tests/tutor/test_tutor_find_db.py [db] (fake embed service, packseed.py): the handler's find call (channel tutor, no budget, no k, no judge_ctx, judge None, one policy pair for corpus and find); a nearer span of the owner's second material is never sent; a span of another owner never sent; empty cards → sources_unavailable with no provider call; FindError(policy_invalid) and a PolicyError from current() → tutor_failed with no provider call; embed down → retrieval degraded; with 29,000 bytes binding, a neighbour is dropped before the last primary; end to end over a sealed r2 pack and over an r3 pack with a fake provider; a test policy with gate always_judge and judge None → no judge_requests row and $0 on the judge line, retrieval degraded"
+      - "add server/tests/tutor/test_tutor_unit.py [unit]: the shipped policy.json gate.mode is never_judge while the tutor's default deps carry no judge (fails when either changes alone)"
       - "change server/tests/tutor/test_tutor_chunks_db.py and test_tutor_db.py [db]: the fake search becomes a fake find returning cards"
       - "add server/tests/tutor/test_tutor_unit.py [unit]: no module under reader.tutor imports reader.search.store (source scan)"
   - id: FR-TUTOR-8
     text: >-
       As approved, except each kept alias renders as `{span, page, material_title, quote_sha256}`: `quote_sha256` is the
-      cited span's stored hash (SRV-INGEST FR-INGEST-34) loaded with it (FR-TUTOR-5), never computed from model text.
+      cited span's stored hash (SRV-INGEST FR-INGEST-34) loaded with it (FR-TUTOR-5), never computed from model text;
+      where the stored column is null, the sha256 of the span's stored text (`locator.quote_sha256`, the rule
+      `opening.load_book` applies), returned by the paired SRV-INGEST read. A citation pairs `quote_sha256` only with a
+      locator: a citation carrying `quote_sha256` beside a legacy `<sha>:<seq>` id is refused (the alias is dropped
+      as one outside the sent set, so its block may become unsupported), because the resolver discards such a hash
+      (spanref.py `_one`) and FR-INGEST-41 rewrites the id and the hash together.
       This is SRV-INGEST FR-INGEST-40's r3 gate (g). The web reads it as an optional field (`web/src/tutor/api.ts`) and
       does not show it; answers stored before the revision have none until FR-INGEST-41 rewrites them (FR-TUTOR-22).
     tests_planned:
       - "change server/tests/tutor/test_tutor_unit.py [unit]: VEC-TUTOR-1's expected citations carry quote_sha256"
       - "add to server/tests/tutor/test_tutor_find_db.py [db]: a citation's quote_sha256 equals material_spans.quote_sha256 of its span, on an r2 legacy pack (backfilled hashes) and on an r3 pack; a legacy id resolved through an accepted seq map carries the mapped span's hash"
       - "change web/src/tutor/AskPanel.test.tsx [unit]: an answer with and without quote_sha256 validates and renders the same citations"
+      - "add to server/tests/tutor/test_tutor_unit.py [unit]: a sent source whose span id is a legacy <sha>:<seq> id (a fake loader returning one) never yields a citation with quote_sha256; its alias is dropped and the block is unsupported"
   - id: INV-TUTOR-2
     text: >-
       As approved, plus: every stored or shown citation's `quote_sha256` equals the stored hash of the span it names,
-      for any model output (the model never sees a hash). [unit]
+      for any model output (the model never sees a hash), and no stored or shown citation carries `quote_sha256`
+      beside a legacy `<sha>:<seq>` id. [unit]
     tests_planned:
-      - "change the INV-TUTOR-2 Hypothesis property in server/tests/tutor/test_tutor_unit.py: generated outputs, including hex strings in quotes and text, never change a citation's quote_sha256 from the sent span's"
+      - "change the INV-TUTOR-2 Hypothesis property in server/tests/tutor/test_tutor_unit.py: generated outputs, including hex strings in quotes and text, never change a citation's quote_sha256 from the sent span's; with sent sets mixing locators and legacy ids, every citation with quote_sha256 names a locator"
+  - id: INV-TUTOR-4
+    text: "As approved, with a case through the real find and StoreCorpus path (no fake find): the canary in the question and in a span appears in no log record and no job args."
+    tests_planned:
+      - "add to server/tests/tutor/test_tutor_find_db.py [db]: INV-TUTOR-4's canary case over the real find (fake embed service and provider)"
+  - id: VEC-TUTOR-1
+    text: "As approved, except every expected citation in spec/fixtures/SRV-TUTOR/answers.yaml is {span, page, material_title, quote_sha256} with the sent span's hash; the span ids in the fixture become locators."
+    tests_planned:
+      - "change server/tests/tutor/test_tutor_unit.py [unit]: VEC-TUTOR-1 cases read the new citation shape"
   - id: NFR-TUTOR-1
     text: "As approved; now includes `find` (its own p95 bound is SRV-SEARCH NFR-SEARCH-7). Re-measured by run P1; threshold 30 s unchanged."
     tests_planned: ["bench P1 [live] (paid, the owner's go)"]
   - id: NFR-TUTOR-2
-    text: "As approved; the prompt bound (29,000 bytes) is unchanged, so the expected mean stays about $0.046. Re-measured by run P1; threshold $0.06 unchanged."
+    text: "As approved; the prompt bound (29,000 bytes) is unchanged. Measured mean $0.0267 per question (V.live, 2026-11-23; spec estimate $0.046). Re-measured by run P1; threshold $0.06 unchanged."
     tests_planned: ["bench P1 [live] (paid, the owner's go)"]
   - id: NFR-TUTOR-3
     text: >-
-      As approved, the **gate before this revision is approved**, threshold 0.8 unchanged, except the predictor:
+      As approved, threshold 0.8 unchanged; it gates done, the merge and `implemented` (kl_revision.gates; M1
+      gates the promotion), except the predictor:
       `gold_in_top8` becomes `gold_in_find`, a gold page among the pages of the L1 card ids (the locator's `p<page>`)
       of `POST /api/find {q, budget: 10500}` on the owner channel, whose route table equals the tutor's and whose
       maximum is the tutor's (zero credit while the gate is `never_judge`); the summary splits grounded by it
@@ -648,19 +685,21 @@ proposed_vectors:
 
 proposed_defers:
   - "L5 boost (gaps first) on the tutor routes: inert until learner state exists (S6.SRV-RECALL); the tutor-route sufficiency comparison with and without it is measured then. Learner state is not in brain_version, so tutor responses are traced, not promised to replay (ADR-0039 reproducibility)"
-  - "A `judge.find` call from the tutor: the worker-side Waiter and its cost in VEC-TUTOR-3 (kl_open_points 2)"
-  - "The previous span as a neighbour: `next` names only the following span"
+  - "A `judge.find` call from the tutor: the worker-side Waiter, its judge_ctx and its cost in VEC-TUTOR-3 (kl_open_points 2; SRV-SEARCH kl_open_points 5 (c))"
+  - "The previous span as a neighbour: `next` names only the following span; M1's variant (d) measures what it would add"
 
 proposed_owner_notes:
-  - "The tutor now retrieves through the same find as search: about 23 short passages plus the passage after each, within the same 21,000-byte source budget, so the cost per question stays about $0.046. Whether answers are grounded more often is measured first for free (M1); the paid 40-question bench (about $1.84) waits for your go."
+  - "The tutor now retrieves through the same find as search: about 23 short passages plus the passage after each, within the same 21,000-byte source budget, so the cost per question does not rise (the last bench measured $0.0267 per question)."
+  - "Grounding: to reach your 0.8 target, nearly every one of the 40 bench questions (40 of 40 by the last bench's rates) must get a page with the answer into the tutor's sources. The free check M1 measures that first; chunks managed 26 of 40, so M1 will probably fall short, and then the task stops for your decision (a larger budget, more neighbouring passages, the judge, or the target) before any money is spent."
+  - "Deviation from the plan: the plan re-measured grounding before approving the spec, but the paid bench needs the built tutor. Now the free M1 decides whether the spec is promoted, and the paid bench (about $1.09 last time, at most $12) decides whether the work is done and merged; it waits for your go."
 
 kl_paired_changes:
   - { spec: SRV-SEARCH, change: "see SRV-SEARCH kl_tutor_find: StoreCorpus material scope; policy.json channels.tutor.budget_default 5,250 → 10,500 (moves policy_version); the tutor's legacy search() call path removed here, search() and POST /api/search removed later" }
-  - { spec: SRV-INGEST, change: "views.active_span_texts (or a sibling read) also returns the span's stored quote_sha256, for legacy ids through the resolver's mapped span; FR-INGEST-40 gate (g) is met by FR-TUTOR-8 and FR-INGEST-41's target by FR-TUTOR-22" }
+  - { spec: SRV-INGEST, change: "see SRV-INGEST kl_tutor_find: views.active_span_texts returns (page, text, quote_sha256); FR-INGEST-40 gate (g) is met by FR-TUTOR-8 and FR-INGEST-41's target by FR-TUTOR-22" }
   - { spec: SRV-OBS, change: "VEC-OBS-5 tutor_record key gold_in_top8 → gold_in_find" }
   - { spec: e2e, change: "e2e/web/live/owner.slice.ts: the tutor-bench predictor through POST /api/find" }
 
 kl_open_points:
-  - "1. The 0.8 gate likely fails: at the baseline's conditional rates it needs a gold page in the sources for about 38 of 40 questions (chunks gave 26). If M1 predicts a miss, the agent blocks for the owner before P1 (more budget, the previous span, the judge, or the gate)."
-  - "2. Judge on the tutor channel: not wired (Deps.judge None; with the shipped never_judge gate find never calls it). Before any gate.mode other than never_judge: a worker-side Waiter (SRV-EVENTS Jobs in the job context) and VEC-TUTOR-3 asserting question_cap_usd ≥ attempts_max × (tutor reserve + judge.find reserve), today 2 × (0.148 + 0.002) = $0.30, no headroom. Joins SRV-SEARCH kl_open_points 5."
-  - "3. The material scope is a Corpus constructor argument, not a request field, so it is not in find's request hash (the pivot seed); harmless while Links is empty."
+  - "1. The 0.8 gate likely fails: by the baseline's rates it needs g ≥ 39.4, i.e. variant (c) of M1 with a gold page in the sources for 40 of 40 questions (chunks gave 26). Below that the agent blocks for the owner before P1 (the likely path)."
+  - "2. Judge on the tutor channel: not wired (Deps.judge None, no judge_ctx; a [unit] test pins the shipped never_judge gate against the judge-less default deps). Before any gate.mode other than never_judge: a worker-side Waiter (SRV-EVENTS Jobs in the job context) and VEC-TUTOR-3 asserting question_cap_usd ≥ attempts_max × (tutor reserve + judge_find_floor_usd), today 2 × (0.148 + 0.002) = $0.30, no headroom. Recorded as condition (c) of SRV-SEARCH kl_open_points 5 (kl_tutor_find)."
+  - "3. The material scope is a Corpus constructor argument, not a request field, so it is not in find's request hash (the pivot seed). Harmless only while Links is empty and no response is cached: the scope must enter the hash before SRV-KB's links or any response cache keyed by that hash."
