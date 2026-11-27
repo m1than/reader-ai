@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 from pathlib import Path
 from typing import Any
 
@@ -124,9 +125,10 @@ async def test_purge_refuses_while_a_text_seam_is_unbound(pg: Pg, tmp_path: Path
         ingest = await search_rows(w, pid)
         async with w.engine.begin() as conn:
             await vectors(conn, w.users["ivan"], pid)  # SRV-SEARCH's forget_overlay is not bound yet
+        unbound = dataclasses.replace(gc.SEAMS[0], search_forget_overlay=gc._unbound)
         with pytest.raises(gc.SeamUnbound):
             async with w.engine.begin() as conn:
-                await gc.purge(conn, w.users["ivan"], pid, gc.SEAMS[0])
+                await gc.purge(conn, w.users["ivan"], pid, unbound)
         assert await w.scalar("SELECT purged_at FROM base_packs WHERE pack_id = :p", p=pid) is None
         assert (await rows_of(w, pid))["spans"] == 3 and await search_count(w, ingest) == (2, 1)
 
@@ -284,8 +286,9 @@ async def test_a_dead_purge_is_requeued_by_the_next_request(
     async with world(pg, tmp_path) as w:
         pid = await pack(w, MATERIAL_SHA, R2, material_id="synthetic")
         async with w.engine.begin() as conn:
-            await vectors(conn, w.users["ivan"], pid)  # the production seams refuse: seam_unbound
-        url = f"/api/materials/synthetic/packs/{pid}/purge"
+            await vectors(conn, w.users["ivan"], pid)
+        monkeypatch.setattr(gc, "SEAMS", [dataclasses.replace(gc.SEAMS[0], search_forget_overlay=gc._unbound)])
+        url =f"/api/materials/synthetic/packs/{pid}/purge"
         async with client(w, jobs=w.jobs) as c:
             assert (await c.post(url, json={"confirm": "synthetic"})).json()["enqueued"] is True
         await w.work()

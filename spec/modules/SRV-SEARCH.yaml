@@ -223,6 +223,27 @@ requirements:
         (ingest_id, model, params_sha256).
       No vector index (declared deviation). Foreign keys are ON DELETE RESTRICT. The downgrade drops these two tables
       only, not the extension. [db]
+      **Revision (ADR-0039, promoted in phase 2, unit 4a).** Migration `search_0002` (branch `search`) creates
+      `search_span_vectors(owner_id → users.id, overlay_id text, pack_id text, locator text, window_no int,
+      char_start int, char_stop int, model text, fts_config text CHECK in ('russian','english','simple'), fts
+      tsvector NOT NULL, embedding vector(1024) NOT NULL)`, primary key (owner_id, overlay_id, locator, window_no) —
+      owner-scoped, because two owners of the same bytes share a pack id (FR-INGEST-35) and must never share rows —
+      plus `USING gin (fts)` and a foreign key (owner_id, overlay_id) → SRV-INGEST's `overlays` (ON DELETE RESTRICT).
+      `fts` is a plain column computed at insert from the passage text (`to_tsvector(cfg, passage)`); the table
+      stores no text column, so the window's text is read from the span through the active view at query time. Rows
+      are written only by the build of their own overlay (P1) and deleted only by `forget_overlay` (FR-SEARCH-5): a
+      trigger refuses INSERT, UPDATE and DELETE of a row whose overlay is `sealed`, and every UPDATE and TRUNCATE,
+      unless the transaction-local setting `reader.search_delete` is `on`, which only `forget_overlay` sets (the
+      pattern of SRV-AGENT's `reader.judge_delete`). Migration `search_0002` has `down_revision = search_0001` and
+      `depends_on` SRV-INGEST's `ingest_0004_packs`. `search_chunks` and `search_embeds` rows are deleted only by
+      `search.forget_legacy` (FR-SEARCH-21); the tables are dropped by a later migration after V.kl-live (defers).
+      No vector index. **Phase 2 (unit 4a), recorded:** the `reader.search_delete` exception covers DELETE only
+      (UPDATE and TRUNCATE are always refused, also under the setting); `reader.search.store.forget_overlay(conn,
+      owner_id, overlay_id)` sets the setting, deletes that owner's rows of that overlay, switches it off again and
+      returns the count, and it is bound as SRV-INGEST's production `search_forget_overlay` GC and purge seam
+      (paired note in SRV-INGEST FR-INGEST-45). The build and read paths (FR-SEARCH-3, -5..-10, -20 revisions) move
+      onto these rows in unit 4b; until then the legacy chunk path above serves. Tests in a new file instead of
+      test_search_db.py. [db] test_span_vectors_db.py.
   - id: FR-SEARCH-5
     text: >-
       **The embed job.** Kind `search.embed`, declared in `reader.search.jobs.JOB_KINDS`:
@@ -933,29 +954,8 @@ proposed_revisions:
     tests_planned:
       - "change server/tests/search/test_search_unit.py: windows per span over VEC-SEARCH-2 (revised); a span under 80 chars is one window; a prefix shrinks the window and every passage ≤ 1,200 chars; empty span → no window"
       - "change server/tests/search/test_search_props.py: for any span text, the windows cover it and each passage ≤ 1,200 chars"
-  - id: FR-SEARCH-4
-    text: >-
-      **Tables.** Migration `search_0002` (branch `search`; parents below; this absorbs V.SRV-SEARCH-fk) creates `search_span_vectors(owner_id → users.id, overlay_id text,
-      pack_id text, locator text, window_no int, char_start int, char_stop int, model text, fts_config text CHECK in
-      ('russian','english','simple'), fts tsvector NOT NULL, embedding vector(1024) NOT NULL)`, primary key
-      (owner_id, overlay_id, locator, window_no) — owner-scoped, because two owners of the same bytes share a pack id
-      (FR-INGEST-35) and must never share rows — plus `USING gin (fts)` and a foreign key (owner_id, overlay_id) →
-      SRV-INGEST's `overlays` (ON DELETE RESTRICT). `fts` is a plain column computed at insert from the passage text
-      (`to_tsvector(cfg, passage)`); the table stores no text column, so the window's text is read from the span
-      through the active view at query time. Rows are written only by the build of their own overlay (P1) and deleted
-      only by `forget_overlay` (FR-SEARCH-5): a trigger refuses INSERT, UPDATE and DELETE of a row whose overlay is
-      `sealed`, and every UPDATE and TRUNCATE, unless the transaction-local setting `reader.search_delete` is `on`,
-      which only `forget_overlay` sets (the pattern of SRV-AGENT's `reader.judge_delete`). Migration `search_0002` has
-      `down_revision = search_0001` and `depends_on` SRV-INGEST's `ingest_0004_packs` (the `overlays` table its foreign
-      key names). `search_chunks` and `search_embeds` are no longer read by any path; their
-      rows are deleted only by `search.forget_legacy(conn, owner_id, ingest_id)`, which deletes that owner's
-      `search_chunks` and `search_embeds` rows of that ingest and is called only by SRV-INGEST's GC and purge under
-      their locks (FR-INGEST-44, -45); the tables are dropped by a later migration after V.kl-live (defers). No vector
-      index (the spike kept the exact scan). [db]
-    tests_planned:
-      - "change server/tests/search/test_search_db.py: search_0002 (down_revision search_0001, depends_on ingest_0004_packs) upgrades and downgrades on the heads; the key and CHECK refuse duplicates and bad fts_config; two owners insert the same (overlay_id, locator, window_no) without conflict; no text column; after seal an INSERT, UPDATE or DELETE of that overlay's rows is refused, TRUNCATE refused, forget_overlay still deletes"
-      - "add to server/tests/search/test_search_db.py: forget_legacy deletes exactly that owner's search_chunks and search_embeds rows of that ingest; another ingest's and another owner's rows (same ingest material) are unchanged; a second call deletes nothing"
-      - "change server/tests/search/conftest.py: fixtures create packs and spans through SRV-INGEST's test helpers instead of chunks"
+  # FR-SEARCH-4's revision promoted into `requirements` (appended to the approved text) with test_span_vectors_db.py
+  # (phase 2, unit 4a); "no longer read by any path" holds once unit 4b moves the reads.
   - id: FR-SEARCH-5
     text: >-
       **The vector overlay build.** Kind `search.embed`, args `{owner_id, pack_id, overlay_id}`, key `[owner_id,
