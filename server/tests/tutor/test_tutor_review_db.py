@@ -39,14 +39,10 @@ pytestmark = pytest.mark.anyio
 
 
 async def test_each_owner_sees_only_their_own_span_text_and_page(pg: Pg, tmp_path: Path) -> None:
-    w = await world(pg, tmp_path)
     # anna's copy of the same material: other text and other pages at the same `sha:seq` span ids
-    await execute(
-        w.engine,
-        "UPDATE material_spans SET text = 'ANNA-ONLY ' || seq || ' miners vary the nonce until the hash',"
-        " page = page + 100 WHERE owner_id = :o",
-        o=w.users["anna"],
-    )
+    anna = [(page + 100, f"ANNA-ONLY {seq} miners vary the nonce until the hash")
+            for seq, (page, _) in enumerate(SPANS)]
+    w = await world(pg, tmp_path, {"anna": anna})
     seen: dict[str, tuple[list[str], list[int], list[int]]] = {}
     for handle in ("ivan", "anna"):
         qid = await insert_question(w, handle)

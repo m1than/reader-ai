@@ -18,13 +18,13 @@ import pytest
 from obs.conftest import finished, obs_setup, require
 
 from .conftest import (
+    SPANS,
     FakeProvider,
     FakeSearch,
     Pg,
     Reply,
     answer_json,
     deps,
-    execute,
     insert_question,
     need,
     world,
@@ -84,8 +84,8 @@ def _no_canary(spans: list[Any], enqueued: list[Any]) -> None:
 async def test_answer_spans_root_keys_and_assessments(
     pg: Pg, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    w = await world(pg, tmp_path)
-    await execute(w.engine, "UPDATE material_spans SET text = text || ' ' || :c", c=BOOK)
+    marked = [(page, f"{body} {BOOK}") for page, body in SPANS]  # every span carries the book canary
+    w = await world(pg, tmp_path, {"ivan": marked, "anna": marked})
     qid = await insert_question(w, question=f"Why {QUESTION}?")
     blocks = [
         {"text": ANSWER, "spans": ["s1"], "quote": "Miners vary the nonce until the hash"},

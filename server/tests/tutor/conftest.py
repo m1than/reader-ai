@@ -149,8 +149,9 @@ class World:
     revisions: dict[str, str] = field(default_factory=dict)
 
 
-async def world(pg: Pg, tmp: Path) -> World:
-    """Migrated database; ivan and anna each own a course bound to material MAT with one lesson (F01) and spans."""
+async def world(pg: Pg, tmp: Path, spans: dict[str, Sequence[tuple[int, str]]] | None = None) -> World:
+    """Migrated database; ivan and anna each own a course bound to material MAT with one lesson (F01) and spans
+    (SPANS, or `spans[handle]`: a sealed pack's spans are immutable, so a test chooses them here)."""
     from sqlalchemy import text
 
     from reader.auth.policy import settings_from_config
@@ -178,7 +179,7 @@ async def world(pg: Pg, tmp: Path) -> World:
             lesson = await store.ensure_lesson(conn, owner, course, 1, "Lesson")
             sha, _ = await store.write_revision(conn, blobs, owner, lesson, F01, "draft", {})
         w.lessons[handle], w.revisions[handle] = lesson, sha
-        await add_material(w, handle, MAT, SPANS)
+        await add_material(w, handle, MAT, (spans or {}).get(handle, SPANS))
     return w
 
 
@@ -214,6 +215,9 @@ async def add_material(w: World, handle: str, sha: str, spans: Sequence[tuple[in
                 ),
                 {"i": ingest, "o": owner, "q": seq, "p": page, "t": body},
             )
+        from ingest.packseed import seal  # FR-TUTOR-5: spans are read from the material's active pack only
+
+        await seal(conn, owner, ingest, sha)
     result: uuid.UUID = ingest
     return result
 

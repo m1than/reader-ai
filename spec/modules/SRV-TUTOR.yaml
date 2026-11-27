@@ -202,6 +202,15 @@ requirements:
       (text, page) and cut to `span_bytes_max`; a `degraded` search is used and recorded. The focused cell (id, kind
       `metadata.reader.kind`, source text) is read from the revision's notebook blob (SRV-LESSON). [db] with a fake
       search
+      **Paired change, ADR-0039 / SRV-INGEST INV-INGEST-16, V.kl-active-view-readers:** `tutor/store.spans_by_ids`
+      loads (page, text) through `reader.ingest.views.active_span_texts`, never the `ingests` join: only the
+      owner's active packs are read, so a material with two packs (r2 and r3) never answers a `<sha>:<seq>` id with
+      the other pack's span. A legacy id reads its seq in a legacy (r2) active pack, and goes through FR-INGEST-42's
+      resolver (accepted seq map; `active` or `reanchored` only) when the active pack is r3; a locator id reads the
+      active pack's span with that locator; anything else is not loaded (dropped from the candidates). Citations keep
+      the id the search gave (FR-TUTOR-8's `quote_sha256` stays with the SRV-INGEST note's later change). The [db]
+      fixtures seal their ingest as an active r2 pack (server/tests/ingest/packseed.py). [db]
+      test_spans_active_pack_db.py.
   - id: FR-TUTOR-6
     text: >-
       Prompt. The system prompt is the versioned file `reader/tutor/prompts/answer-v1.md` (≤ `system_bytes_max`);

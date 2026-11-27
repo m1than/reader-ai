@@ -726,6 +726,15 @@ requirements:
       with their own spans, which must not change the first owner's chars, a lesson with two compile runs
       (`last_compile_usd` = the newer run's), a deleted lesson's spend, and the expected `lessons` JSON; a [db] test
       also sets the row limit to 1 and expects `truncated` true. [unit, db, live]
+      **Paired change, ADR-0039 / SRV-INGEST INV-INGEST-16, V.kl-active-view-readers:** the source length is read
+      through `reader.ingest.views`, as `DbSpanReader` now reads (SRV-PIPELINE FR-PIPELINE-2's paired change): the
+      lessons' (material, pdf_first, pdf_last) come from the caller's `course_plans` rows, and each length is
+      `span_chars` of the material's pack in the caller's head manifest entry (`active_pack`), never the `ingests`
+      join; a material with two packs (r2 and r3) counts one pack's characters, never their sum, and a material with
+      no active pack gives null. The Run snapshot of an import (FR-OBS-20) reads the ingest's counts through
+      `views.ingest_facts`, by its ingest id, whatever its pack's state. Fixtures seal their ingests as active r2
+      packs (server/tests/ingest/packseed.py); tests that changed span texts after the import choose them before it
+      (a sealed pack's rows are immutable). [db] test_summary.py.
   - id: FR-OBS-14
     text: >-
       Under ADR-0035 (accepted 2026-11-24: the worker's assessment and prompt writes to MLflow). Code-sourced

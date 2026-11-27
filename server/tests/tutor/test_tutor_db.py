@@ -19,6 +19,7 @@ import pytest
 
 from .conftest import (
     MAT,
+    SPANS,
     FakeJobs,
     FakeProvider,
     FakeSearch,
@@ -505,9 +506,9 @@ async def test_rows_belong_to_the_lessons_owner_and_revision(pg: Pg, tmp_path: P
 
 
 async def test_no_text_leaks_into_logs_or_job_args(pg: Pg, tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
-    w = await world(pg, tmp_path)
     canaries = {"q": "CANARY-QUESTION-7f3a", "span": "CANARY-SPAN-91bc", "answer": "CANARY-ANSWER-55de"}
-    await execute(w.engine, "UPDATE material_spans SET text = text || ' ' || :c WHERE seq = 0", c=canaries["span"])
+    marked = [(SPANS[0][0], f"{SPANS[0][1]} {canaries['span']}"), *SPANS[1:]]  # the canary in seq 0's text
+    w = await world(pg, tmp_path, {"ivan": marked, "anna": marked})
     jobs = FakeJobs()
     blocks = [{"text": canaries["answer"], "spans": ["s1"], "quote": "Miners vary the nonce until the hash"}]
     with caplog.at_level(logging.DEBUG):
