@@ -324,6 +324,13 @@ requirements:
       overlays. Paired (SRV-INGEST): the import enqueues `args_for(owner, its pack)`; `uploads.embed_key` returns
       `search.jobs.embed_key(owner, sha256)`; `packs.SEARCH_ENSURE` is bound to `search.jobs.ensure_material`.
       test_search_db.py, test_search_unit.py, test_search_active_pack_db.py.
+      **Code review of 0eddd7d (blocking 1), step (1) corrected:** before the predicate, a pack with no committed
+      row for the owner (`packs.material_of` finds none: the import that enqueued it has not committed or rolled
+      back) raises `IngestNotReady` (transient, SRV-EVENTS' backoff), not `overlay_superseded`; and the import
+      enqueues through `enqueue_current(queue, args)`, which requeues the key when it is dead (`_ensure_args`'s
+      rule), because the key [owner_id, overlay_id] of a rolled-back import is the key of the next successful
+      import of the same pack. Also pinned: newest by converter-version order where the pack ids order the other
+      way; no embed call on the overlay-id and collected refusals. test_search_db.py.
   - id: FR-SEARCH-6
     text: >-
       **Full-text configuration.** A material's `fts_config` comes from its reader.yaml `materials[].language`, looked up
@@ -428,6 +435,13 @@ requirements:
       leaves the key to the worker-start hook; VEC-SEARCH-4's overlay state `sealed` (not in the head entry) maps
       to `queued` for job none or succeeded (the activation waits in SRV-INGEST's pending row), else to the job
       status. test_search_db.py, test_search_unit.py.
+      **Code review of 0eddd7d (blocking 2, 3):** `ensure_material(conn, owner_id, material_sha256, queue=None)`
+      takes the caller's queue; SRV-INGEST's restore route collects the restored material during its transaction
+      and, after the commit, calls it with the api's `Jobs` (no queue in the process → `enqueue_skipped`, as
+      before), so a restored material whose first-pack key is dead is requeued through the route. Pinned:
+      worker start skips a pack whose current overlay was collected while its job status is `none`; `ensure`
+      leaves a sealed or a collected current overlay alone (no job key). test_search_db.py,
+      test_search_manage.py.
   - id: FR-SEARCH-10   # paired change for SRV-INGEST revision 2 (ADR-0029)
     text: >-
       **Full-text configuration of uploaded materials.** A material imported from an upload (SRV-INGEST

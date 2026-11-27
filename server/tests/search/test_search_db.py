@@ -634,3 +634,78 @@ async def test_worker_start_enqueues_buildable_packs_without_a_sealed_overlay(w:
         assert await scalar(w.engine, count) == 2
         await jobs.on_worker_start(queue)  # a second start adds nothing
         assert await scalar(w.engine, count) == 2
+
+
+# ---- code review of 0eddd7d (blocking 1, 3) ----
+
+
+async def test_an_uncommitted_pack_is_not_ready_and_the_import_requeues_a_dead_key(
+    w: World, pg: Pg, embed_server: EmbedServer
+) -> None:
+    jobs, errors = need("reader.search.jobs"), need("reader.search.errors")
+    owner = w.users["ivan"]
+    missing = jobs.EmbedArgs(owner_id=owner, pack_id="e" * 64, overlay_id="f" * 64)
+    with pytest.raises(errors.IngestNotReady):  # the import that enqueued it rolled back (or has not committed)
+        await run_embed(w, missing)
+    async with _queue(w, pg) as queue:
+        await add_material(w, "ivan", MAT_RU, RU_SPANS)
+        args = await embed_args(w, owner, MAT_RU)
+        assert (await jobs.enqueue_current(queue, args)).kind == "queued"
+        await _kill(w, jobs.job_key(args))  # the key died behind the rolled-back import
+        await jobs.enqueue_current(queue, args)  # the next successful import of the same pack
+        assert await jobs.search_status(queue, owner, MAT_RU) == "queued"
+    assert embed_server.encoder.calls == []
+
+
+async def test_refusals_make_no_embed_call(w: World, embed_server: EmbedServer) -> None:
+    jobs = need("reader.search.jobs")
+    await add_material(w, "ivan", MAT_RU, RU_SPANS)
+    owner = w.users["ivan"]
+    head = await embed_args(w, owner, MAT_RU)
+    wrong = jobs.EmbedArgs(owner_id=owner, pack_id=head.pack_id, overlay_id="f" * 64)
+    assert await _raises(w, wrong) == "overlay_superseded"
+    assert embed_server.encoder.calls == []  # the overlay-id refusal embeds nothing
+    await run_embed(w, head)
+    calls = len(embed_server.encoder.calls)
+    async with w.engine.begin() as conn:
+        await conn.execute(text("UPDATE overlays SET collected_at = now() WHERE overlay_id = :v"),
+                           {"v": head.overlay_id})
+    assert await _raises(w, head) == "overlay_superseded"
+    assert len(embed_server.encoder.calls) == calls and calls > 0  # none after the first build
+
+
+async def test_newest_by_converter_order_where_pack_ids_disagree(w: World) -> None:
+    from ingest.packseed import R2, R3, add_pack
+
+    from reader.ingest import PARSE_CONFIGS, manifest
+    from reader.ingest.artifact import pack_id
+
+    jobs = need("reader.search.jobs")
+    sha = next(s for s in (c * 64 for c in "0123456789cdef")
+               if pack_id(s, dict(PARSE_CONFIGS[R3])) < pack_id(s, dict(PARSE_CONFIGS[R2])))
+    await add_material(w, "ivan", sha, [(1, "Miners validate blocks." + FILL_EN)], config_id=None)
+    owner = w.users["ivan"]
+    async with w.engine.begin() as conn:
+        newer = await add_pack(conn, owner, sha, R3, [(1, "text", "Blocks link by hash." + FILL_EN)])
+        await manifest.remove_material(conn, owner, sha)
+        await conn.execute(text("UPDATE materials SET deleted_at = NULL WHERE owner_id = :o"), {"o": owner})
+        pack = await jobs.buildable_pack(conn, owner, sha)
+    assert pack is not None and pack.pack_id == newer  # R3 wins although its pack id sorts first
+
+
+async def test_sealed_or_collected_current_overlays_are_left_alone(w: World, pg: Pg) -> None:
+    jobs = need("reader.search.jobs")
+    owner = w.users["ivan"]
+    keys = "SELECT count(*) FROM job_keys WHERE kind = 'search.embed'"
+    async with _queue(w, pg) as queue:
+        await add_material(w, "ivan", MAT_RU, RU_SPANS)
+        args = await embed_args(w, owner, MAT_RU)
+        await run_embed(w, args)  # built and sealed without a job: the job status stays none
+        assert await jobs.ensure(queue, owner, MAT_RU) == "ready"
+        assert await scalar(w.engine, keys) == 0
+        async with w.engine.begin() as conn:
+            await conn.execute(text("UPDATE overlays SET collected_at = now() WHERE overlay_id = :v"),
+                               {"v": args.overlay_id})
+        await jobs.on_worker_start(queue)  # the current overlay was collected: skipped although none
+        await jobs.ensure(queue, owner, MAT_RU)
+        assert await scalar(w.engine, keys) == 0

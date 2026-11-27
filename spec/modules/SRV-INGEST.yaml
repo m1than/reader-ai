@@ -551,6 +551,15 @@ requirements:
       no buildable pack (FR-INGEST-31's busy check then has no embed key to find running); `packs.SEARCH_ENSURE`
       is bound to `reader.search.jobs.ensure_material` (restore and profile reconcile enqueue the current key
       through the worker's queue, skipped in the api, which has none). test_ingest_db.py, test_manage_db.py.
+      **Correction (V.kl-search-find, code review of 0eddd7d, 2026-11-28):** the embed key is [owner_id,
+      overlay_id], the same for a rolled-back import and the next successful import of the same pack, so "a later
+      successful import enqueues under its new ingest id" no longer holds. Instead: the embed job raises
+      `IngestNotReady` (transient) while the pack has no committed row, and the import's enqueue goes through
+      `reader.search.jobs.enqueue_current(queue, args)`, which requeues the key when it is dead (the ensure rule),
+      so a key that died behind a rolled-back import runs again with the next successful import. The restore
+      route passes `ensure_material` bound to the api's `Jobs` and calls it after its transaction commits, so a
+      restored material whose key is dead is requeued from the api too (FR-INGEST-39's restore; SRV-SEARCH
+      FR-SEARCH-9). test_search_db.py, test_search_manage.py (SRV-SEARCH).
       The job kind `ingest.import` is declared in `reader.ingest.jobs.KINDS`.
       - **args:** `{material_sha256, converter_version, artifact_id, material_id}`.
       - **key:** `[material_sha256, converter_version]`.

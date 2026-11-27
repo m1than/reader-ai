@@ -1,6 +1,6 @@
 """SRV-SEARCH [db]: a deleted material's chunks leave results and come back with its restore.
 
-@trace FR-SEARCH-20 FR-INGEST-31
+@trace FR-SEARCH-20 FR-INGEST-31 FR-SEARCH-9
 
 The delete and restore go through SRV-INGEST's routes. Before SRV-LESSON's manage migration is merged,
 `courses` lacks the columns the delete reads, so `course_columns` adds them with IF NOT EXISTS (a no-op after
@@ -180,3 +180,47 @@ async def test_find_and_open_leave_a_deleted_material_and_the_restore_serves_it_
         assert (await c.post("/api/materials/book-ru/restore", json={})).status_code == 200
         assert (await c.post("/api/find", json=body)).json()["cards"] == first
         assert (await c.post("/api/open", json={"id": mine[0]})).status_code == 200
+
+
+async def test_the_restore_route_requeues_a_dead_first_pack_key(w: World, pg: Pg) -> None:
+    """Code review of 0eddd7d (blocking 2): the api has no worker; the route passes its own Jobs."""
+    from reader.api.app import create_app
+    from reader.auth.store import _start_session
+    from reader.config import Secret
+    from reader.db import DbTarget
+    from reader.jobs.catalog import Catalog
+    from reader.jobs.queue import Jobs
+    from reader.jobs.worker import make_app
+
+    jobs = need("reader.search.jobs")
+    await course_columns(w)
+    await add_material(w, "ivan", MAT_RU, A_SPANS, config_id="book-ru")  # its first pack, never embedded
+    owner = w.users["ivan"]
+    app = make_app(DbTarget(pg.host, pg.port, pg.user, pg.database, Secret(pg.password)))
+    await app.open_async()
+    try:
+        queue = Jobs(w.engine, app, Catalog(jobs.JOB_KINDS))
+        async with w.engine.connect() as conn:
+            args = await jobs.current_args(conn, owner, MAT_RU)
+        assert args is not None
+        await queue.enqueue(jobs.KIND, args)
+        async with w.engine.begin() as conn:
+            await conn.execute(text("UPDATE job_keys SET outcome = 'dead', attempts = 3 WHERE key = :k"),
+                               {"k": jobs.job_key(args)})
+        async with w.engine.begin() as conn:
+            session = await _start_session(conn, owner, None)
+        api = create_app(w.settings, w.engine, run_cleanup_task=False, jobs=queue)
+        async with httpx.AsyncClient(
+            transport=httpx.ASGITransport(app=api), base_url=ORIGIN, headers={"Origin": ORIGIN},
+            cookies={SESSION_COOKIE: session},
+        ) as c:
+            gone = await c.request("DELETE", "/api/materials/book-ru", json={"confirm": "book-ru"})
+            assert gone.status_code == 200, gone.text
+            back = await c.post("/api/materials/book-ru/restore", json={})
+            assert back.status_code == 200, back.text
+        assert await jobs.search_status(queue, owner, MAT_RU) == "queued"
+        attempts = "SELECT attempts FROM job_keys WHERE key = :k"
+        async with w.engine.connect() as conn:
+            assert (await conn.execute(text(attempts), {"k": jobs.job_key(args)})).scalar() == 0
+    finally:
+        await app.close_async()
