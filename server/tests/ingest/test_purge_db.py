@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 from typing import Any
 
@@ -12,7 +13,7 @@ import pytest
 from sqlalchemy import text
 
 from .conftest import MATERIAL_SHA, Pg, World, client, need, world
-from .test_gc_db import Calls, pack, plan_and_report, rows_of
+from .test_gc_db import Calls, delete, named, pack, plan_and_report, rows_of, waiting
 from .test_manage_db import add_owner
 from .test_overlays_db import activate, vectors
 from .test_seqmap_db import R2, R3, sha_of
@@ -206,6 +207,46 @@ async def test_an_applied_purge_writes_one_audit_row(
                 await kind.handler(kind.args(owner_id=owner, pack_id=pid), conn,
                                    JobContext(job_id=1, key="k", attempts=attempt))
         assert await audit_rows(w) == [(owner, "material", "synthetic", {"pack_id": pid})]
+
+
+async def test_restore_racing_purge_of_the_same_pack(pg: Pg, tmp_path: Path) -> None:
+    manifest = need("reader.ingest.manifest")
+    async with world(pg, tmp_path) as w:
+        owner = w.users["ivan"]
+
+        async def undelete(conn: Any, sha: str) -> None:
+            await conn.execute(text("UPDATE materials SET deleted_at = NULL WHERE sha256 = :s"), {"s": sha})
+            await manifest.restore_material(conn, owner, sha)
+
+        async def restore(sha: str) -> None:
+            async with w.engine.begin() as conn:
+                await undelete(conn, sha)
+
+        first = sha_of("purge first")
+        p1 = await pack(w, first)
+        await activate(w, p1)
+        await delete(w, first)
+        async with w.engine.begin() as conn:  # the purge holds the pack lock first
+            assert await need("reader.ingest.gc").purge(conn, owner, p1, Calls().seams())
+            task = asyncio.create_task(restore(first))
+            await waiting(w)
+        await task
+        assert await named(w, "pack", p1) == 0
+
+        second = sha_of("restore first")
+        p2 = await pack(w, second)
+        await activate(w, p2)
+        await delete(w, second)
+        assert await named(w, "pack", p2) == 0
+        async with w.engine.begin() as conn:  # the restore holds the pack lock first
+            await undelete(conn, second)
+            purging = asyncio.create_task(purge(w, p2, Calls()))
+            await waiting(w)
+        assert await purging is True
+        assert await named(w, "pack", p2) == 0  # the purge appended an entry without it
+        assert await w.scalar("SELECT purged_at IS NOT NULL FROM base_packs WHERE pack_id = :p", p=p2)
+        assert await w.scalar(
+            "SELECT count(*) FROM manifest_entries WHERE reason = 'purge'") == 1
 
 
 async def test_a_dead_purge_is_requeued_by_the_next_request(

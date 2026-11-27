@@ -1913,6 +1913,11 @@ requirements:
       `audit_actions`, FR-EVENTS-30), so it commits or rolls back with the purge; a repeated purge, a 404 and a
       `confirm_mismatch` write none. [db] test_purge_db.py: one row with that id and detail after the job; none after
       the refused requests and none after a second purge.
+      (5) **Races** (two connections, the pack lock of FR-INGEST-46): restore of a deleted material racing the purge
+      of its pack — the purge holding the pack lock first purges it and the restore, which waited on that lock,
+      appends no entry naming it; the restore holding the lock first commits the pack into the head, and the purge,
+      which waited, then appends one entry without it and sets `purged_at`; never a head entry naming a purged
+      pack. [db] test_purge_db.py, with the awaited lock read from `pg_locks`.
       [db] test_purge_db.py (Seams doubles): purge of an active pack → one entry without it; spans, outline,
       overlays and their rows gone, forget_pack, judge_inputs and judge_requests seams called with the pack id;
       purge of a migrated r2 pack calls search forget_legacy once with its ingest id; ingests and base_packs rows
