@@ -1,0 +1,1946 @@
+{
+ "spike": "tutor-find-m1",
+ "model_calls": 0,
+ "usd": 0,
+ "artifact": {
+  "material_sha256": "61e8d4c390ba63c3f13efe0860d5042f8d1b19ba8f26b4f2e14e73478bc9e2b2",
+  "converter_version": "docling-2.151.1+r2",
+  "span_count": 9463,
+  "outline_count": 494,
+  "spans_sha256": "8b1b3db99e61c737bca2d36201273bb7678792373d4c1707c8e57e70bb44d445"
+ },
+ "index": {
+  "windows": 9316,
+  "seed_s": 4,
+  "embed_job_s": 10,
+  "embed_model": "BAAI/bge-m3@5617a9f61b028005a4858fdac845db406aefb181"
+ },
+ "policy_version": "1812a08b7e003379c56083001a232a5f16d9f1f72562270a51261529abe91dd8",
+ "budget": 10500,
+ "prompt_bytes_max": 29000,
+ "summary": {
+  "a": {
+   "gold_in_sources": 21,
+   "sources_mean": 8,
+   "source_bytes_mean": 3214,
+   "prompt_bytes_max": 8517,
+   "gold_spans_mean": 1.15,
+   "gold_bytes_mean": 567
+  },
+  "b": {
+   "gold_in_sources": 28,
+   "sources_mean": 25.4,
+   "source_bytes_mean": 3723,
+   "prompt_bytes_max": 9816,
+   "gold_spans_mean": 1.65,
+   "gold_bytes_mean": 385
+  },
+  "c": {
+   "gold_in_sources": 28,
+   "sources_mean": 49.2,
+   "source_bytes_mean": 12804,
+   "prompt_bytes_max": 21306,
+   "gold_spans_mean": 2.92,
+   "gold_bytes_mean": 922
+  },
+  "d": {
+   "gold_in_sources": 28,
+   "sources_mean": 71.7,
+   "source_bytes_mean": 20564,
+   "prompt_bytes_max": 28836,
+   "gold_spans_mean": 4.05,
+   "gold_bytes_mean": 1263
+  },
+  "find": {
+   "gold_in_find": 28,
+   "l1_cards_mean": 25.4,
+   "l1_card_cost_mean_tokens": 400.6,
+   "ms_p50": 47,
+   "degraded": 0
+  },
+  "build_threshold_met": true,
+  "p1_threshold_met": false
+ },
+ "questions": [
+  {
+   "id": "v01",
+   "a": {
+    "hits": 8,
+    "degraded": false,
+    "sources": 8,
+    "source_bytes": 3996,
+    "gold_in_sources": false,
+    "gold_spans": 0,
+    "gold_bytes": 0,
+    "prompt_bytes": 4602
+   },
+   "find": {
+    "cards": 23,
+    "l1_cards": 23,
+    "ms": 56,
+    "degraded": false,
+    "gold_in_find": true
+   },
+   "b": {
+    "candidates": 23,
+    "sources": 23,
+    "source_bytes": 7642,
+    "gold_in_sources": true,
+    "gold_spans": 2,
+    "gold_bytes": 747,
+    "prompt_bytes": 8843
+   },
+   "c": {
+    "candidates": 45,
+    "sources": 45,
+    "source_bytes": 18877,
+    "gold_in_sources": true,
+    "gold_spans": 4,
+    "gold_bytes": 1317,
+    "prompt_bytes": 20953
+   },
+   "d": {
+    "candidates": 66,
+    "sources": 62,
+    "source_bytes": 26084,
+    "gold_in_sources": true,
+    "gold_spans": 5,
+    "gold_bytes": 1375,
+    "prompt_bytes": 28836
+   }
+  },
+  {
+   "id": "v02",
+   "a": {
+    "hits": 8,
+    "degraded": false,
+    "sources": 8,
+    "source_bytes": 4083,
+    "gold_in_sources": true,
+    "gold_spans": 3,
+    "gold_bytes": 765,
+    "prompt_bytes": 4619
+   },
+   "find": {
+    "cards": 26,
+    "l1_cards": 26,
+    "ms": 47,
+    "degraded": false,
+    "gold_in_find": true
+   },
+   "b": {
+    "candidates": 26,
+    "sources": 26,
+    "source_bytes": 2594,
+    "gold_in_sources": true,
+    "gold_spans": 8,
+    "gold_bytes": 1322,
+    "prompt_bytes": 3842
+   },
+   "c": {
+    "candidates": 50,
+    "sources": 50,
+    "source_bytes": 11352,
+    "gold_in_sources": true,
+    "gold_spans": 14,
+    "gold_bytes": 2630,
+    "prompt_bytes": 13549
+   },
+   "d": {
+    "candidates": 70,
+    "sources": 70,
+    "source_bytes": 17218,
+    "gold_in_sources": true,
+    "gold_spans": 18,
+    "gold_bytes": 3769,
+    "prompt_bytes": 20207
+   }
+  },
+  {
+   "id": "v04",
+   "a": {
+    "hits": 8,
+    "degraded": false,
+    "sources": 8,
+    "source_bytes": 4764,
+    "gold_in_sources": true,
+    "gold_spans": 1,
+    "gold_bytes": 231,
+    "prompt_bytes": 5378
+   },
+   "find": {
+    "cards": 24,
+    "l1_cards": 24,
+    "ms": 48,
+    "degraded": false,
+    "gold_in_find": true
+   },
+   "b": {
+    "candidates": 24,
+    "sources": 24,
+    "source_bytes": 4391,
+    "gold_in_sources": true,
+    "gold_spans": 1,
+    "gold_bytes": 231,
+    "prompt_bytes": 5641
+   },
+   "c": {
+    "candidates": 48,
+    "sources": 48,
+    "source_bytes": 11145,
+    "gold_in_sources": true,
+    "gold_spans": 2,
+    "gold_bytes": 278,
+    "prompt_bytes": 13350
+   },
+   "d": {
+    "candidates": 72,
+    "sources": 72,
+    "source_bytes": 22011,
+    "gold_in_sources": true,
+    "gold_spans": 3,
+    "gold_bytes": 791,
+    "prompt_bytes": 25171
+   }
+  },
+  {
+   "id": "v05",
+   "a": {
+    "hits": 8,
+    "degraded": false,
+    "sources": 8,
+    "source_bytes": 2312,
+    "gold_in_sources": false,
+    "gold_spans": 0,
+    "gold_bytes": 0,
+    "prompt_bytes": 2896
+   },
+   "find": {
+    "cards": 27,
+    "l1_cards": 27,
+    "ms": 46,
+    "degraded": false,
+    "gold_in_find": false
+   },
+   "b": {
+    "candidates": 27,
+    "sources": 27,
+    "source_bytes": 1970,
+    "gold_in_sources": false,
+    "gold_spans": 0,
+    "gold_bytes": 0,
+    "prompt_bytes": 3312
+   },
+   "c": {
+    "candidates": 54,
+    "sources": 54,
+    "source_bytes": 16851,
+    "gold_in_sources": false,
+    "gold_spans": 0,
+    "gold_bytes": 0,
+    "prompt_bytes": 19271
+   },
+   "d": {
+    "candidates": 80,
+    "sources": 80,
+    "source_bytes": 24540,
+    "gold_in_sources": false,
+    "gold_spans": 0,
+    "gold_bytes": 0,
+    "prompt_bytes": 27998
+   }
+  },
+  {
+   "id": "v06",
+   "a": {
+    "hits": 8,
+    "degraded": false,
+    "sources": 8,
+    "source_bytes": 1905,
+    "gold_in_sources": true,
+    "gold_spans": 4,
+    "gold_bytes": 1383,
+    "prompt_bytes": 2500
+   },
+   "find": {
+    "cards": 26,
+    "l1_cards": 26,
+    "ms": 46,
+    "degraded": false,
+    "gold_in_find": true
+   },
+   "b": {
+    "candidates": 26,
+    "sources": 26,
+    "source_bytes": 3085,
+    "gold_in_sources": true,
+    "gold_spans": 5,
+    "gold_bytes": 1557,
+    "prompt_bytes": 4397
+   },
+   "c": {
+    "candidates": 44,
+    "sources": 44,
+    "source_bytes": 8589,
+    "gold_in_sources": true,
+    "gold_spans": 8,
+    "gold_bytes": 2781,
+    "prompt_bytes": 10620
+   },
+   "d": {
+    "candidates": 62,
+    "sources": 62,
+    "source_bytes": 13340,
+    "gold_in_sources": true,
+    "gold_spans": 10,
+    "gold_bytes": 3594,
+    "prompt_bytes": 16104
+   }
+  },
+  {
+   "id": "v07",
+   "a": {
+    "hits": 8,
+    "degraded": false,
+    "sources": 8,
+    "source_bytes": 3650,
+    "gold_in_sources": true,
+    "gold_spans": 3,
+    "gold_bytes": 2528,
+    "prompt_bytes": 4206
+   },
+   "find": {
+    "cards": 26,
+    "l1_cards": 26,
+    "ms": 46,
+    "degraded": false,
+    "gold_in_find": true
+   },
+   "b": {
+    "candidates": 26,
+    "sources": 26,
+    "source_bytes": 2856,
+    "gold_in_sources": true,
+    "gold_spans": 1,
+    "gold_bytes": 348,
+    "prompt_bytes": 4129
+   },
+   "c": {
+    "candidates": 52,
+    "sources": 52,
+    "source_bytes": 9102,
+    "gold_in_sources": true,
+    "gold_spans": 2,
+    "gold_bytes": 348,
+    "prompt_bytes": 11414
+   },
+   "d": {
+    "candidates": 78,
+    "sources": 78,
+    "source_bytes": 18906,
+    "gold_in_sources": true,
+    "gold_spans": 3,
+    "gold_bytes": 374,
+    "prompt_bytes": 22260
+   }
+  },
+  {
+   "id": "v08",
+   "a": {
+    "hits": 8,
+    "degraded": false,
+    "sources": 8,
+    "source_bytes": 865,
+    "gold_in_sources": true,
+    "gold_spans": 2,
+    "gold_bytes": 349,
+    "prompt_bytes": 1463
+   },
+   "find": {
+    "cards": 25,
+    "l1_cards": 25,
+    "ms": 46,
+    "degraded": false,
+    "gold_in_find": true
+   },
+   "b": {
+    "candidates": 25,
+    "sources": 25,
+    "source_bytes": 3761,
+    "gold_in_sources": true,
+    "gold_spans": 2,
+    "gold_bytes": 349,
+    "prompt_bytes": 5037
+   },
+   "c": {
+    "candidates": 48,
+    "sources": 48,
+    "source_bytes": 14704,
+    "gold_in_sources": true,
+    "gold_spans": 4,
+    "gold_bytes": 1692,
+    "prompt_bytes": 16899
+   },
+   "d": {
+    "candidates": 71,
+    "sources": 71,
+    "source_bytes": 21744,
+    "gold_in_sources": true,
+    "gold_spans": 6,
+    "gold_bytes": 2599,
+    "prompt_bytes": 24858
+   }
+  },
+  {
+   "id": "v09",
+   "a": {
+    "hits": 8,
+    "degraded": false,
+    "sources": 8,
+    "source_bytes": 6242,
+    "gold_in_sources": false,
+    "gold_spans": 0,
+    "gold_bytes": 0,
+    "prompt_bytes": 6829
+   },
+   "find": {
+    "cards": 23,
+    "l1_cards": 23,
+    "ms": 46,
+    "degraded": false,
+    "gold_in_find": true
+   },
+   "b": {
+    "candidates": 23,
+    "sources": 23,
+    "source_bytes": 6946,
+    "gold_in_sources": true,
+    "gold_spans": 1,
+    "gold_bytes": 420,
+    "prompt_bytes": 8129
+   },
+   "c": {
+    "candidates": 43,
+    "sources": 43,
+    "source_bytes": 14589,
+    "gold_in_sources": true,
+    "gold_spans": 2,
+    "gold_bytes": 591,
+    "prompt_bytes": 16569
+   },
+   "d": {
+    "candidates": 61,
+    "sources": 61,
+    "source_bytes": 21729,
+    "gold_in_sources": true,
+    "gold_spans": 3,
+    "gold_bytes": 914,
+    "prompt_bytes": 24445
+   }
+  },
+  {
+   "id": "v10",
+   "a": {
+    "hits": 8,
+    "degraded": false,
+    "sources": 8,
+    "source_bytes": 2614,
+    "gold_in_sources": true,
+    "gold_spans": 2,
+    "gold_bytes": 696,
+    "prompt_bytes": 3203
+   },
+   "find": {
+    "cards": 25,
+    "l1_cards": 25,
+    "ms": 47,
+    "degraded": false,
+    "gold_in_find": true
+   },
+   "b": {
+    "candidates": 25,
+    "sources": 25,
+    "source_bytes": 4404,
+    "gold_in_sources": true,
+    "gold_spans": 2,
+    "gold_bytes": 696,
+    "prompt_bytes": 5669
+   },
+   "c": {
+    "candidates": 49,
+    "sources": 49,
+    "source_bytes": 10354,
+    "gold_in_sources": true,
+    "gold_spans": 4,
+    "gold_bytes": 1391,
+    "prompt_bytes": 12575
+   },
+   "d": {
+    "candidates": 72,
+    "sources": 72,
+    "source_bytes": 16309,
+    "gold_in_sources": true,
+    "gold_spans": 5,
+    "gold_bytes": 1428,
+    "prompt_bytes": 19452
+   }
+  },
+  {
+   "id": "v11",
+   "a": {
+    "hits": 8,
+    "degraded": false,
+    "sources": 8,
+    "source_bytes": 2813,
+    "gold_in_sources": false,
+    "gold_spans": 0,
+    "gold_bytes": 0,
+    "prompt_bytes": 3379
+   },
+   "find": {
+    "cards": 27,
+    "l1_cards": 27,
+    "ms": 77,
+    "degraded": false,
+    "gold_in_find": true
+   },
+   "b": {
+    "candidates": 27,
+    "sources": 27,
+    "source_bytes": 2145,
+    "gold_in_sources": true,
+    "gold_spans": 1,
+    "gold_bytes": 134,
+    "prompt_bytes": 3469
+   },
+   "c": {
+    "candidates": 54,
+    "sources": 54,
+    "source_bytes": 9156,
+    "gold_in_sources": true,
+    "gold_spans": 2,
+    "gold_bytes": 228,
+    "prompt_bytes": 11563
+   },
+   "d": {
+    "candidates": 80,
+    "sources": 80,
+    "source_bytes": 18283,
+    "gold_in_sources": true,
+    "gold_spans": 3,
+    "gold_bytes": 370,
+    "prompt_bytes": 21728
+   }
+  },
+  {
+   "id": "v12",
+   "a": {
+    "hits": 8,
+    "degraded": false,
+    "sources": 8,
+    "source_bytes": 1346,
+    "gold_in_sources": false,
+    "gold_spans": 0,
+    "gold_bytes": 0,
+    "prompt_bytes": 1883
+   },
+   "find": {
+    "cards": 25,
+    "l1_cards": 25,
+    "ms": 47,
+    "degraded": false,
+    "gold_in_find": false
+   },
+   "b": {
+    "candidates": 25,
+    "sources": 25,
+    "source_bytes": 3811,
+    "gold_in_sources": false,
+    "gold_spans": 0,
+    "gold_bytes": 0,
+    "prompt_bytes": 5027
+   },
+   "c": {
+    "candidates": 48,
+    "sources": 48,
+    "source_bytes": 11460,
+    "gold_in_sources": false,
+    "gold_spans": 0,
+    "gold_bytes": 0,
+    "prompt_bytes": 13594
+   },
+   "d": {
+    "candidates": 71,
+    "sources": 71,
+    "source_bytes": 19354,
+    "gold_in_sources": false,
+    "gold_spans": 0,
+    "gold_bytes": 0,
+    "prompt_bytes": 22406
+   }
+  },
+  {
+   "id": "v13",
+   "a": {
+    "hits": 8,
+    "degraded": false,
+    "sources": 8,
+    "source_bytes": 2035,
+    "gold_in_sources": false,
+    "gold_spans": 0,
+    "gold_bytes": 0,
+    "prompt_bytes": 2631
+   },
+   "find": {
+    "cards": 24,
+    "l1_cards": 24,
+    "ms": 47,
+    "degraded": false,
+    "gold_in_find": true
+   },
+   "b": {
+    "candidates": 24,
+    "sources": 24,
+    "source_bytes": 5787,
+    "gold_in_sources": true,
+    "gold_spans": 1,
+    "gold_bytes": 527,
+    "prompt_bytes": 7022
+   },
+   "c": {
+    "candidates": 47,
+    "sources": 47,
+    "source_bytes": 15485,
+    "gold_in_sources": true,
+    "gold_spans": 2,
+    "gold_bytes": 801,
+    "prompt_bytes": 17640
+   },
+   "d": {
+    "candidates": 70,
+    "sources": 70,
+    "source_bytes": 19571,
+    "gold_in_sources": true,
+    "gold_spans": 3,
+    "gold_bytes": 808,
+    "prompt_bytes": 22646
+   }
+  },
+  {
+   "id": "v14",
+   "a": {
+    "hits": 8,
+    "degraded": false,
+    "sources": 8,
+    "source_bytes": 516,
+    "gold_in_sources": true,
+    "gold_spans": 1,
+    "gold_bytes": 46,
+    "prompt_bytes": 1073
+   },
+   "find": {
+    "cards": 27,
+    "l1_cards": 27,
+    "ms": 46,
+    "degraded": false,
+    "gold_in_find": true
+   },
+   "b": {
+    "candidates": 27,
+    "sources": 27,
+    "source_bytes": 1622,
+    "gold_in_sources": true,
+    "gold_spans": 1,
+    "gold_bytes": 46,
+    "prompt_bytes": 2937
+   },
+   "c": {
+    "candidates": 53,
+    "sources": 53,
+    "source_bytes": 12522,
+    "gold_in_sources": true,
+    "gold_spans": 2,
+    "gold_bytes": 1007,
+    "prompt_bytes": 14879
+   },
+   "d": {
+    "candidates": 78,
+    "sources": 78,
+    "source_bytes": 19532,
+    "gold_in_sources": true,
+    "gold_spans": 3,
+    "gold_bytes": 1472,
+    "prompt_bytes": 22888
+   }
+  },
+  {
+   "id": "v15",
+   "a": {
+    "hits": 8,
+    "degraded": false,
+    "sources": 8,
+    "source_bytes": 6953,
+    "gold_in_sources": false,
+    "gold_spans": 0,
+    "gold_bytes": 0,
+    "prompt_bytes": 7552
+   },
+   "find": {
+    "cards": 23,
+    "l1_cards": 23,
+    "ms": 46,
+    "degraded": false,
+    "gold_in_find": false
+   },
+   "b": {
+    "candidates": 23,
+    "sources": 23,
+    "source_bytes": 5858,
+    "gold_in_sources": false,
+    "gold_spans": 0,
+    "gold_bytes": 0,
+    "prompt_bytes": 7056
+   },
+   "c": {
+    "candidates": 45,
+    "sources": 45,
+    "source_bytes": 17041,
+    "gold_in_sources": false,
+    "gold_spans": 0,
+    "gold_bytes": 0,
+    "prompt_bytes": 19119
+   },
+   "d": {
+    "candidates": 66,
+    "sources": 66,
+    "source_bytes": 24559,
+    "gold_in_sources": false,
+    "gold_spans": 0,
+    "gold_bytes": 0,
+    "prompt_bytes": 27477
+   }
+  },
+  {
+   "id": "v16",
+   "a": {
+    "hits": 8,
+    "degraded": false,
+    "sources": 8,
+    "source_bytes": 1955,
+    "gold_in_sources": false,
+    "gold_spans": 0,
+    "gold_bytes": 0,
+    "prompt_bytes": 2543
+   },
+   "find": {
+    "cards": 27,
+    "l1_cards": 27,
+    "ms": 58,
+    "degraded": false,
+    "gold_in_find": true
+   },
+   "b": {
+    "candidates": 27,
+    "sources": 27,
+    "source_bytes": 2601,
+    "gold_in_sources": true,
+    "gold_spans": 2,
+    "gold_bytes": 181,
+    "prompt_bytes": 3943
+   },
+   "c": {
+    "candidates": 51,
+    "sources": 51,
+    "source_bytes": 11012,
+    "gold_in_sources": true,
+    "gold_spans": 3,
+    "gold_bytes": 267,
+    "prompt_bytes": 13314
+   },
+   "d": {
+    "candidates": 75,
+    "sources": 75,
+    "source_bytes": 16581,
+    "gold_in_sources": true,
+    "gold_spans": 4,
+    "gold_bytes": 312,
+    "prompt_bytes": 19843
+   }
+  },
+  {
+   "id": "v17",
+   "a": {
+    "hits": 8,
+    "degraded": false,
+    "sources": 8,
+    "source_bytes": 6439,
+    "gold_in_sources": false,
+    "gold_spans": 0,
+    "gold_bytes": 0,
+    "prompt_bytes": 7026
+   },
+   "find": {
+    "cards": 22,
+    "l1_cards": 22,
+    "ms": 49,
+    "degraded": false,
+    "gold_in_find": true
+   },
+   "b": {
+    "candidates": 22,
+    "sources": 22,
+    "source_bytes": 8669,
+    "gold_in_sources": true,
+    "gold_spans": 1,
+    "gold_bytes": 561,
+    "prompt_bytes": 9816
+   },
+   "c": {
+    "candidates": 43,
+    "sources": 43,
+    "source_bytes": 15437,
+    "gold_in_sources": true,
+    "gold_spans": 2,
+    "gold_bytes": 736,
+    "prompt_bytes": 17425
+   },
+   "d": {
+    "candidates": 63,
+    "sources": 63,
+    "source_bytes": 25819,
+    "gold_in_sources": true,
+    "gold_spans": 3,
+    "gold_bytes": 1343,
+    "prompt_bytes": 28607
+   }
+  },
+  {
+   "id": "v18",
+   "a": {
+    "hits": 8,
+    "degraded": false,
+    "sources": 8,
+    "source_bytes": 747,
+    "gold_in_sources": true,
+    "gold_spans": 3,
+    "gold_bytes": 374,
+    "prompt_bytes": 1284
+   },
+   "find": {
+    "cards": 26,
+    "l1_cards": 26,
+    "ms": 46,
+    "degraded": false,
+    "gold_in_find": true
+   },
+   "b": {
+    "candidates": 26,
+    "sources": 26,
+    "source_bytes": 2437,
+    "gold_in_sources": true,
+    "gold_spans": 5,
+    "gold_bytes": 837,
+    "prompt_bytes": 3692
+   },
+   "c": {
+    "candidates": 48,
+    "sources": 48,
+    "source_bytes": 8401,
+    "gold_in_sources": true,
+    "gold_spans": 8,
+    "gold_bytes": 1090,
+    "prompt_bytes": 10538
+   },
+   "d": {
+    "candidates": 69,
+    "sources": 69,
+    "source_bytes": 16400,
+    "gold_in_sources": true,
+    "gold_spans": 11,
+    "gold_bytes": 1631,
+    "prompt_bytes": 19376
+   }
+  },
+  {
+   "id": "v19",
+   "a": {
+    "hits": 8,
+    "degraded": false,
+    "sources": 8,
+    "source_bytes": 1835,
+    "gold_in_sources": true,
+    "gold_spans": 1,
+    "gold_bytes": 216,
+    "prompt_bytes": 2362
+   },
+   "find": {
+    "cards": 26,
+    "l1_cards": 26,
+    "ms": 48,
+    "degraded": false,
+    "gold_in_find": true
+   },
+   "b": {
+    "candidates": 26,
+    "sources": 26,
+    "source_bytes": 2649,
+    "gold_in_sources": true,
+    "gold_spans": 2,
+    "gold_bytes": 442,
+    "prompt_bytes": 3894
+   },
+   "c": {
+    "candidates": 50,
+    "sources": 50,
+    "source_bytes": 11753,
+    "gold_in_sources": true,
+    "gold_spans": 3,
+    "gold_bytes": 740,
+    "prompt_bytes": 13956
+   },
+   "d": {
+    "candidates": 74,
+    "sources": 74,
+    "source_bytes": 18580,
+    "gold_in_sources": true,
+    "gold_spans": 4,
+    "gold_bytes": 1675,
+    "prompt_bytes": 21741
+   }
+  },
+  {
+   "id": "v20",
+   "a": {
+    "hits": 8,
+    "degraded": false,
+    "sources": 8,
+    "source_bytes": 3946,
+    "gold_in_sources": false,
+    "gold_spans": 0,
+    "gold_bytes": 0,
+    "prompt_bytes": 4598
+   },
+   "find": {
+    "cards": 23,
+    "l1_cards": 23,
+    "ms": 46,
+    "degraded": false,
+    "gold_in_find": true
+   },
+   "b": {
+    "candidates": 23,
+    "sources": 23,
+    "source_bytes": 5614,
+    "gold_in_sources": true,
+    "gold_spans": 4,
+    "gold_bytes": 972,
+    "prompt_bytes": 6864
+   },
+   "c": {
+    "candidates": 43,
+    "sources": 43,
+    "source_bytes": 12363,
+    "gold_in_sources": true,
+    "gold_spans": 7,
+    "gold_bytes": 1655,
+    "prompt_bytes": 14412
+   },
+   "d": {
+    "candidates": 63,
+    "sources": 63,
+    "source_bytes": 20349,
+    "gold_in_sources": true,
+    "gold_spans": 10,
+    "gold_bytes": 2853,
+    "prompt_bytes": 23197
+   }
+  },
+  {
+   "id": "v21",
+   "a": {
+    "hits": 8,
+    "degraded": false,
+    "sources": 8,
+    "source_bytes": 1573,
+    "gold_in_sources": false,
+    "gold_spans": 0,
+    "gold_bytes": 0,
+    "prompt_bytes": 2102
+   },
+   "find": {
+    "cards": 25,
+    "l1_cards": 25,
+    "ms": 46,
+    "degraded": false,
+    "gold_in_find": false
+   },
+   "b": {
+    "candidates": 25,
+    "sources": 25,
+    "source_bytes": 2598,
+    "gold_in_sources": false,
+    "gold_spans": 0,
+    "gold_bytes": 0,
+    "prompt_bytes": 3806
+   },
+   "c": {
+    "candidates": 50,
+    "sources": 50,
+    "source_bytes": 7429,
+    "gold_in_sources": false,
+    "gold_spans": 0,
+    "gold_bytes": 0,
+    "prompt_bytes": 9713
+   },
+   "d": {
+    "candidates": 71,
+    "sources": 71,
+    "source_bytes": 13534,
+    "gold_in_sources": false,
+    "gold_spans": 0,
+    "gold_bytes": 0,
+    "prompt_bytes": 16676
+   }
+  },
+  {
+   "id": "v22",
+   "a": {
+    "hits": 8,
+    "degraded": false,
+    "sources": 8,
+    "source_bytes": 2720,
+    "gold_in_sources": true,
+    "gold_spans": 1,
+    "gold_bytes": 1197,
+    "prompt_bytes": 3308
+   },
+   "find": {
+    "cards": 26,
+    "l1_cards": 26,
+    "ms": 76,
+    "degraded": false,
+    "gold_in_find": false
+   },
+   "b": {
+    "candidates": 26,
+    "sources": 26,
+    "source_bytes": 3957,
+    "gold_in_sources": false,
+    "gold_spans": 0,
+    "gold_bytes": 0,
+    "prompt_bytes": 5262
+   },
+   "c": {
+    "candidates": 52,
+    "sources": 52,
+    "source_bytes": 15389,
+    "gold_in_sources": false,
+    "gold_spans": 0,
+    "gold_bytes": 0,
+    "prompt_bytes": 17732
+   },
+   "d": {
+    "candidates": 78,
+    "sources": 78,
+    "source_bytes": 21300,
+    "gold_in_sources": false,
+    "gold_spans": 0,
+    "gold_bytes": 0,
+    "prompt_bytes": 24681
+   }
+  },
+  {
+   "id": "v23",
+   "a": {
+    "hits": 8,
+    "degraded": false,
+    "sources": 8,
+    "source_bytes": 1717,
+    "gold_in_sources": true,
+    "gold_spans": 1,
+    "gold_bytes": 164,
+    "prompt_bytes": 2264
+   },
+   "find": {
+    "cards": 26,
+    "l1_cards": 26,
+    "ms": 45,
+    "degraded": false,
+    "gold_in_find": true
+   },
+   "b": {
+    "candidates": 26,
+    "sources": 26,
+    "source_bytes": 2912,
+    "gold_in_sources": true,
+    "gold_spans": 1,
+    "gold_bytes": 164,
+    "prompt_bytes": 4174
+   },
+   "c": {
+    "candidates": 50,
+    "sources": 50,
+    "source_bytes": 12194,
+    "gold_in_sources": true,
+    "gold_spans": 2,
+    "gold_bytes": 978,
+    "prompt_bytes": 14417
+   },
+   "d": {
+    "candidates": 74,
+    "sources": 74,
+    "source_bytes": 21895,
+    "gold_in_sources": true,
+    "gold_spans": 3,
+    "gold_bytes": 1297,
+    "prompt_bytes": 25076
+   }
+  },
+  {
+   "id": "v24",
+   "a": {
+    "hits": 8,
+    "degraded": false,
+    "sources": 8,
+    "source_bytes": 5181,
+    "gold_in_sources": false,
+    "gold_spans": 0,
+    "gold_bytes": 0,
+    "prompt_bytes": 5741
+   },
+   "find": {
+    "cards": 24,
+    "l1_cards": 24,
+    "ms": 46,
+    "degraded": false,
+    "gold_in_find": true
+   },
+   "b": {
+    "candidates": 24,
+    "sources": 24,
+    "source_bytes": 6166,
+    "gold_in_sources": true,
+    "gold_spans": 1,
+    "gold_bytes": 255,
+    "prompt_bytes": 7364
+   },
+   "c": {
+    "candidates": 46,
+    "sources": 46,
+    "source_bytes": 15592,
+    "gold_in_sources": true,
+    "gold_spans": 2,
+    "gold_bytes": 479,
+    "prompt_bytes": 17664
+   },
+   "d": {
+    "candidates": 66,
+    "sources": 66,
+    "source_bytes": 24142,
+    "gold_in_sources": true,
+    "gold_spans": 5,
+    "gold_bytes": 1263,
+    "prompt_bytes": 27009
+   }
+  },
+  {
+   "id": "v25",
+   "a": {
+    "hits": 8,
+    "degraded": false,
+    "sources": 8,
+    "source_bytes": 4522,
+    "gold_in_sources": true,
+    "gold_spans": 2,
+    "gold_bytes": 1390,
+    "prompt_bytes": 5072
+   },
+   "find": {
+    "cards": 27,
+    "l1_cards": 27,
+    "ms": 47,
+    "degraded": false,
+    "gold_in_find": true
+   },
+   "b": {
+    "candidates": 27,
+    "sources": 27,
+    "source_bytes": 2058,
+    "gold_in_sources": true,
+    "gold_spans": 1,
+    "gold_bytes": 91,
+    "prompt_bytes": 3364
+   },
+   "c": {
+    "candidates": 54,
+    "sources": 54,
+    "source_bytes": 16606,
+    "gold_in_sources": true,
+    "gold_spans": 2,
+    "gold_bytes": 666,
+    "prompt_bytes": 18989
+   },
+   "d": {
+    "candidates": 81,
+    "sources": 78,
+    "source_bytes": 25351,
+    "gold_in_sources": true,
+    "gold_spans": 3,
+    "gold_bytes": 666,
+    "prompt_bytes": 28692
+   }
+  },
+  {
+   "id": "v26",
+   "a": {
+    "hits": 8,
+    "degraded": false,
+    "sources": 8,
+    "source_bytes": 1190,
+    "gold_in_sources": false,
+    "gold_spans": 0,
+    "gold_bytes": 0,
+    "prompt_bytes": 1765
+   },
+   "find": {
+    "cards": 27,
+    "l1_cards": 27,
+    "ms": 52,
+    "degraded": false,
+    "gold_in_find": false
+   },
+   "b": {
+    "candidates": 27,
+    "sources": 27,
+    "source_bytes": 1676,
+    "gold_in_sources": false,
+    "gold_spans": 0,
+    "gold_bytes": 0,
+    "prompt_bytes": 3008
+   },
+   "c": {
+    "candidates": 53,
+    "sources": 53,
+    "source_bytes": 14223,
+    "gold_in_sources": false,
+    "gold_spans": 0,
+    "gold_bytes": 0,
+    "prompt_bytes": 16593
+   },
+   "d": {
+    "candidates": 78,
+    "sources": 78,
+    "source_bytes": 23122,
+    "gold_in_sources": false,
+    "gold_spans": 0,
+    "gold_bytes": 0,
+    "prompt_bytes": 26490
+   }
+  },
+  {
+   "id": "v27",
+   "a": {
+    "hits": 8,
+    "degraded": false,
+    "sources": 8,
+    "source_bytes": 7946,
+    "gold_in_sources": true,
+    "gold_spans": 2,
+    "gold_bytes": 1492,
+    "prompt_bytes": 8517
+   },
+   "find": {
+    "cards": 22,
+    "l1_cards": 22,
+    "ms": 52,
+    "degraded": false,
+    "gold_in_find": true
+   },
+   "b": {
+    "candidates": 22,
+    "sources": 22,
+    "source_bytes": 7197,
+    "gold_in_sources": true,
+    "gold_spans": 2,
+    "gold_bytes": 976,
+    "prompt_bytes": 8327
+   },
+   "c": {
+    "candidates": 44,
+    "sources": 44,
+    "source_bytes": 19297,
+    "gold_in_sources": true,
+    "gold_spans": 4,
+    "gold_bytes": 2112,
+    "prompt_bytes": 21306
+   },
+   "d": {
+    "candidates": 65,
+    "sources": 58,
+    "source_bytes": 26242,
+    "gold_in_sources": true,
+    "gold_spans": 6,
+    "gold_bytes": 2919,
+    "prompt_bytes": 28810
+   }
+  },
+  {
+   "id": "v28",
+   "a": {
+    "hits": 8,
+    "degraded": false,
+    "sources": 8,
+    "source_bytes": 404,
+    "gold_in_sources": false,
+    "gold_spans": 0,
+    "gold_bytes": 0,
+    "prompt_bytes": 1002
+   },
+   "find": {
+    "cards": 27,
+    "l1_cards": 27,
+    "ms": 53,
+    "degraded": false,
+    "gold_in_find": true
+   },
+   "b": {
+    "candidates": 27,
+    "sources": 27,
+    "source_bytes": 1534,
+    "gold_in_sources": true,
+    "gold_spans": 1,
+    "gold_bytes": 43,
+    "prompt_bytes": 2890
+   },
+   "c": {
+    "candidates": 53,
+    "sources": 53,
+    "source_bytes": 9467,
+    "gold_in_sources": true,
+    "gold_spans": 2,
+    "gold_bytes": 826,
+    "prompt_bytes": 11862
+   },
+   "d": {
+    "candidates": 79,
+    "sources": 79,
+    "source_bytes": 15633,
+    "gold_in_sources": true,
+    "gold_spans": 3,
+    "gold_bytes": 966,
+    "prompt_bytes": 19067
+   }
+  },
+  {
+   "id": "v29",
+   "a": {
+    "hits": 8,
+    "degraded": false,
+    "sources": 8,
+    "source_bytes": 496,
+    "gold_in_sources": false,
+    "gold_spans": 0,
+    "gold_bytes": 0,
+    "prompt_bytes": 1078
+   },
+   "find": {
+    "cards": 28,
+    "l1_cards": 28,
+    "ms": 49,
+    "degraded": false,
+    "gold_in_find": false
+   },
+   "b": {
+    "candidates": 28,
+    "sources": 28,
+    "source_bytes": 1275,
+    "gold_in_sources": false,
+    "gold_spans": 0,
+    "gold_bytes": 0,
+    "prompt_bytes": 2656
+   },
+   "c": {
+    "candidates": 56,
+    "sources": 56,
+    "source_bytes": 13394,
+    "gold_in_sources": false,
+    "gold_spans": 0,
+    "gold_bytes": 0,
+    "prompt_bytes": 15894
+   },
+   "d": {
+    "candidates": 83,
+    "sources": 83,
+    "source_bytes": 23634,
+    "gold_in_sources": false,
+    "gold_spans": 0,
+    "gold_bytes": 0,
+    "prompt_bytes": 27217
+   }
+  },
+  {
+   "id": "v30",
+   "a": {
+    "hits": 8,
+    "degraded": false,
+    "sources": 8,
+    "source_bytes": 2707,
+    "gold_in_sources": true,
+    "gold_spans": 1,
+    "gold_bytes": 1122,
+    "prompt_bytes": 3321
+   },
+   "find": {
+    "cards": 26,
+    "l1_cards": 26,
+    "ms": 47,
+    "degraded": false,
+    "gold_in_find": false
+   },
+   "b": {
+    "candidates": 26,
+    "sources": 26,
+    "source_bytes": 3620,
+    "gold_in_sources": false,
+    "gold_spans": 0,
+    "gold_bytes": 0,
+    "prompt_bytes": 4952
+   },
+   "c": {
+    "candidates": 52,
+    "sources": 52,
+    "source_bytes": 11282,
+    "gold_in_sources": false,
+    "gold_spans": 0,
+    "gold_bytes": 0,
+    "prompt_bytes": 13653
+   },
+   "d": {
+    "candidates": 77,
+    "sources": 77,
+    "source_bytes": 18312,
+    "gold_in_sources": false,
+    "gold_spans": 0,
+    "gold_bytes": 0,
+    "prompt_bytes": 21682
+   }
+  },
+  {
+   "id": "v31",
+   "a": {
+    "hits": 8,
+    "degraded": false,
+    "sources": 8,
+    "source_bytes": 1129,
+    "gold_in_sources": false,
+    "gold_spans": 0,
+    "gold_bytes": 0,
+    "prompt_bytes": 1717
+   },
+   "find": {
+    "cards": 26,
+    "l1_cards": 26,
+    "ms": 47,
+    "degraded": false,
+    "gold_in_find": false
+   },
+   "b": {
+    "candidates": 26,
+    "sources": 26,
+    "source_bytes": 2752,
+    "gold_in_sources": false,
+    "gold_spans": 0,
+    "gold_bytes": 0,
+    "prompt_bytes": 4059
+   },
+   "c": {
+    "candidates": 51,
+    "sources": 51,
+    "source_bytes": 9937,
+    "gold_in_sources": false,
+    "gold_spans": 0,
+    "gold_bytes": 0,
+    "prompt_bytes": 12257
+   },
+   "d": {
+    "candidates": 76,
+    "sources": 76,
+    "source_bytes": 18428,
+    "gold_in_sources": false,
+    "gold_spans": 0,
+    "gold_bytes": 0,
+    "prompt_bytes": 21754
+   }
+  },
+  {
+   "id": "v32",
+   "a": {
+    "hits": 8,
+    "degraded": false,
+    "sources": 8,
+    "source_bytes": 4082,
+    "gold_in_sources": true,
+    "gold_spans": 1,
+    "gold_bytes": 1172,
+    "prompt_bytes": 4623
+   },
+   "find": {
+    "cards": 27,
+    "l1_cards": 27,
+    "ms": 76,
+    "degraded": false,
+    "gold_in_find": false
+   },
+   "b": {
+    "candidates": 27,
+    "sources": 27,
+    "source_bytes": 2458,
+    "gold_in_sources": false,
+    "gold_spans": 0,
+    "gold_bytes": 0,
+    "prompt_bytes": 3759
+   },
+   "c": {
+    "candidates": 53,
+    "sources": 53,
+    "source_bytes": 10833,
+    "gold_in_sources": false,
+    "gold_spans": 0,
+    "gold_bytes": 0,
+    "prompt_bytes": 13174
+   },
+   "d": {
+    "candidates": 78,
+    "sources": 78,
+    "source_bytes": 18272,
+    "gold_in_sources": false,
+    "gold_spans": 0,
+    "gold_bytes": 0,
+    "prompt_bytes": 21613
+   }
+  },
+  {
+   "id": "v33",
+   "a": {
+    "hits": 8,
+    "degraded": false,
+    "sources": 8,
+    "source_bytes": 4717,
+    "gold_in_sources": true,
+    "gold_spans": 3,
+    "gold_bytes": 1429,
+    "prompt_bytes": 5244
+   },
+   "find": {
+    "cards": 26,
+    "l1_cards": 26,
+    "ms": 46,
+    "degraded": false,
+    "gold_in_find": true
+   },
+   "b": {
+    "candidates": 26,
+    "sources": 26,
+    "source_bytes": 3414,
+    "gold_in_sources": true,
+    "gold_spans": 5,
+    "gold_bytes": 582,
+    "prompt_bytes": 4659
+   },
+   "c": {
+    "candidates": 51,
+    "sources": 51,
+    "source_bytes": 15834,
+    "gold_in_sources": true,
+    "gold_spans": 9,
+    "gold_bytes": 3008,
+    "prompt_bytes": 18078
+   },
+   "d": {
+    "candidates": 76,
+    "sources": 69,
+    "source_bytes": 25218,
+    "gold_in_sources": true,
+    "gold_spans": 13,
+    "gold_bytes": 4696,
+    "prompt_bytes": 28182
+   }
+  },
+  {
+   "id": "v34",
+   "a": {
+    "hits": 8,
+    "degraded": false,
+    "sources": 8,
+    "source_bytes": 1354,
+    "gold_in_sources": true,
+    "gold_spans": 5,
+    "gold_bytes": 1176,
+    "prompt_bytes": 1920
+   },
+   "find": {
+    "cards": 26,
+    "l1_cards": 26,
+    "ms": 46,
+    "degraded": false,
+    "gold_in_find": true
+   },
+   "b": {
+    "candidates": 26,
+    "sources": 26,
+    "source_bytes": 2845,
+    "gold_in_sources": true,
+    "gold_spans": 7,
+    "gold_bytes": 1535,
+    "prompt_bytes": 4128
+   },
+   "c": {
+    "candidates": 48,
+    "sources": 48,
+    "source_bytes": 10519,
+    "gold_in_sources": true,
+    "gold_spans": 12,
+    "gold_bytes": 4081,
+    "prompt_bytes": 12680
+   },
+   "d": {
+    "candidates": 68,
+    "sources": 68,
+    "source_bytes": 17225,
+    "gold_in_sources": true,
+    "gold_spans": 15,
+    "gold_bytes": 5200,
+    "prompt_bytes": 20184
+   }
+  },
+  {
+   "id": "v35",
+   "a": {
+    "hits": 8,
+    "degraded": false,
+    "sources": 8,
+    "source_bytes": 4140,
+    "gold_in_sources": true,
+    "gold_spans": 1,
+    "gold_bytes": 476,
+    "prompt_bytes": 4687
+   },
+   "find": {
+    "cards": 26,
+    "l1_cards": 26,
+    "ms": 47,
+    "degraded": false,
+    "gold_in_find": true
+   },
+   "b": {
+    "candidates": 26,
+    "sources": 26,
+    "source_bytes": 2575,
+    "gold_in_sources": true,
+    "gold_spans": 1,
+    "gold_bytes": 476,
+    "prompt_bytes": 3832
+   },
+   "c": {
+    "candidates": 51,
+    "sources": 51,
+    "source_bytes": 12251,
+    "gold_in_sources": true,
+    "gold_spans": 2,
+    "gold_bytes": 1502,
+    "prompt_bytes": 14506
+   },
+   "d": {
+    "candidates": 76,
+    "sources": 76,
+    "source_bytes": 22563,
+    "gold_in_sources": true,
+    "gold_spans": 3,
+    "gold_bytes": 1547,
+    "prompt_bytes": 25816
+   }
+  },
+  {
+   "id": "v36",
+   "a": {
+    "hits": 8,
+    "degraded": false,
+    "sources": 8,
+    "source_bytes": 4248,
+    "gold_in_sources": false,
+    "gold_spans": 0,
+    "gold_bytes": 0,
+    "prompt_bytes": 4739
+   },
+   "find": {
+    "cards": 25,
+    "l1_cards": 25,
+    "ms": 48,
+    "degraded": false,
+    "gold_in_find": true
+   },
+   "b": {
+    "candidates": 25,
+    "sources": 25,
+    "source_bytes": 3977,
+    "gold_in_sources": true,
+    "gold_spans": 1,
+    "gold_bytes": 282,
+    "prompt_bytes": 5144
+   },
+   "c": {
+    "candidates": 48,
+    "sources": 48,
+    "source_bytes": 15953,
+    "gold_in_sources": true,
+    "gold_spans": 2,
+    "gold_bytes": 385,
+    "prompt_bytes": 18036
+   },
+   "d": {
+    "candidates": 70,
+    "sources": 70,
+    "source_bytes": 25853,
+    "gold_in_sources": true,
+    "gold_spans": 3,
+    "gold_bytes": 565,
+    "prompt_bytes": 28812
+   }
+  },
+  {
+   "id": "v37",
+   "a": {
+    "hits": 8,
+    "degraded": false,
+    "sources": 8,
+    "source_bytes": 3858,
+    "gold_in_sources": true,
+    "gold_spans": 4,
+    "gold_bytes": 3265,
+    "prompt_bytes": 4357
+   },
+   "find": {
+    "cards": 26,
+    "l1_cards": 26,
+    "ms": 47,
+    "degraded": false,
+    "gold_in_find": true
+   },
+   "b": {
+    "candidates": 26,
+    "sources": 26,
+    "source_bytes": 3022,
+    "gold_in_sources": true,
+    "gold_spans": 2,
+    "gold_bytes": 612,
+    "prompt_bytes": 4240
+   },
+   "c": {
+    "candidates": 49,
+    "sources": 49,
+    "source_bytes": 10117,
+    "gold_in_sources": true,
+    "gold_spans": 4,
+    "gold_bytes": 2253,
+    "prompt_bytes": 12255
+   },
+   "d": {
+    "candidates": 71,
+    "sources": 71,
+    "source_bytes": 15589,
+    "gold_in_sources": true,
+    "gold_spans": 6,
+    "gold_bytes": 2895,
+    "prompt_bytes": 18607
+   }
+  },
+  {
+   "id": "v38",
+   "a": {
+    "hits": 8,
+    "degraded": false,
+    "sources": 8,
+    "source_bytes": 1801,
+    "gold_in_sources": false,
+    "gold_spans": 0,
+    "gold_bytes": 0,
+    "prompt_bytes": 2365
+   },
+   "find": {
+    "cards": 27,
+    "l1_cards": 27,
+    "ms": 48,
+    "degraded": false,
+    "gold_in_find": false
+   },
+   "b": {
+    "candidates": 27,
+    "sources": 27,
+    "source_bytes": 2303,
+    "gold_in_sources": false,
+    "gold_spans": 0,
+    "gold_bytes": 0,
+    "prompt_bytes": 3617
+   },
+   "c": {
+    "candidates": 53,
+    "sources": 53,
+    "source_bytes": 12315,
+    "gold_in_sources": false,
+    "gold_spans": 0,
+    "gold_bytes": 0,
+    "prompt_bytes": 14660
+   },
+   "d": {
+    "candidates": 78,
+    "sources": 78,
+    "source_bytes": 21333,
+    "gold_in_sources": false,
+    "gold_spans": 0,
+    "gold_bytes": 0,
+    "prompt_bytes": 24675
+   }
+  },
+  {
+   "id": "v39",
+   "a": {
+    "hits": 8,
+    "degraded": false,
+    "sources": 8,
+    "source_bytes": 6212,
+    "gold_in_sources": true,
+    "gold_spans": 1,
+    "gold_bytes": 1998,
+    "prompt_bytes": 6780
+   },
+   "find": {
+    "cards": 24,
+    "l1_cards": 24,
+    "ms": 46,
+    "degraded": false,
+    "gold_in_find": true
+   },
+   "b": {
+    "candidates": 24,
+    "sources": 24,
+    "source_bytes": 5796,
+    "gold_in_sources": true,
+    "gold_spans": 1,
+    "gold_bytes": 471,
+    "prompt_bytes": 7002
+   },
+   "c": {
+    "candidates": 47,
+    "sources": 47,
+    "source_bytes": 15594,
+    "gold_in_sources": true,
+    "gold_spans": 2,
+    "gold_bytes": 1781,
+    "prompt_bytes": 17718
+   },
+   "d": {
+    "candidates": 69,
+    "sources": 69,
+    "source_bytes": 23070,
+    "gold_in_sources": true,
+    "gold_spans": 3,
+    "gold_bytes": 1911,
+    "prompt_bytes": 26073
+   }
+  },
+  {
+   "id": "v40",
+   "a": {
+    "hits": 8,
+    "degraded": false,
+    "sources": 8,
+    "source_bytes": 7346,
+    "gold_in_sources": false,
+    "gold_spans": 0,
+    "gold_bytes": 0,
+    "prompt_bytes": 7881
+   },
+   "find": {
+    "cards": 25,
+    "l1_cards": 25,
+    "ms": 47,
+    "degraded": false,
+    "gold_in_find": false
+   },
+   "b": {
+    "candidates": 25,
+    "sources": 25,
+    "source_bytes": 4941,
+    "gold_in_sources": false,
+    "gold_spans": 0,
+    "gold_bytes": 0,
+    "prompt_bytes": 6153
+   },
+   "c": {
+    "candidates": 47,
+    "sources": 47,
+    "source_bytes": 13048,
+    "gold_in_sources": false,
+    "gold_spans": 0,
+    "gold_bytes": 0,
+    "prompt_bytes": 15137
+   },
+   "d": {
+    "candidates": 68,
+    "sources": 68,
+    "source_bytes": 21139,
+    "gold_in_sources": false,
+    "gold_spans": 0,
+    "gold_bytes": 0,
+    "prompt_bytes": 24065
+   }
+  },
+  {
+   "id": "t01",
+   "a": {
+    "hits": 8,
+    "degraded": false,
+    "sources": 8,
+    "source_bytes": 2182,
+    "gold_in_sources": true,
+    "gold_spans": 4,
+    "gold_bytes": 1222,
+    "prompt_bytes": 2756
+   },
+   "find": {
+    "cards": 26,
+    "l1_cards": 26,
+    "ms": 47,
+    "degraded": false,
+    "gold_in_find": true
+   },
+   "b": {
+    "candidates": 26,
+    "sources": 26,
+    "source_bytes": 3003,
+    "gold_in_sources": true,
+    "gold_spans": 4,
+    "gold_bytes": 555,
+    "prompt_bytes": 4289
+   },
+   "c": {
+    "candidates": 46,
+    "sources": 46,
+    "source_bytes": 10673,
+    "gold_in_sources": true,
+    "gold_spans": 5,
+    "gold_bytes": 1269,
+    "prompt_bytes": 12753
+   },
+   "d": {
+    "candidates": 66,
+    "sources": 66,
+    "source_bytes": 19801,
+    "gold_in_sources": true,
+    "gold_spans": 5,
+    "gold_bytes": 1269,
+    "prompt_bytes": 22675
+   }
+  }
+ ]
+}
