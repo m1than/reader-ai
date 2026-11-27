@@ -2600,6 +2600,7 @@ proposed_owner_notes:
 # Phase 2 Green corrections (test data only, no oracle weakened), paired with this note:
 #   unit 2: the reconcile test counted the import as an entry; the import appends none (FR-INGEST-39), so the
 #   expected seqs are 1..4, not 2..5.
+#   unit 3: two test lines wrapped for ruff (line length), no oracle change.
 #
 # Open points:
 #   1. FR-INGEST-41 runs as a one-shot command, not an Alembic migration (P2 (4) wording): startup migrations would

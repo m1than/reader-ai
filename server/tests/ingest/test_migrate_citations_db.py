@@ -53,8 +53,8 @@ async def test_rewrite_all_or_nothing(pg: Pg, tmp_path: Path, caplog: Any) -> No
         await activate(w, legacy)
         r3 = await synthetic_pack(w, sha, R3, [(1, CANARY), (1, "b")])
         async with w.engine.begin() as conn:
-            await conn.execute(text("CREATE TABLE cite_probe (id int PRIMARY KEY, owner_id uuid, answer jsonb)"
-                                    ))
+            await conn.execute(text(
+                "CREATE TABLE cite_probe (id int PRIMARY KEY, owner_id uuid, answer jsonb)"))
             built = await need("reader.ingest.seqmap").build(conn, owner, await ingest_of(w, legacy), r3)
             assert built == "accepted"
         located = await w.rows("SELECT locator, quote_sha256 FROM material_spans WHERE ingest_id = :i"

@@ -45,7 +45,8 @@ async def with_vectors(w: World, pack: str, expect: str) -> str:
 
 async def mapped(w: World, legacy: str, new: str, expect: str = "accepted") -> None:
     async with w.engine.begin() as conn:
-        built = await need("reader.ingest.seqmap").build(conn, w.users["ivan"], await ingest_of(w, legacy), new)
+        legacy_ingest = await ingest_of(w, legacy)
+        built = await need("reader.ingest.seqmap").build(conn, w.users["ivan"], legacy_ingest, new)
         assert built == expect
 
 

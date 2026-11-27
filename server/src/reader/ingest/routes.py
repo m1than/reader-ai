@@ -506,6 +506,7 @@ async def restore_material(ctx: Ctx) -> Response:
         if row.deleted_at is not None:
             await conn.execute(text("UPDATE materials SET deleted_at = NULL WHERE id = :i"), {"i": row.id})
             restored = await manage.restore_courses(conn, owner, material_id)  # after the material is live
+            await manifest.restore_material(conn, owner, sha)  # FR-INGEST-39: after FR-INGEST-31's locks
             await audit.record(conn, owner, "material.restore", material_id, {"courses": len(restored)})
         return JSONResponse(
             {"material": await _entry(ctx, conn, material_id, sha), "restored_courses": restored}

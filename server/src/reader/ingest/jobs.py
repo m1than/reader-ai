@@ -43,6 +43,51 @@ class ImportArgs(BaseModel):
     material_id: str = Field(min_length=1, max_length=200)
 
 
+SEQMAP_KIND: Final = "ingest.seqmap"
+REANCHOR_KIND: Final = "ingest.reanchor"
+_TRANSIENT: Final = (
+    ConnectionDoesNotExistError, CannotConnectNowError, ConnectionRefusedError, ConnectorException
+)
+
+
+class SeqmapArgs(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    owner_id: uuid.UUID
+    material_sha256: str = Field(pattern=r"^[0-9a-f]{64}$")
+    from_ingest_id: uuid.UUID
+    to_pack_id: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+class ReanchorArgs(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    owner_id: uuid.UUID
+    from_pack_id: str = Field(pattern=r"^[0-9a-f]{64}$")
+    to_pack_id: str = Field(pattern=r"^[0-9a-f]{64}$")
+
+
+async def _seqmap(args: SeqmapArgs, conn: AsyncConnection, ctx: JobContext) -> None:
+    """FR-INGEST-40 step 3; an accept calls try_activate in this transaction."""
+    from reader.ingest import seqmap
+
+    del ctx
+    await seqmap.build(conn, args.owner_id, args.from_ingest_id, args.to_pack_id)
+
+
+async def _reanchor(args: ReanchorArgs, conn: AsyncConnection, ctx: JobContext) -> None:
+    """FR-INGEST-43: both packs and the material's head pack locked in one call, then the run and
+    try_activate."""
+    from reader.ingest import manifest, packs, reanchor
+
+    del ctx
+    sha = await packs.material_of(conn, args.owner_id, args.to_pack_id)
+    _, top = await manifest.head(conn, args.owner_id)
+    held = [e["pack_id"] for e in top["packs"]
+            if await packs.material_of(conn, args.owner_id, e["pack_id"]) == sha]
+    await packs.lock_packs(conn, {args.from_pack_id, args.to_pack_id, *held})
+    await reanchor.run(conn, args.owner_id, args.from_pack_id, args.to_pack_id)  # logs its counts only
+    await manifest.try_activate(conn, args.owner_id, args.to_pack_id)
+
+
 async def _enqueue_embed(conn: AsyncConnection, owner: uuid.UUID, material_sha256: str) -> None:
     """FR-INGEST-13 (SRV-SEARCH FR-SEARCH-5 paired change): search.embed for the ingest this run wrote.
 
@@ -137,6 +182,10 @@ def make_kinds(blobs_root: Path) -> tuple[JobKind, ...]:
             timeout_s=600.0,
             after_end=after_end,
         ),
+        JobKind(name=SEQMAP_KIND, queue="ingest", args=SeqmapArgs,
+                key=("owner_id", "from_ingest_id", "to_pack_id"), handler=_seqmap, transient=_TRANSIENT),
+        JobKind(name=REANCHOR_KIND, queue="ingest", args=ReanchorArgs,
+                key=("owner_id", "from_pack_id", "to_pack_id"), handler=_reanchor, transient=_TRANSIENT),
     )
 
 
@@ -158,6 +207,45 @@ async def after_end(engine: Any, payload: Mapping[str, Any], outcome: str) -> No
              "v": str(payload["converter_version"])})).scalar()
     if ingest_id is not None:
         await obs_runs.enqueue_end("ingest", str(ingest_id), 1)
+    from reader.ingest import packs
+
+    pid = packs.pack_id(str(payload["material_sha256"]), str(payload["converter_version"]))
+    async with engine.connect() as conn:
+        await enqueue_followups(conn, owner, pid)
+
+
+async def enqueue_followups(conn: AsyncConnection, owner: uuid.UUID, pid: str) -> list[str]:
+    """FR-INGEST-13 rev (second part), -40, -43: after the import's commit, `ingest.seqmap` while the
+    material has a legacy ingest and no accepted map from it, and `ingest.reanchor` when another pack of it
+    is in the head."""
+    from reader.ingest import manifest, packs
+    from reader.jobs import running
+
+    sha = await packs.material_of(conn, owner, pid)
+    version = (await conn.execute(text(
+        "SELECT parse_config ->> 'converter_version' FROM base_packs WHERE owner_id = :o AND pack_id = :p"),
+        {"o": owner, "p": pid})).scalar()
+    if sha is None or version in ingest.LEGACY_VERSIONS:
+        return []
+    done: list[str] = []
+    legacy = (await conn.execute(text(
+        "SELECT b.ingest_id FROM base_packs b WHERE b.owner_id = :o AND b.material_sha256 = :s"
+        " AND b.parse_config ->> 'converter_version' = ANY(:v) AND NOT EXISTS (SELECT 1 FROM seq_maps m"
+        " WHERE m.owner_id = b.owner_id AND m.from_ingest_id = b.ingest_id AND m.state = 'accepted')"
+        " ORDER BY b.created_at LIMIT 1"),
+        {"o": owner, "s": sha, "v": list(ingest.LEGACY_VERSIONS)})).scalar()
+    if legacy is not None:
+        await running().enqueue(SEQMAP_KIND, {"owner_id": str(owner), "material_sha256": sha,
+                                              "from_ingest_id": str(legacy), "to_pack_id": pid})
+        done.append(SEQMAP_KIND)
+    _, top = await manifest.head(conn, owner)
+    for element in top["packs"]:
+        other = element["pack_id"]
+        if other != pid and await packs.material_of(conn, owner, other) == sha:
+            await running().enqueue(REANCHOR_KIND, {"owner_id": str(owner), "from_pack_id": other,
+                                                    "to_pack_id": pid})
+            done.append(REANCHOR_KIND)
+    return done
 
 
 JOB_KINDS: Final = make_kinds(ingest.BLOBS_DIR)

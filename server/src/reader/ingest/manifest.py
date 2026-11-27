@@ -274,6 +274,100 @@ async def sweep(engine: AsyncEngine) -> None:
             await try_activate(conn, owner_id, str(pid))
 
 
+async def _last_element(
+    conn: AsyncConnection, owner_id: uuid.UUID, sha: str
+) -> tuple[str, dict[str, str]] | None:
+    """The material's element in the last manifest entry that named it."""
+    row = (await conn.execute(text(
+        "SELECT e.pack_id, e.overlays FROM manifest_entries m"
+        " CROSS JOIN LATERAL jsonb_to_recordset(m.entry -> 'packs') AS e(pack_id text, overlays jsonb)"
+        " JOIN base_packs b ON b.owner_id = m.owner_id AND b.pack_id = e.pack_id"
+        " WHERE m.owner_id = :o AND b.material_sha256 = :s ORDER BY m.seq DESC LIMIT 1"),
+        {"o": owner_id, "s": sha})).first()
+    return None if row is None else (str(row[0]), dict(row[1]))
+
+
+async def _pack_gone(conn: AsyncConnection, owner_id: uuid.UUID, pid: str) -> bool:
+    return bool((await conn.execute(text(
+        "SELECT collected_at IS NOT NULL OR purged_at IS NOT NULL FROM base_packs"
+        " WHERE owner_id = :o AND pack_id = :p"), {"o": owner_id, "p": pid})).scalar())
+
+
+async def _pending(
+    conn: AsyncConnection, owner_id: uuid.UUID, sha: str
+) -> dict[str, tuple[dict[str, str], Any]]:
+    rows = await conn.execute(text(
+        "SELECT pack_id, overlays, reason FROM pending_activations"
+        " WHERE owner_id = :o AND material_sha256 = :s"),
+        {"o": owner_id, "s": sha})
+    return {str(r[0]): (dict(r[1]), r[2]) for r in rows}
+
+
+async def _anchor_inline(conn: AsyncConnection, owner_id: uuid.UUID, old: str, new: str) -> None:
+    """FR-INGEST-43 run inline by restore and rollback (reused when the pair's run exists)."""
+    from reader.ingest import reanchor
+
+    await reanchor.run(conn, owner_id, old, new)
+
+
+async def restore_material(conn: AsyncConnection, owner_id: uuid.UUID, sha: str,
+                           ensure: packs.SearchEnsure | None = None) -> list[str]:
+    """FR-INGEST-39's restore, after FR-INGEST-31's locks; returns try_activate's outcomes in order."""
+    last = await _last_element(conn, owner_id, sha)
+    _, top = await head(conn, owner_id)
+    current = await _element_of(conn, owner_id, top, sha)
+    await packs.lock_packs(conn, {*(await _pending(conn, owner_id, sha)), *([last[0]] if last else []),
+                                  *([current[0]] if current else [])})
+    if last is not None and not await _pack_gone(conn, owner_id, last[0]):
+        live = {}
+        for kind, oid in last[1].items():
+            gone = (await conn.execute(text(
+                "SELECT collected_at IS NOT NULL FROM overlays WHERE owner_id = :o AND overlay_id = :i"),
+                {"o": owner_id, "i": oid})).scalar()
+            if not gone:
+                live[kind] = oid
+        desired = (await _pending(conn, owner_id, sha)).get(last[0], ({}, None))[0]
+        await request_activation(conn, owner_id, last[0], {**live, **desired})  # merged under desires
+    floor = None if last is None else packs.version_rank(await _version(conn, owner_id, last[0]))
+    order = sorted([(packs.version_rank(await _version(conn, owner_id, p)), p)
+                    for p in await _pending(conn, owner_id, sha)])
+    outcomes: list[str] = []
+    for rank, pid in order:
+        if floor is not None and rank < floor:
+            await _done(conn, owner_id, pid, "skipped")
+            continue
+        _, top = await head(conn, owner_id)
+        current = await _element_of(conn, owner_id, top, sha)
+        if current is not None and current[0] != pid:
+            await _anchor_inline(conn, owner_id, current[0], pid)
+        outcomes.append(str(await try_activate(conn, owner_id, pid)))
+    left = (await _pending(conn, owner_id, sha)).values()
+    if any(reason == "vectors_missing" or "vectors" not in named for named, reason in left):
+        await (ensure or packs.SEARCH_ENSURE[0])(conn, owner_id, sha)
+    return outcomes
+
+
+async def rollback(conn: AsyncConnection, owner_id: uuid.UUID, to_seq: int) -> int:
+    """FR-INGEST-39's rollback (P4 and the property test only; no route, job or command calls it)."""
+    seq, top = await head(conn, owner_id)
+    target, current = _elements(await _entry_at(conn, owner_id, to_seq)), _elements(top)
+    await packs.lock_packs(conn, [p for p in {*target, *current} if target.get(p) != current.get(p)])
+    by_material = {await packs.material_of(conn, owner_id, p): p for p in current}
+    elements: dict[str, dict[str, str]] = {}
+    for pid, named in target.items():
+        sha = await packs.material_of(conn, owner_id, pid)
+        deleted = (await conn.execute(text(
+            "SELECT deleted_at IS NOT NULL FROM materials WHERE owner_id = :o AND sha256 = :s"),
+            {"o": owner_id, "s": sha})).scalar()
+        if deleted:
+            continue  # a rollback never re-activates a deleted material
+        elements[pid] = named
+        old = by_material.get(sha)
+        if old is not None and old != pid and not await _pack_gone(conn, owner_id, pid):
+            await _anchor_inline(conn, owner_id, old, pid)
+    return await append(conn, owner_id, seq, make_entry(elements), "rollback")
+
+
 async def remove_material(conn: AsyncConnection, owner_id: uuid.UUID, material_sha256: str) -> bool:
     """FR-INGEST-31's delete: one entry without the material's element when the head names it; no lock."""
     for _ in range(CAS_RETRIES):

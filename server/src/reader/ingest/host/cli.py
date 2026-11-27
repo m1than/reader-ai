@@ -3,6 +3,7 @@
     reader-ingest MATERIAL_ID [--config PATH]            convert, then receive over docker exec stdin
     reader-ingest MATERIAL_ID --requeue [--config PATH]  requeue a dead import without converting
     reader-ingest --setup [--config PATH]                converter venv and models (the one networked step)
+    reader-ingest --migrate-citations [--config PATH]    rewrite mutable legacy citations (FR-INGEST-41)
 
 SRV-INGEST FR-INGEST-1..5, -10, -11 (host mapping), -12, -16; ADR-0027. Exit codes: 0 done or nothing to do,
 2 configuration or setup, 3 busy or stack unhealthy, 4 import dead, 5 conversion or receive failed. Errors are
@@ -42,6 +43,7 @@ WATCHDOG_FAILED_TICKS: Final = 3  # consecutive failed ticks before the run is k
 STATUS_TIMEOUT_S: Final = 60.0
 RECEIVE_TIMEOUT_S: Final = 330.0  # receive ends itself at 300 s
 DOCKER_TIMEOUT_S: Final = 30.0
+MIGRATE_TIMEOUT_S: Final = 600.0  # one transaction over the declared targets (FR-INGEST-41); structural
 LINE_LIMIT: Final = 4096  # bytes per child stdout line; a progress line is under 60
 ENV_ALLOWED: Final = ("PATH", "HOME", "LANG", "DOCKER_HOST")
 LABELS: Final = {
@@ -547,7 +549,20 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--requeue", action="store_true")
     parser.add_argument("--setup", action="store_true")
     parser.add_argument("--watch", action="store_true")
+    parser.add_argument("--migrate-citations", action="store_true")
     return parser
+
+
+def _migrate_citations(deps: Deps, out: TextIO) -> int:
+    """FR-INGEST-41: the health check (worker_container), then the one in-container command."""
+    container = worker_container(deps)
+    code, reply = _exec(deps, container, "reader.ingest.migrate_citations", [], MIGRATE_TIMEOUT_S)
+    if code == 4:
+        raise Stop("unmapped", 4, "an accepted seq map is missing; nothing was changed")
+    if code != 0 or not isinstance(reply, dict) or reply.get("result") != "migrated":
+        raise Stop("migrate_failed", 5)
+    out.write("citations migrated\n")
+    return 0
 
 
 def data_dir_of(config_path: Path) -> Path:
@@ -567,6 +582,8 @@ def ingest(argv: list[str], deps: Deps, out: TextIO, err: TextIO) -> int:
             from reader.ingest.host import watch
 
             return watch.run_watch(data_dir_of(args.config), deps)
+        if args.migrate_citations:
+            return _migrate_citations(deps, out)
         if args.setup:
             data_dir = data_dir_of(args.config)
             problem = setup.run_setup(data_dir, _env(), _printer(out))
