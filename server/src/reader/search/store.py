@@ -68,7 +68,8 @@ async def embed_facts(conn: AsyncConnection, owner_id: uuid.UUID, ingest_id: Any
         return 0, None
     row = (await conn.execute(text(
         "SELECT o.overlay_id, o.sealed_at FROM overlays o WHERE o.owner_id = :o AND o.pack_id = :p"
-        " AND o.kind = 'vectors' AND o.state = 'sealed' ORDER BY o.sealed_at DESC, o.overlay_id LIMIT 1"),
+        " AND o.kind = 'vectors' AND o.state = 'sealed' AND o.collected_at IS NULL"
+        " ORDER BY o.sealed_at DESC, o.overlay_id LIMIT 1"),
         {"o": owner_id, "p": pack.pack_id})).first()
     if row is None:
         return 0, None

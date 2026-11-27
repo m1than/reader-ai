@@ -105,6 +105,7 @@ class Book:
         for i, node in enumerate(self.nodes):
             up = self.parent[i]
             self.children[self.source.id if up is None else self.nodes[up].id].append(node.id)
+        self.has_children = {p for p in self.parent if p is not None}
         self.span_index = {s.locator: j for j, s in enumerate(self.spans)}
         self.node_index = {node.id: i for i, node in enumerate(self.nodes)}
         self.total = sum(len(s.text) for s in self.spans)
@@ -150,7 +151,7 @@ class Book:
 
     def node_card(self, i: int, channel: str, entitled: bool) -> Card:
         node = self.nodes[i]
-        tokens = card_shape.l2_budget(self.policy, has_children=any(p == i for p in self.parent),
+        tokens = card_shape.l2_budget(self.policy, has_children=i in self.has_children,
                                       top_level=self.parent[i] is None)
         c = self.cited[i]
         full = None
