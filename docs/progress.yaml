@@ -2252,7 +2252,13 @@ tasks:
         policy_version); FR-TUTOR-8 citation quote_sha256 (FR-INGEST-40 gate (g)) and FR-TUTOR-22 REWRITERS
         (FR-INGEST-41 target); judge not wired (Deps.judge None); L5 boost deferred; the tutor's search() path
         removed, search() and /api/search later (V.kl-live). Measurement: M1 free [local] predictor
-        gold_in_sources; P1 paid bench ~$1.84 (<= $12) waits for the owner. Awaits deep-reviewer",
+        gold_in_sources; P1 paid bench (last run $1.087, <= $12) waits for the owner. Round 1 (deep-reviewer,
+        Fable, on 3e225f3): changes, 6 blocking, all applied in 3b564b8: threshold g >= 39.4, so P1 only if M1
+        variant (c) hits 40 of 40 (the block-for-owner branch is likely); M1 screen over variants (a) search(k=8)
+        spans, (b) primaries, (c) +next, (d) +previous+next; M1 gates promotion, P1 gates done/merge (deviation in
+        owner notes); judge ship condition (c) in SRV-SEARCH, no judge_ctx until the Waiter; SRV-INGEST draft
+        views.active_span_rows; traceability and NFC length at ask; no quote_sha256 beside a legacy id. Awaits
+        round 2",
       what: "SRV-TUTOR revision (~100–200 lines): retrieval through find on the tutor channel with its own maximum in
         policy, starting at today's 21,000-byte source budget, full span text for personal-use cards, NFR-TUTOR-3
         grounding re-measured as a gate; L5 boost once learner
