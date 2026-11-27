@@ -2163,9 +2163,24 @@ tasks:
         FR-OBS-20 notes; VEC-OBS-3 key regenerated). Process deviation: the 4b code was committed WIP (a1826b7)
         before its tests because the review interruption asked for a clean commit; tests and spec followed in
         the next commit. test_search_local.py (the chunk bench) is skipped until NFR-SEARCH-1/-2/-4 are
-        promoted. Remaining: unit 5 (judge.find
-        waiter with the process-wide LISTEN, owner judge_ctx, /api/find and /api/open, FR-SEARCH-28, -33,
-        INV-SEARCH-11, -14; binding the policy load into api and worker start and obs.versions.POLICY)",
+        promoted. Unit 5 done (2026-11-28; Red 276129b committed before Green 53b9c8e): FR-SEARCH-28, -33,
+        INV-SEARCH-11, -14 promoted, FR-SEARCH-8 and INV-SEARCH-4 revisions promoted; reader.search.judge_wait
+        (Waiter = find's Judge port: recorded first at $0, one LISTEN judge_done connection per process that
+        restarts at the next request after a loss, registration before the row, created_at and deadline from the
+        insert's now(), args {request_id, input_sha256}, closed payload codes with the bare-id rule, timeout,
+        enqueue failure deletes the row); owner-channel judge_ctx (line mcp, fresh run, run cap from policy);
+        /api/find and /api/open on the owner channel set by the server (any client key such as channel → 400);
+        FR-SEARCH-33 find spans (<= 25 documents, hashes only) and cards.read; policy.bind() at api and every
+        worker lane start (paired SRV-AUTH serve.main: policy_invalid stops the start) binding
+        obs.versions.POLICY, current() cached per process, facets read once per policy, PolicyError → FindError;
+        the star-height check scans the pattern text (no re._parser) and the 50 ms bound is a unit test only (no
+        start-time clock; deviation recorded in FR-SEARCH-34). Review items pinned: 6-digit budget boundary, L4
+        without route, pivot seed = request hash, open fill at src depth 4 budget 400, owner purge with
+        production seams over real span-vector rows, search_0002 downgrade, gc._unbound docstring, `url =f`.
+        Paired: SRV-OBS slice_empty in reader.judge_skip (VEC-OBS-1), SRV-INGEST FR-INGEST-45 note, OPS-DOD
+        operation search.find. Deviation (cost): the owner channel's judge ctx has no daily budget until SRV-MCP's
+        per-user cap (kl_open_points 5); the shipped gate never_judge makes no judge call until judge-gate.
+        Remaining: the coordinator's code review of unit 5 and the merge; NFR-SEARCH-1, -2, -4..-7 (paid bench)",
       needs: [V.kl-ingest-packs, V.spike.judge-gate, V.kl-agent-judges, V.kl-obs-spans],
       what: "SRV-SEARCH revision (~800–1,200 lines): the B6 cascade (routes, facets file, greedy selection under a token
         budget with stated bounds, 1-hop expansion, one judge.find job last on the worker-judge lane), policy_version,

@@ -334,6 +334,22 @@ operations:
       observability: { missing: "FR-SEARCH-8 requires the line; no test asserts it is emitted" }
       recovery: { items: [FR-SEARCH-7] }
 
+  - id: search.find
+    title: Find and open cards of the owner's materials (owner channel)
+    surface: [api]
+    specs: [SRV-SEARCH]
+    routes: ["POST /api/find", "POST /api/open"]
+    gate: tracked
+    criteria:
+      functional: { items: [FR-SEARCH-22, FR-SEARCH-31, FR-SEARCH-8, FR-SEARCH-20, INV-SEARCH-9] }
+      security: { items: [INV-SEARCH-1, INV-SEARCH-12, INV-SEARCH-13] }
+      privacy: { items: [INV-SEARCH-14, FR-SEARCH-33] }
+      a11y: { na: "no web find surface in the slice (api for the owner, the tutor and the pipeline)" }
+      latency: { missing: "NFR-SEARCH-7 (find p95 ≤ 2,500 ms on the live stack) is a paid bench, still proposed" }
+      cost: { missing: "per request capped by owner_judge_run_cap_usd (FR-SEARCH-28); no daily judge budget for the mcp line until SRV-MCP (kl_open_points 5)" }
+      observability: { items: [FR-SEARCH-33] }
+      recovery: { items: [FR-SEARCH-28] }
+
   - id: lesson.list
     title: List my lessons
     surface: [web]
