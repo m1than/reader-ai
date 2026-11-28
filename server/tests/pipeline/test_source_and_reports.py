@@ -637,6 +637,25 @@ def test_built_r3_notebook_carries_hashes_and_round_trips() -> None:
     assert view[3]["reference"] == {"kind": "test_vector", "span": "s1", "expected": ["1"]}
 
 
+def test_a_model_written_reference_hash_is_never_kept() -> None:
+    """Code review round 1: a model-supplied quote_sha256 on a lab reference is overwritten for a known alias
+    and dropped with the span for an unknown one (only code writes it, FR-PIPELINE-7)."""
+    notebook = need("reader.pipeline.notebook")
+
+    def reference(alias: str) -> dict[str, Any]:
+        lab = {"id": "lab1", "kind": "lab", "source": "x = 1", "kernel": "python3", "network": "none",
+               "asserts": ["x == 1"],
+               "reference": {"kind": "test_vector", "span": alias, "quote_sha256": "f" * 64, "expected": ["1"]}}
+        built = notebook.build({"cells": [lab]}, title="L", aliases=_r3_aliases(), material_title="M",
+                               stage="draft", prompt_version="v1", model="m", previous=None)
+        out: dict[str, Any] = built.notebook["cells"][0]["metadata"]["reader"]["reference"]
+        return out
+
+    assert reference("s1") == {"kind": "test_vector", "span": f"spn:{A}:p61:0-10", "quote_sha256": Q1,
+                               "expected": ["1"]}
+    assert reference("s99") == {"kind": "test_vector", "expected": ["1"]}
+
+
 def test_legacy_id_notebook_under_r3_aliases_reads_as_unknown() -> None:
     """INV-PIPELINE-3 per step (round 1, blocking 3): a notebook drafted over the legacy pack, read by a later
     step whose source is the r3 pack: to_compact, the rule checks and the failing check's payload run; legacy

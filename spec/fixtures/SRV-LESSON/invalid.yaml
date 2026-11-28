@@ -185,6 +185,10 @@ cases:
   - id: sector-trailing-newline
     ops: [{ op: replace, path: /cells/0/metadata/reader/sectors/0, value: "consensus\n" }]
     write: cell_schema
+  - id: rejected-because-span-key
+    note: "code review round 1 (r3_gates_revision): a free-key map is not a span holder; step 7b never parses its values"
+    ops: [{ op: add, path: /cells/5/metadata/reader/rejected_because/span, value: "spn: too narrow" }]
+    write: null
   - id: material-sha256-trailing-newline
     ops: [{ op: replace, path: /cells/1/metadata/reader/source_refs/1/material_sha256, value: "bfaf5f84ec26d5d046b23c32827ff917c72a94707ef23407d77031429d53f1a1\n" }]
     write: cell_schema

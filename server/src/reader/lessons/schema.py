@@ -189,17 +189,24 @@ def validate(data: bytes) -> Validated:
     return Validated(stored, canonical, hashlib.sha256(canonical).hexdigest(), len(doc["cells"]))
 
 
-def _span_refs(value: object) -> Iterator[tuple[str, str | None]]:
-    """(span, quote_sha256 or None) of every object holding a `span` under a validated `metadata.reader`."""
-    if isinstance(value, dict):
-        span, quote = value.get("span"), value.get("quote_sha256")
-        if isinstance(span, str):
-            yield span, quote if isinstance(quote, str) else None
-        for child in value.values():
-            yield from _span_refs(child)
-    elif isinstance(value, list):
-        for child in value:
-            yield from _span_refs(child)
+def _list(value: object) -> list[Any]:
+    return value if isinstance(value, list) else []
+
+
+def _span_refs(reader: dict[str, Any] | None) -> Iterator[tuple[str, str | None]]:
+    """(span, quote_sha256 or None) of the schema's span holders in a validated `metadata.reader`: claim
+    citations, cell citations, `source_ref`, `source_refs` and the lab `reference`; never a free-key map
+    such as a tradeoff's `rejected_because`."""
+    if reader is None:
+        return
+    holders: list[Any] = [c for claim in _list(reader.get("claims")) if isinstance(claim, dict)
+                          for c in _list(claim.get("citations"))]
+    holders += _list(reader.get("citations")) + _list(reader.get("source_refs"))
+    holders += [reader.get("source_ref"), reader.get("reference")]
+    for holder in holders:
+        if isinstance(holder, dict) and isinstance(holder.get("span"), str):
+            quote = holder.get("quote_sha256")
+            yield holder["span"], quote if isinstance(quote, str) else None
 
 
 def span_refs(notebook: dict[str, Any]) -> list[tuple[str, str | None]]:

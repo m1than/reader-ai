@@ -15,7 +15,7 @@ from sqlalchemy import event, text
 from .conftest import Pg, World, build_artifact, need, world
 from .packseed import activate_pack
 from .test_seqmap_db import R2, R3, sha_of, spans_of, synthetic_pack
-from .test_spanref_db import loc, q
+from .test_spanref_db import R4, R5, loc, q, versions
 
 pytestmark = pytest.mark.anyio
 
@@ -66,16 +66,36 @@ async def test_one_pack_per_locator(pg: Pg, tmp_path: Path) -> None:
         assert await citing(w, []) == set()
 
 
-async def test_collected_and_foreign_packs_are_never_named(pg: Pg, tmp_path: Path) -> None:
+async def test_collected_and_foreign_packs_are_never_named(pg: Pg, tmp_path: Path, monkeypatch: Any) -> None:
+    versions(monkeypatch)
     async with world(pg, tmp_path) as w:
         sha = sha_of("collected")
-        legacy = await synthetic_pack(w, sha, R2, [(1, "a")])
-        r3 = await synthetic_pack(w, sha, R3, [(1, "a")])
-        a = await loc(w, r3, "a")
+        packs = sorted([await synthetic_pack(w, sha, v, [(1, "a")]) for v in (R2, R3, R4)])
+        a = await loc(w, packs[0], "a")
+        assert await citing(w, [(a, q("a"))]) == {packs[0]}
+        # Code review round 1: an unsealed pack (the lowest id of all) holding the same (locator, hash), then
+        # the lowest sealed one collected and the next purged: only the highest is named.
+        owner, building = w.users["ivan"], "0" * 64
         async with w.engine.begin() as conn:
-            await conn.execute(text("UPDATE base_packs SET collected_at = now() WHERE pack_id = :p"),
-                               {"p": min(legacy, r3)})
-        assert await citing(w, [(a, q("a"))]) == {max(legacy, r3)}
+            ingest_id = (await conn.execute(text(
+                "INSERT INTO ingests (owner_id, material_id, converter_version, artifact_id, span_count,"
+                " outline_count, outline_source, pages_without_text)"
+                " SELECT :o, m.id, :v, :a, 1, 0, 'headings', '{}' FROM materials m"
+                " WHERE m.owner_id = :o AND m.sha256 = :s RETURNING id"),
+                {"o": owner, "v": R5, "a": "e" * 64, "s": sha})).scalar_one()
+            await conn.execute(text(
+                "INSERT INTO material_spans (ingest_id, owner_id, seq, page, kind, text, x0, y0, x1, y1,"
+                " locator, quote_sha256) VALUES (:i, :o, 0, 1, 'text', 'a', 0, 0, 1, 1, :l, :q)"),
+                {"i": ingest_id, "o": owner, "l": a, "q": q("a")})
+            await conn.execute(text(
+                "INSERT INTO base_packs (owner_id, pack_id, material_sha256, ingest_id, parse_config, state)"
+                " SELECT owner_id, :p, material_sha256, :i, parse_config, 'building' FROM base_packs"
+                " WHERE pack_id = :src"), {"p": building, "i": ingest_id, "src": packs[0]})
+        assert await citing(w, [(a, q("a"))]) == {packs[0]}  # the unsealed pack is never named
+        async with w.engine.begin() as conn:
+            for sql, pack in (("collected_at = now()", packs[0]), ("purged_at = now()", packs[1])):
+                await conn.execute(text(f"UPDATE base_packs SET {sql} WHERE pack_id = :p"), {"p": pack})  # noqa: S608
+        assert await citing(w, [(a, q("a"))]) == {packs[2]}
 
         # anna's own copy of another material, the same (locator, hash): never named for ivan, named for her.
         other = sha_of("anna")

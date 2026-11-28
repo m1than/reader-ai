@@ -58,12 +58,13 @@ class Picked:
 
     def ref(self, material_sha256: str) -> dict[str, str]:
         """The span id, plus its quote_sha256 beside a locator (SRV-INGEST FR-INGEST-34; r3_gates_revision).
-        A locator without a stored hash cannot occur (an active pack is sealed): asserted, so the job fails
-        closed instead of storing a locator without its hash."""
+        A locator without a stored hash cannot occur (an active pack is sealed): an explicit AssertionError
+        (it survives `python -O`), so the job fails closed instead of storing a locator without its hash."""
         sid = self.id_in(material_sha256)
         if not sid.startswith(LOCATOR_PREFIX):  # a legacy `<sha>:<seq>` id carries no hash
             return {"span": sid}
-        assert self.quote_sha256 is not None, "locator span without its quote hash"  # noqa: S101
+        if self.quote_sha256 is None:
+            raise AssertionError("locator span without its quote hash")
         return {"span": sid, "quote_sha256": self.quote_sha256}
 
 
