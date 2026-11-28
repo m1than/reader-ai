@@ -1,4 +1,4 @@
-# @trace FR-FRESH-2
+# @trace FR-FRESH-2 FR-FRESH-3 FR-FRESH-10
 """SRV-FRESH [db]: the sample is drawn from the material's active pack only (FR-FRESH-2's paired change,
 ADR-0039 / SRV-INGEST INV-INGEST-16, V.kl-active-view-readers).
 
@@ -8,12 +8,14 @@ ingest, spans, outline and stored span ids come from one pack, never both."""
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Any
 
 import pytest
 
 from ingest.packseed import R3, activate_pack, add_pack
 
-from .conftest import MAT, OUTLINE, SPANS, Pg, need, world
+from .conftest import MAT, OUTLINE, SPANS, FakeProvider, Pg, client, need, world
+from .test_freshness_db import _replies, full_check, path, report_row
 
 pytestmark = pytest.mark.anyio
 R3_SPANS = [
@@ -55,9 +57,48 @@ async def test_two_packs_sample_the_active_pack_only(pg: Pg, tmp_path: Path) -> 
         # the stale report's ingest (the r2 pack's) still reads its own rows
         assert len(await store.spans(conn, ivan, w.ingests["ivan"])) == len(SPANS)
     expected = {p: locator.page_locators(MAT, p, [t])[0] for p, _, t in R3_SPANS}
+    hashes = {p: locator.quote_sha256(t) for p, _, t in R3_SPANS}
     picked = prepared.sample.spans
-    assert prepared.sample.stored(MAT) == [{"span": expected[p.page], "page": p.page} for p in picked]
+    assert prepared.sample.stored(MAT) == [  # r3_gates_revision: a locator entry carries its stored hash
+        {"span": expected[p.page], "page": p.page, "quote_sha256": hashes[p.page]} for p in picked
+    ]
     assert prepared.scan_inputs_sha256 != r2_hash
+
+
+async def _claims_over(w: Any, tmp: Path) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """A fake-provider check: the stored claims and the GET read shape's claims."""
+    provider = FakeProvider(w.engine, _replies())
+    report_id, _ = await full_check(w, tmp, provider)
+    stored = (await report_row(w, report_id))["claims"]
+    async with client(w) as c:
+        shown = (await c.get(path(w) + "/freshness")).json()["report"]["claims"]
+    return stored, shown
+
+
+async def test_r3_claims_store_the_quote_hash_and_the_read_shape_is_unchanged(pg: Pg, tmp_path: Path) -> None:
+    """FR-FRESH-3 and FR-FRESH-10 (r3_gates_revision): a scan over the r3 pack stores claims whose span is a
+    locator with its span's quote_sha256; the read shape keeps exactly the approved keys."""
+    locator = need("reader.ingest.locator")
+    w = await world(pg, tmp_path)
+    ivan = w.users["ivan"]
+    async with w.engine.begin() as conn:  # the same synthetic spans re-converted: r3 ids, the same texts
+        r3 = await add_pack(conn, ivan, MAT, R3, list(SPANS))
+        await activate_pack(conn, ivan, r3)
+    stored, shown = await _claims_over(w, tmp_path)
+    page, _, body = SPANS[2]  # CLAIM cites s3
+    loc = locator.page_locators(MAT, page, [t for p, _, t in SPANS if p == page])[0]
+    assert stored[0]["span"] == loc
+    assert stored[0]["quote_sha256"] == locator.quote_sha256(body)
+    assert shown[0]["span"] == loc
+    assert set(shown[0]) == {"id", "subject", "kind", "confidence", "page", "span", "cell"}
+
+
+async def test_legacy_claims_store_no_quote_hash(pg: Pg, tmp_path: Path) -> None:
+    w = await world(pg, tmp_path)
+    stored, shown = await _claims_over(w, tmp_path)
+    assert stored[0]["span"] == f"{MAT}:2"
+    assert "quote_sha256" not in stored[0]
+    assert set(shown[0]) == {"id", "subject", "kind", "confidence", "page", "span", "cell"}
 
 
 async def test_no_active_pack_is_not_imported(pg: Pg, tmp_path: Path) -> None:

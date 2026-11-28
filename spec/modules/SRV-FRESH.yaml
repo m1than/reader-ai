@@ -193,6 +193,9 @@ requirements:
       existing hash and report is unchanged), the locator for an r3 pack (FR-INGEST-33). The rest of the SRV-INGEST
       note for this module (the pack id in `scan_inputs_sha256`) is not part of this change. The [db] fixtures seal
       their ingest as an active r2 pack (server/tests/ingest/packseed.py). [db] test_freshness_active_pack_db.py.
+      **Promoted revision (r3_gates_revision, unit fresh):** this id's text in `proposed_revisions` (a locator
+      sample entry carries its stored `quote_sha256`; the sampler asserts the hash) extends the text above.
+      test_freshness_active_pack_db.py, test_units.py.
   - id: FR-FRESH-3
     text: >-
       Scan (stage a). One SRV-AGENT call, task `freshness_scan`, stage `scan`, `thinking_off`, no tools, its own
@@ -220,6 +223,8 @@ requirements:
       `scan_inputs_sha256` equals that of any earlier report of the same material with stored `claims` (whatever that
       report's final status) copies its `claims` and `scan_bibliography`, sets `scan_reused_from`, and records no scan
       cost (no provider call).
+      **Promoted revision (r3_gates_revision, unit fresh):** this id's text in `proposed_revisions` (a claim's
+      locator carries its span's `quote_sha256`) extends the text above. test_freshness_active_pack_db.py.
   - id: FR-FRESH-4
     text: >-
       Topics. The outline titles of level ≤ 2 in outline order, the first `topics_max`, each sanitised and cut to
@@ -353,6 +358,10 @@ requirements:
       date_source: model, kind, why, covers: [section id]}]`, every citation `{url, host, title}`. `topics` are
       FR-FRESH-4's `[{id, title}]` read from the report's ingest when the report has a verdict, else null. `dropped`
       is `{reason: count}`.
+      **Promoted revision (r3_gates_revision, unit fresh):** this id's text in `proposed_revisions` (the read
+      shape is unchanged; a stored claim's `quote_sha256` is not returned) applies. Recorded: its read-shape test
+      over an r3 scan sits in test_freshness_active_pack_db.py (beside the r3 pack fixture), not in
+      test_freshness_db.py.
   - id: FR-FRESH-11
     text: >-
       Routes (session, owner role, the material's owner only; anyone else gets the 404 `not_found` of a material that
@@ -637,3 +646,52 @@ review: "Round 1 (deep-reviewer, 2026-11-23): changes, 12 blocking. Fixes in rev
 # material through one helper
 # `live_material(conn, owner_id, material_id)` that returns nothing for a deleted material (`materials.deleted_at
 # IS NOT NULL`, SRV-INGEST). Reports are kept (never deleted) and come back with the material's restore.
+
+# ---- Proposed revision (2026-11-28, V/kl-r3-gates; approved by agent 2026-11-28, r3_gates_revision): a precondition of SRV-INGEST
+# FR-INGEST-40-r3-bump (deep-reviewer round 1 on 340bc02, blocking 4). SRV-INGEST FR-INGEST-34: every citation that
+# names a locator carries the quote hash of the span it cited. After the bump the view mints locators for the r3
+# pack (FR-FRESH-2's paired change), so a report's `sample[].span` and `claims[].span` would name locators without
+# their hash. Legacy ids (every stored report) are unchanged and carry no hash (the same rule as SRV-LESSON's
+# schema). Not changed: `scan_inputs_sha256` (span ids only; a locator already fixes its span), the prompt (aliases
+# only), the rest of the SRV-INGEST note for this module (the pack id in `scan_inputs_sha256`), FR-FRESH-10 rows
+# already stored (never updated).
+proposed_revisions:
+  - id: FR-FRESH-2
+    text: >-
+      As approved (with its active-pack paired change), plus: a sampled span whose view id is a locator records its
+      stored `quote_sha256` (`views.PackSpan.quote_sha256`), and the stored sample entry is `{span, page,
+      quote_sha256}` for a locator and `{span, page}` for a legacy id, as before. A locator span without a stored
+      hash cannot occur (an active pack is sealed); the sampler asserts it (a plain assertion, so the job fails
+      closed instead of storing a locator without its hash).
+    tests_planned:
+      - "add to server/tests/freshness/test_freshness_active_pack_db.py [db]: with the material's r3 pack active the stored sample's entries are {span: <locator>, page, quote_sha256} with the spans' stored hashes; with the r2 legacy pack active they stay {span: <sha>:<seq>, page} (no hash key), byte-identical to today's sample"
+      - "add to server/tests/freshness/test_units.py [unit]: a Picked span with a locator id and no hash raises AssertionError and stores nothing; scan_inputs_sha256 of a sample is unchanged by the added hash field"
+  - id: FR-FRESH-3
+    text: >-
+      As approved, plus: code's expansion of a claim's alias adds the span's `quote_sha256` beside a locator
+      (`{…, page, span, quote_sha256}`); a legacy id gets none.
+    tests_planned:
+      - "add to test_freshness_active_pack_db.py [db] (fake provider): a scan over the r3 pack stores claims whose span is a locator with its span's quote_sha256; over the legacy pack, no quote_sha256 key"
+  - id: FR-FRESH-10
+    text: >-
+      As approved; the read shape is unchanged: a claim's stored `quote_sha256` is not returned (`claims` keep the
+      keys of `_CLAIM_KEYS` in reader/freshness/check.py), so WEB-FRESH needs no change.
+    tests_planned:
+      - "add to server/tests/freshness/test_freshness_db.py's read-shape test [db]: a report whose stored claims carry quote_sha256 (scanned over an r3 pack) returns claims with exactly the approved keys"
+
+r3_gates_revision:  # the review record of V/kl-r3-gates' revision, the same block in each spec it touches
+  task: V.kl-r3-gates
+  scope: "SRV-INGEST FR-INGEST-40's gates: (e) SRV-LESSON VEC-LESSON-1, -3, FR-LESSON-1, -4, -32, INV-LESSON-6 with SRV-INGEST FR-INGEST-49 (views.citing_packs); (f) SRV-PIPELINE FR-PIPELINE-7, -27, INV-PIPELINE-3; (h) WEB-NOTEBOOK FR-NOTEBOOK-2; SRV-FRESH FR-FRESH-2, -3, -10 (the bump's precondition); SRV-INGEST FR-INGEST-40-r3-bump (the held bump step)"
+  round_1: "deep-reviewer (Fable) on 340bc02: changes, 5 blocking, all applied in ac97a5b: (1) VEC-LESSON-1's `if` needs `required: [span]`, so a span-less source_ref or lab reference stays valid (3 new VEC-LESSON-3 cases); (2) FR-INGEST-49 names one pack per locator (the active pack when it holds the span, else the lowest pack id; FR-INGEST-42 steps 2, 4) and none for a legacy id, so no backfill and the r2 pack is never pinned; (3) compile runs in flight across the r3 activation: option (a), the owner step forbids compiles from the re-conversion until `appended`, INV-PIPELINE-3 stated per step, a unit test over a legacy-id notebook with r3 aliases; (4) SRV-FRESH's revision (FR-FRESH-2, -3, -10) added to the bump's precondition; (5) the bump's tests list every r2/r3-pinning test file as change or keeps r2. Decisions written in: gate (i)'s residual is covered by owner step (3)'s check; quote_sha256 beside a legacy id is refused; the citation state labels go to WEB-NOTEBOOK's defers; a locator span without a hash fails closed"
+  round_2: "deep-reviewer (Fable) on ac97a5b: changes, 2 blocking, applied in 637af3a: (1) the owner step's no-compile check named `reader status`, which lists no compile runs: it now reads `GET /api/compiles` (its `open_runs` predicate, reader/pipeline/routes.py); (2) SRV-FRESH FR-FRESH-10 widened the read shape and left WEB-FRESH unconfirmed: the read shape is unchanged (`_CLAIM_KEYS`, reader/freshness/check.py). Nits applied: FR-FRESH-2's fail-closed is a plain assertion (the scan has no output_invalid), VEC-PIPELINE-6's placeholder note"
+  round_3: "deep-reviewer (Fable) on 637af3a: VERDICT approve"
+  status: approved
+  approved_by: agent
+  approved_at: 2026-11-28
+  promotion: >-
+    The revision is approved as text. Its items move from proposed_* into requirements / invariants / vectors
+    (replacing the revised ids' approved text, which stays in proposed_revisions verbatim as reviewed) only together
+    with their Red tests, one module per unit (the SRV-SEARCH pattern; T5). FR-INGEST-40-r3-bump stays proposed:
+    `CONVERTER_VERSION` stays `docling-2.151.1+r2` until gate (g) (V.kl-tutor-find, SRV-TUTOR FR-TUTOR-8) is Green
+    on V/slice-integration too.
+  code_review_round_1: "deep-reviewer (Fable) on cb82561: VERDICT approve, no blocking. Non-blocking, applied: (1) FR-LESSON-1 step 7b and FR-LESSON-32's span_refs walked free-key maps (a tradeoff's rejected_because): the walk now visits only the schema's span holders (claims[].citations, citations, source_ref, source_refs, the lab reference); VEC-LESSON-3 case rejected-because-span-key (valid, no span ref); (2) test_citing_packs_db.py pins FR-INGEST-49's sealed and purged filters with an unsealed and a purged pack holding the same (locator, hash); (3) test_source_and_reports.py: a model-supplied quote_sha256 on a lab reference is overwritten for a known alias and dropped with the span for an unknown one (FR-PIPELINE-7); (4) the redundant check: kept for readability; (5) SRV-FRESH Picked.ref raises AssertionError explicitly (survives python -O); (6) the recorded deviations: accepted."

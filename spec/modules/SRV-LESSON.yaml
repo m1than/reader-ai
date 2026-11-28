@@ -28,9 +28,9 @@
 #   - Learner state (progress, recall schedule, the text of a learner's notes) is not stored in the slice. The slice
 #     guarantees the key it will need: a new revision never drops a `notes` cell id of the newest revision
 #     (INV-LESSON-3), so learner notes keyed by cell id (ADR-0004) survive republishing once they exist.
-#   - Span ids in citations have the form `<material_sha256>:<seq>`; a span citation may carry `page` and
-#     `material_title` for display (coordinator decision; SRV-INGEST issues ids in this form, WEB renders
-#     "material_title, p. page").
+#   - Span ids in citations have the form `<material_sha256>:<seq>` or, since V/kl-r3-gates (r3_gates_revision), a
+#     PDF locator (SRV-INGEST FR-INGEST-33) with its `quote_sha256`; a span citation may carry `page` and
+#     `material_title` for display (coordinator decision; WEB renders "material_title, p. page").
 #   - ADR-0004, ADR-0006, ADR-0007, ADR-0009 and ADR-0017 are `status: proposed`; this spec follows them as written.
 #
 # Cross-spec requirements (paired changes, sent by the coordinator):
@@ -61,7 +61,7 @@ approved_by: agent
 approved_at: 2026-11-22
 layer: server
 track: product
-adr: [ADR-0004, ADR-0007, ADR-0009, ADR-0017, ADR-0006, ADR-0020]
+adr: [ADR-0004, ADR-0007, ADR-0009, ADR-0017, ADR-0006, ADR-0020, ADR-0039]
 slice: V.SRV-LESSON-min
 review: "deep-reviewer (Fable) round 1 on abe2d25: changes (B1–B7 plus non-blocking); one round outside complex areas (AGENTS.md), findings applied in f2ce56b with coordinator decisions; coordinator diff check passed; approved with Red (2026-11-22). FR-LESSON-15 (2026-11-23, V/plan) reviewed with SRV-PLAN (deep-reviewer round 4 approve on d9f655a); Green: the foreign-key pin reads `confdeltype::text` (the catalog's `char` type arrives as bytes), no oracle changed. Amendment V/manage (2026-11-24): FR-LESSON-20..31 and INV-LESSON-20..23, deep-reviewer rounds 1–3 (round 3 VERDICT approve on 2a7d86f), promoted with Red; two existing tests change with it — the lesson routes' declared set gains the amendment's routes, and the migration test downgrades `lessons@-1` twice (the new head first), each oracle extended, none weakened. Green (V/manage): see the amendment note's Green paragraph. Merge with the SRV-INGEST slice (2026-11-24): `material_is_live` adds `AND deleted_at IS NULL`, so FR-LESSON-25's restore refusal `material_deleted` is live and its test loses the strict xfail marker it carried before the merge; that test also deletes the course before restoring it (the pre-merge version restored a course that was never deleted, a no-op the marker hid), so its oracle now reaches the refusal. Code-review fixes (V/manage-fix-srv, 2026-11-24): FR-LESSON-25's confirm target defined once (NFC, first 40 code points, then trimmed), identical in SRV-INGEST FR-INGEST-31 and WEB-MANAGE FR-MANAGE-2, with the 39-plus-space vector; INV-LESSON-23 gains deterministic lock-order oracles read from `pg_locks` (held and awaited advisory locks per waiting backend); INV-LESSON-20's deleted-lesson writes (progress, note, bookmark) get a 404-and-nothing-written test."
 
@@ -122,6 +122,7 @@ tables:
   lesson_progress: { owner_id: true, columns: "user_id uuid → users, lesson_id uuid, done_at timestamptz; PRIMARY KEY (user_id, lesson_id); FK (lesson_id, owner_id) → lessons (id, owner_id)" }
   lesson_notes: { owner_id: true, columns: "id uuid pk, user_id uuid → users, lesson_id uuid, cell_id text null, body text CHECK (1..10000 chars), created_at, updated_at; FK (lesson_id, owner_id) → lessons (id, owner_id); at most 500 per (user_id, lesson_id)" }
   lesson_bookmarks: { owner_id: true, columns: "user_id uuid → users, lesson_id uuid, cell_id text, created_at; PRIMARY KEY (user_id, lesson_id, cell_id); FK (lesson_id, owner_id) → lessons (id, owner_id); at most 200 per (user_id, lesson_id)" }
+  revision_packs: { owner_id: true, columns: "FR-LESSON-32 (r3_gates_revision): lesson_id uuid, sha256 text, pack_id text CHECK (64 lowercase hex), created_at timestamptz NOT NULL DEFAULT now(); PRIMARY KEY (lesson_id, sha256, pack_id); FK (lesson_id, sha256) → lesson_revisions (lesson_id, sha256); FK (lesson_id, owner_id) → lessons (id, owner_id); ON DELETE RESTRICT; append-only (INV-LESSON-6 revised)" }
 
 # Fixed error codes. The write path (FR-LESSON-4) raises `LessonWriteError(code)`; routes answer JSON `{"error": code}`.
 write_errors: [not_utf8, not_nbformat, duplicate_cell_id, missing_reader_metadata, cell_schema, cell_type_mismatch,
@@ -156,6 +157,9 @@ requirements:
       canonical bytes, so the transient keys nbformat strips on write — notebook `signature`, `orig_nbformat`,
       `orig_nbformat_minor`, cell `trusted` — are absent), `canonical` (bytes),
       `sha256`, `cell_count`), raising `reader.lessons.schema.LessonWriteError` whose `code` is one of `write_errors`.
+      **Promoted revision (r3_gates_revision, unit e):** this id's text in `proposed_revisions` (step 7b: every
+      `span` that starts with `spn:` parses with `reader.ingest.locator.parse`, else `cell_schema`) extends the text
+      above. test_lessons_schema.py.
   - id: FR-LESSON-2
     text: >-
       Canonical form. The canonical bytes of a valid notebook are `nbformat.writes(nb).encode("utf-8")` of the
@@ -192,6 +196,8 @@ requirements:
       call, including when the revision already existed; return `(sha256, created)` where `created` says whether step 6
       inserted the row. A crash after the blob and before commit leaves an unreferenced blob, which is harmless
       (content-addressed) and collected by a later stage (`defers`).
+      **Promoted revision (r3_gates_revision, unit e):** this id's text in `proposed_revisions` (FR-LESSON-32's
+      `revision_packs` rows in step 6) extends the text above. test_lessons_store.py.
   - id: FR-LESSON-5
     text: >-
       `stage` is one of the schema's provenance stages (paired SRV-PIPELINE change, 2026-11-22: the enum adds
@@ -443,6 +449,36 @@ requirements:
       /api/bookmarks` lists the caller's bookmarks across lessons that are not deleted, a bookmark whose cell left
       the current revision marked `stale: true`. Another user's note id → 404. [db] each route, both caps, an
       unknown cell.
+  - id: FR-LESSON-32
+    text: >-
+      **Packs a revision cites** (r3_gates_revision; SRV-INGEST FR-INGEST-44's `revision_packs`). Migration
+      `lessons_0003` (branch label `lessons`) creates `revision_packs` (tables). FR-LESSON-4 step 6, only when it
+      inserts the revision row (`created` true), collects the notebook's distinct span references: every `span` of
+      a citation, a `source_ref`, a `source_refs` entry and a lab `reference`, each with its `quote_sha256` when it
+      is a locator; it calls `reader.ingest.views.citing_packs(conn, owner_id, refs)` (SRV-INGEST FR-INGEST-49) and
+      inserts one row per returned pack id, in the same transaction as the revision row. A reference that names no
+      pack of this owner (the fixture lesson's synthetic material, a collected pack, a legacy id) adds no row and
+      never fails the write. A write that reproduces an existing revision (`created` false) adds no row. The
+      function reads only through `reader.ingest.views` (INV-INGEST-16), never the ingest tables.
+      **Every revision, not only published ones:** there is no publish step yet (G2 is SRV-PIPELINE's), so every
+      stage revision gets its rows; GC then keeps more packs than published revisions need, the safe side.
+      **No backfill:** a revision stored before `lessons_0003` can hold only legacy ids (the schema refused
+      locators until this revision), and a legacy id needs no row (FR-INGEST-49: a legacy pack leaves the head only
+      after an accepted seq map, and GC keeps that map's target, through which every legacy id resolves).
+      **SRV-INGEST `gc.Seams.cited` stays unbound (fail-closed: every pack cited)** after this revision. Binding it
+      to `revision_packs` needs the GC race closed first: the revision write reads the cited pack through views
+      without `lock_packs`, so a concurrent `gc_pack` could collect a pack between that read and the commit of the
+      row that cites it; the binding takes `packs.lock_packs` (FR-INGEST-46) on the returned ids before the insert,
+      and comes with SRV-KB's findings seam.
+      [db] test_lessons_store.py: with the material's r3 pack active and its r2 legacy pack sealed (backfilled
+      locators equal to r3's for unchanged spans), a revision citing two locators (with their hashes) of r3 → one
+      row naming r3 only; the same with the legacy pack active and no r3 → the legacy pack only; a legacy id adds
+      no row; written in the revision's transaction (a rollback after write_revision leaves none); rewriting the
+      same bytes adds none; F01 (synthetic material, no pack) writes its revision with no row; a locator whose hash
+      differs from the stored span's adds no row. The migration test: lessons_0003 is the branch head; its
+      downgrade drops only revision_packs; the test downgrades `lessons@-1` three times. FR-LESSON-20's migration
+      test (test_manage_courses_db.py) downgrades to `lessons_0001` by id instead of `lessons@-1`, since
+      lessons_0003 now sits above lessons_0002 (its oracle unchanged).
 
 invariants:
   - id: INV-LESSON-1
@@ -471,6 +507,9 @@ invariants:
       Immutability: rows of `lesson_revisions` and `lesson_revision_stages` are never updated, deleted or truncated
       (row triggers refuse UPDATE and DELETE, a `BEFORE TRUNCATE … FOR EACH STATEMENT` trigger refuses TRUNCATE; a test
       attempts each), and `reader.blobs.put` never changes the bytes at a final name whose bytes already hash to it.
+      **Promoted revision (r3_gates_revision, unit e):** this id's text in `proposed_revisions` (`revision_packs`
+      rows are never updated, deleted or truncated; the resolver writes none) extends the text above.
+      test_lessons_store.py.
   - id: INV-LESSON-7
     text: >-
       `owner_id` of lessons, revisions and stage records always equals the owning course's `owner_id` (composite
@@ -526,7 +565,11 @@ vectors:
   - id: VEC-LESSON-1
     source: "Written for this spec (2026-11-21) from ADR-0004's kind table; JSON Schema 2020-12"
     file: spec/fixtures/SRV-LESSON/cell.schema.json
-    note: "The packaged copy server/src/reader/lessons/cell.schema.json must be byte-identical (test)."
+    note: >-
+      The packaged copy server/src/reader/lessons/cell.schema.json must be byte-identical (test).
+      **Promoted revision (r3_gates_revision, unit e):** this id's text in `proposed_revisions` (`span_ref` accepts
+      the legacy id or a PDF locator; `quote_sha256` required beside a locator and refused otherwise) replaces the
+      schema's span rules.
   - id: VEC-LESSON-2
     source: "Synthetic fixture lesson F01, generated by spec/fixtures/SRV-LESSON/gen_f01.py (nbformat 5.11.1, jsonschema 4.26.0); lab values from REF-LESSON-4 section 11 and ADR-0009 (q = 0.3, z = 1: 0.628)"
     file: spec/fixtures/SRV-LESSON/F01.ipynb
@@ -538,6 +581,9 @@ vectors:
   - id: VEC-LESSON-3
     source: "Mutations of VEC-LESSON-2 written for this spec (RFC 6902 operations), with the expected write codes and the G2 codes SRV-PIPELINE must give later"
     file: spec/fixtures/SRV-LESSON/invalid.yaml
+    note: >-
+      **Promoted revision (r3_gates_revision, unit e):** this id's text in `proposed_revisions` adds the locator
+      and quote-hash cases (synthetic hashes over F01's synthetic material; no book text).
 
 test_levels:
   unit: "FR-LESSON-1, 2, 3, 5 and VEC-LESSON-1..3 without a database (blobs in a temporary directory)."
@@ -634,3 +680,87 @@ owner_notes:
 # test_manage_lessons_db.py renames a lesson and reads a course's impact while its only run is cancelled with
 # `finished_at` still null. FR-LESSON-25 gains the empty-target sentence (same wording as SRV-INGEST FR-INGEST-31
 # and WEB-MANAGE FR-MANAGE-2); [unit] tests/lessons/test_manage_confirm_unit.py.
+
+# ---- Proposed revision (2026-11-28, V/kl-r3-gates; approved by agent 2026-11-28, r3_gates_revision): SRV-INGEST FR-INGEST-40 gate (e), locator
+# span ids in lessons (ADR-0039 P2, owner decision 20). Paired: SRV-INGEST FR-INGEST-49 (`views.citing_packs`),
+# SRV-PIPELINE FR-PIPELINE-7 (the only writer of locator citations), WEB-NOTEBOOK FR-NOTEBOOK-2 (grouping).
+# Nothing here changes a stored revision: every revision stored today holds `<sha>:<seq>` ids, which stay valid
+# (INV-LESSON-6; SRV-INGEST FR-INGEST-42 resolves them at read time). The header's decision "Span ids in citations
+# have the form `<material_sha256>:<seq>`" becomes "either that form or a PDF locator with its quote hash".
+# Deep-reviewer round 1 (340bc02): changes; blocking 1 (span-less objects), 2 (citing_packs rule) applied below.
+# At promotion ADR-0039 joins `adr`, `revision_packs` moves into `tables` and the header decision above is reworded.
+# Unit e (promotion): proposed_tables.revision_packs moved into `tables` and FR-LESSON-32 into `requirements`; the
+# revised ids below are promoted (each one's entry names its text here as normative).
+
+proposed_revisions:
+  - id: VEC-LESSON-1
+    text: >-
+      cell.schema.json (fixture and packaged copy byte-identical, as approved), with: `span_ref` accepts the legacy
+      id `^[0-9a-f]{64}:(0|[1-9][0-9]{0,11})$` or the PDF locator of SRV-INGEST FR-INGEST-33
+      `^spn:[0-9a-f]{64}:p[1-9][0-9]{0,4}:(0|[1-9][0-9]{0,9})-(0|[1-9][0-9]{0,9})(#(0|[1-9][0-9]{0,5}))?$` (still
+      under `single_line`); the non-PDF form (`:L<a>-<b>`) is refused until a non-PDF converter exists. Every object
+      that holds a `span` (the span `citation`, `source_ref`, the `test_vector` lab `reference`) gains an optional
+      `quote_sha256` (`$defs/sha256`) under one rule: required when `span` starts with `spn:`, absent otherwise (a
+      legacy id is resolved through the seq map, so a stored hash beside it would have no meaning), expressed as
+      `if {required: [span], properties: {span: {pattern: "^spn:"}}} then {required: [quote_sha256]} else {not:
+      {required: [quote_sha256]}}` (the `required` in `if` keeps a span-less `source_ref` or `test_vector`
+      reference valid: without it the `if` passes vacuously and the object would need a hash; round 1, blocking 1).
+      The `span_ref` description names both forms.
+    tests_planned:
+      - "change test_lessons_schema.py::test_packaged_schema_is_the_vector: reads the new fixture bytes (oracle unchanged)"
+  - id: FR-LESSON-1
+    text: >-
+      As approved, plus step (7b) after the schema pass: every `span` value that starts with `spn:` is parsed with
+      `reader.ingest.locator.parse` (stdlib only; FR-INGEST-33), which also checks what the pattern cannot (start ≤
+      end; `#n` present iff start = end); a `LocatorError` is `cell_schema`.
+    tests_planned:
+      - "test_lessons_schema.py::test_vector_case over the new VEC-LESSON-3 cases"
+  - id: VEC-LESSON-3
+    text: >-
+      invalid.yaml as approved, plus mutations of F01's citation 1 (span ids over F01's synthetic material sha
+      `bfaf5f84…f1a1`, synthetic hashes; no book text): `span-locator-with-quote` (a valid PDF locator and a
+      `quote_sha256`) → write null; `span-locator-empty-with-ordinal` (`…:p3:40-40#0` with a hash) → null;
+      `span-locator-no-quote` → cell_schema; `span-legacy-with-quote` → cell_schema; `span-locator-start-after-end`
+      (`:p1:9-3`) → cell_schema (step 7b); `span-locator-ordinal-on-range` (`:p1:0-9#0`) → cell_schema (7b);
+      `span-locator-empty-no-ordinal` (`:p1:4-4`) → cell_schema (7b); `span-locator-file-form`
+      (`spn:<sha>:notes.md:L1-2`) → cell_schema; `span-locator-page-zero` (`:p0:0-1`) → cell_schema;
+      `quote-uppercase` (an uppercase-hex hash) → cell_schema; `source-ref-locator-no-quote` (an erratum
+      `source_ref.span` locator without a hash) → cell_schema; `lab-reference-locator-with-quote` → null;
+      `source-ref-no-span` (F01's `source_refs` entry with `material_sha256` and `page`, no span) → null;
+      `source-ref-no-span-with-quote` (the same with a `quote_sha256`) → cell_schema; `lab-reference-no-span` (a
+      `test_vector` reference without `span`) → null. The existing `span-old-form` case (`fixture:F01:p1:0-120`) stays cell_schema.
+    tests_planned:
+      - "change test_lessons_schema.py::test_vector_case: parametrised over the new cases (the file is the oracle)"
+  - id: FR-LESSON-4
+    text: >-
+      As approved, plus FR-LESSON-32's `revision_packs` rows in step 6 when the revision row is inserted.
+    tests_planned:
+      - "FR-LESSON-32's test_lessons_store.py cases"
+  - id: INV-LESSON-6
+    text: >-
+      As approved, and `revision_packs` rows are never updated, deleted or truncated (the same row and statement
+      triggers). The read-time resolver (SRV-INGEST FR-INGEST-42) writes no revision, stage record or
+      `revision_packs` row.
+    tests_planned:
+      - "add to test_lessons_store.py [db]: UPDATE, DELETE and TRUNCATE of revision_packs are refused"
+
+proposed_decisions:  # the round-1 open questions, answered by the coordinator (deep-reviewer round 1, 340bc02)
+  - "Backfill of revision_packs: none needed (FR-LESSON-32: pre-revision revisions hold legacy ids only, which need no row)."
+  - "quote_sha256 beside a legacy id is refused (one meaning per form); SRV-TUTOR's citations follow the same rule."
+
+r3_gates_revision:  # the review record of V/kl-r3-gates' revision, the same block in each spec it touches
+  task: V.kl-r3-gates
+  scope: "SRV-INGEST FR-INGEST-40's gates: (e) SRV-LESSON VEC-LESSON-1, -3, FR-LESSON-1, -4, -32, INV-LESSON-6 with SRV-INGEST FR-INGEST-49 (views.citing_packs); (f) SRV-PIPELINE FR-PIPELINE-7, -27, INV-PIPELINE-3; (h) WEB-NOTEBOOK FR-NOTEBOOK-2; SRV-FRESH FR-FRESH-2, -3, -10 (the bump's precondition); SRV-INGEST FR-INGEST-40-r3-bump (the held bump step)"
+  round_1: "deep-reviewer (Fable) on 340bc02: changes, 5 blocking, all applied in ac97a5b: (1) VEC-LESSON-1's `if` needs `required: [span]`, so a span-less source_ref or lab reference stays valid (3 new VEC-LESSON-3 cases); (2) FR-INGEST-49 names one pack per locator (the active pack when it holds the span, else the lowest pack id; FR-INGEST-42 steps 2, 4) and none for a legacy id, so no backfill and the r2 pack is never pinned; (3) compile runs in flight across the r3 activation: option (a), the owner step forbids compiles from the re-conversion until `appended`, INV-PIPELINE-3 stated per step, a unit test over a legacy-id notebook with r3 aliases; (4) SRV-FRESH's revision (FR-FRESH-2, -3, -10) added to the bump's precondition; (5) the bump's tests list every r2/r3-pinning test file as change or keeps r2. Decisions written in: gate (i)'s residual is covered by owner step (3)'s check; quote_sha256 beside a legacy id is refused; the citation state labels go to WEB-NOTEBOOK's defers; a locator span without a hash fails closed"
+  round_2: "deep-reviewer (Fable) on ac97a5b: changes, 2 blocking, applied in 637af3a: (1) the owner step's no-compile check named `reader status`, which lists no compile runs: it now reads `GET /api/compiles` (its `open_runs` predicate, reader/pipeline/routes.py); (2) SRV-FRESH FR-FRESH-10 widened the read shape and left WEB-FRESH unconfirmed: the read shape is unchanged (`_CLAIM_KEYS`, reader/freshness/check.py). Nits applied: FR-FRESH-2's fail-closed is a plain assertion (the scan has no output_invalid), VEC-PIPELINE-6's placeholder note"
+  round_3: "deep-reviewer (Fable) on 637af3a: VERDICT approve"
+  status: approved
+  approved_by: agent
+  approved_at: 2026-11-28
+  promotion: >-
+    The revision is approved as text. Its items move from proposed_* into requirements / invariants / vectors
+    (replacing the revised ids' approved text, which stays in proposed_revisions verbatim as reviewed) only together
+    with their Red tests, one module per unit (the SRV-SEARCH pattern; T5). FR-INGEST-40-r3-bump stays proposed:
+    `CONVERTER_VERSION` stays `docling-2.151.1+r2` until gate (g) (V.kl-tutor-find, SRV-TUTOR FR-TUTOR-8) is Green
+    on V/slice-integration too.
+  code_review_round_1: "deep-reviewer (Fable) on cb82561: VERDICT approve, no blocking. Non-blocking, applied: (1) FR-LESSON-1 step 7b and FR-LESSON-32's span_refs walked free-key maps (a tradeoff's rejected_because): the walk now visits only the schema's span holders (claims[].citations, citations, source_ref, source_refs, the lab reference); VEC-LESSON-3 case rejected-because-span-key (valid, no span ref); (2) test_citing_packs_db.py pins FR-INGEST-49's sealed and purged filters with an unsealed and a purged pack holding the same (locator, hash); (3) test_source_and_reports.py: a model-supplied quote_sha256 on a lab reference is overwritten for a known alias and dropped with the span for an unknown one (FR-PIPELINE-7); (4) the redundant check: kept for readability; (5) SRV-FRESH Picked.ref raises AssertionError explicitly (survives python -O); (6) the recorded deviations: accepted."

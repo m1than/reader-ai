@@ -1,4 +1,4 @@
-# @trace VEC-PIPELINE-4, VEC-PIPELINE-5, VEC-PIPELINE-6, FR-PIPELINE-2, FR-PIPELINE-3, FR-PIPELINE-4, FR-PIPELINE-7, FR-PIPELINE-25, FR-PIPELINE-27
+# @trace VEC-PIPELINE-4, VEC-PIPELINE-5, VEC-PIPELINE-6, FR-PIPELINE-2, FR-PIPELINE-3, FR-PIPELINE-4, FR-PIPELINE-7, FR-PIPELINE-25, FR-PIPELINE-27, INV-PIPELINE-3
 """Source rendering with aliases and delimiters, prompts and input hashes, report validation, forced verdicts,
 citation expansion and the slice's open-cell items (pure)."""
 
@@ -554,3 +554,141 @@ def test_review_prompt_asks_for_independent_lab_references() -> None:
     prompts = need("reader.pipeline.prompts")
     text = prompts.load().text("adversarial_review")
     assert "Lab references:" in text and "not independent of the lab's own computation" in text
+
+
+# --- r3_gates_revision (FR-PIPELINE-7, -27, INV-PIPELINE-3): locator span ids carry their quote hash ------------
+
+Q1, Q2, Q3 = "1" * 64, "2" * 64, "3" * 64  # synthetic quote hashes; synthetic texts, no book text
+
+
+def _r3_aliases() -> dict[str, Any]:
+    """Aliases over an r3 source: locators of material A with their stored hashes."""
+    source = need("reader.pipeline.source")
+    return {
+        "s1": source.Span(f"spn:{A}:p61:0-10", 61, "text", "t1", Q1),
+        "s2": source.Span(f"spn:{A}:p61:11-20", 61, "text", "t2", Q2),
+        "s3": source.Span(f"spn:{A}:p62:0-0#0", 62, "figure", "", Q3),
+    }
+
+
+def test_expanded_locators_carry_their_quote_hash() -> None:
+    """FR-PIPELINE-7: a locator citation gains its span's quote_sha256; a legacy id gets none."""
+    reports = need("reader.pipeline.reports")
+    source = need("reader.pipeline.source")
+    errors = need("reader.agent.errors")
+    aliases = {"s1": source.Span(f"{A}:4", 61, "text", "t"), "s2": _r3_aliases()["s1"]}
+    kept, dropped = reports.expand_citations([{"span": "s1"}, {"span": "s2"}], aliases, "Title")
+    assert dropped == []
+    assert kept == [
+        {"span": f"{A}:4", "page": 61, "material_title": "Title"},
+        {"span": f"spn:{A}:p61:0-10", "quote_sha256": Q1, "page": 61, "material_title": "Title"},
+    ]
+    unhashed = {"s1": source.Span(f"spn:{A}:p61:0-10", 61, "text", "t")}  # a locator without its hash
+    with pytest.raises(errors.AgentError) as refused:
+        reports.expand_citations([{"span": "s1"}], unhashed, "Title")
+    assert refused.value.code == "output_invalid"
+
+
+def test_material_of_both_id_forms() -> None:
+    notebook = need("reader.pipeline.notebook")
+    locator = need("reader.ingest.locator")
+    assert notebook.material_of(f"spn:{A}:p70:0-120") == A
+    assert notebook.material_of(f"spn:{A}:p3:40-40#0") == A
+    assert notebook.material_of(f"{A}:12") == A
+    for bad in ("spn:abc", "a:b:3", "", f"spn:{A}:p1:9-3"):
+        with pytest.raises(locator.LocatorError):
+            notebook.material_of(bad)
+
+
+def test_built_r3_notebook_carries_hashes_and_round_trips() -> None:
+    """FR-PIPELINE-7: an explain claim, an erratum source_ref, a route's source_refs and a lab reference over
+    r3 spans validate under SRV-LESSON's revised schema; to_compact gives back aliases without hashes."""
+    notebook = need("reader.pipeline.notebook")
+    from reader.lessons.schema import validate
+
+    aliases = _r3_aliases()
+    compact = {
+        "cells": [
+            {"id": "r1", "kind": "route", "source": "r", "source_refs": [{"span": "s3"}]},
+            {"id": "e1", "kind": "explain", "source": "x",
+             "claims": [{"id": "c1", "text": "t", "citations": [{"span": "s1"}]}]},
+            {"id": "er1", "kind": "erratum", "source": "x", "correction": "c", "source_ref": {"span": "s2"},
+             "citations": [{"span": "s2"}]},
+            {"id": "lab1", "kind": "lab", "source": "x = 1", "kernel": "python3", "network": "none",
+             "asserts": ["x == 1"], "reference": {"kind": "test_vector", "span": "s1", "expected": ["1"]}},
+        ]
+    }
+    built = notebook.build(compact, title="L", aliases=aliases, material_title="M", stage="draft",
+                           prompt_version="v1", model="m", previous=None)
+    validate(notebook.to_bytes(built.notebook))
+    readers = [c["metadata"]["reader"] for c in built.notebook["cells"]]
+    assert readers[0]["source_refs"] == [
+        {"material_sha256": A, "page": 62, "span": f"spn:{A}:p62:0-0#0", "quote_sha256": Q3}
+    ]
+    assert readers[1]["claims"][0]["citations"][0]["quote_sha256"] == Q1
+    assert readers[2]["source_ref"] == {"material_sha256": A, "page": 61, "span": f"spn:{A}:p61:11-20",
+                                        "quote_sha256": Q2}
+    assert readers[3]["reference"] == {"kind": "test_vector", "span": f"spn:{A}:p61:0-10", "quote_sha256": Q1,
+                                       "expected": ["1"]}
+    back = json.dumps(notebook.to_compact(built.notebook, aliases))
+    assert "quote_sha256" not in back and "spn:" not in back
+    view = notebook.to_compact(built.notebook, aliases)["cells"]
+    assert view[1]["claims"][0]["citations"] == [{"span": "s1"}]
+    assert view[3]["reference"] == {"kind": "test_vector", "span": "s1", "expected": ["1"]}
+
+
+def test_a_model_written_reference_hash_is_never_kept() -> None:
+    """Code review round 1: a model-supplied quote_sha256 on a lab reference is overwritten for a known alias
+    and dropped with the span for an unknown one (only code writes it, FR-PIPELINE-7)."""
+    notebook = need("reader.pipeline.notebook")
+
+    def reference(alias: str) -> dict[str, Any]:
+        lab = {"id": "lab1", "kind": "lab", "source": "x = 1", "kernel": "python3", "network": "none",
+               "asserts": ["x == 1"],
+               "reference": {"kind": "test_vector", "span": alias, "quote_sha256": "f" * 64, "expected": ["1"]}}
+        built = notebook.build({"cells": [lab]}, title="L", aliases=_r3_aliases(), material_title="M",
+                               stage="draft", prompt_version="v1", model="m", previous=None)
+        out: dict[str, Any] = built.notebook["cells"][0]["metadata"]["reader"]["reference"]
+        return out
+
+    assert reference("s1") == {"kind": "test_vector", "span": f"spn:{A}:p61:0-10", "quote_sha256": Q1,
+                               "expected": ["1"]}
+    assert reference("s99") == {"kind": "test_vector", "expected": ["1"]}
+
+
+def test_legacy_id_notebook_under_r3_aliases_reads_as_unknown() -> None:
+    """INV-PIPELINE-3 per step (round 1, blocking 3): a notebook drafted over the legacy pack, read by a later
+    step whose source is the r3 pack: to_compact, the rule checks and the failing check's payload run; legacy
+    ids read `unknown`; no span id or quote hash reaches the model."""
+    notebook = need("reader.pipeline.notebook")
+    rules = need("reader.pipeline.rules")
+    stages = need("reader.pipeline.stages")
+    steps_mod = need("reader.pipeline.steps")
+    runs = need("reader.pipeline.runs")
+    source = need("reader.pipeline.source")
+    from decimal import Decimal
+
+    legacy = notebook.build(
+        {"cells": [{"id": "e1", "kind": "explain", "source": "x",
+                    "claims": [{"id": "c1", "text": "t", "citations": [{"span": "s1"}]}]}]},
+        title="L", aliases=_aliases(), material_title="M", stage="draft", prompt_version="v1", model="m",
+        previous=None,
+    ).notebook
+    old_id = legacy["cells"][0]["metadata"]["reader"]["claims"][0]["citations"][0]["span"]
+    r3 = _r3_aliases()
+    view = notebook.to_compact(legacy, r3)
+    assert view["cells"][0]["claims"][0]["citations"] == [{"span": "unknown"}]
+    data = rules.RuleInput(legacy, {s.span_id: s for s in r3.values()}, set(), stages.load().reference_libraries)
+    rules.report(stages.load().rules, data)  # runs without an exception
+    lesson = runs.Lesson(source.render(list(r3.values())), "L", "Course title")
+
+    def row(n: int, stage: str, report: dict[str, Any]) -> Any:
+        return runs.StepRow(n, n, stage, "", None, report, None, None, Decimal(0), Decimal(0))
+
+    fact = {"verdicts": [{"cell": "e1", "claim": "c1", "verdict": "unsupported", "spans": [old_id],
+                          "note": "n", "forced": None, "credibility": 6}], "next": "revise"}
+    steps = [row(1, "draft", {"stripped": []}), row(2, "fact_check", fact)]
+    payload = json.loads(steps_mod._user_prompt("revise", legacy, lesson, steps))
+    assert payload["fact_report"][0]["spans"] == ["unknown"]
+    text = json.dumps(payload)
+    assert old_id not in text and "quote_sha256" not in text and A not in text

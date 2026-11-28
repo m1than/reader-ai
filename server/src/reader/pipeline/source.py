@@ -17,6 +17,7 @@ from typing import Final, Protocol
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncConnection
 
+from reader.ingest import locator
 from reader.pipeline.errors import PipelineError
 
 SOURCE_MAX_CHARS: Final = 300000  # bounds.source_max_chars
@@ -30,6 +31,15 @@ class Span:
     page: int
     kind: str
     text: str
+    quote_sha256: str | None = None  # stored quote hash (FR-INGEST-34); cited beside a locator only
+
+
+def material_of(span_id: str) -> str:
+    """FR-PIPELINE-7: the material of a span id, a locator or a legacy `<sha>:<seq>`; raises LocatorError
+    for anything else (never a split of a locator on `:`)."""
+    if locator.is_legacy_id(span_id):
+        return span_id.split(":", 1)[0]
+    return locator.parse(span_id).material_sha256
 
 
 @dataclass(frozen=True)
@@ -87,7 +97,7 @@ class DbSpanReader:
             )
         ).scalar()
         title = str(config_id) if spans and config_id else material_sha256[:12]
-        return [Span(s.span_id, s.page, s.kind, s.text) for s in spans], title
+        return [Span(s.span_id, s.page, s.kind, s.text, s.quote_sha256) for s in spans], title
 
 
 async def material_imported(conn: AsyncConnection, owner_id: uuid.UUID, material_sha256: str) -> bool:

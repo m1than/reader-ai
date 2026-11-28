@@ -828,3 +828,32 @@ def test_stored_fields_are_bounded_and_resolved_from_r(
     for text_value in [r["text"] for r in resolved.reasons] + [s["note"] for s in resolved.claim_status]:
         assert len(text_value) <= params.TEXT_CHARS_MAX
         assert not m.text.has_removed(text_value)
+
+
+# r3_gates_revision (FR-FRESH-2, -3): a locator sample entry carries its quote hash; a legacy id carries none.
+SHA = "e" * 64
+LOC = f"spn:{SHA}:p8:0-40"
+
+
+def test_locator_sample_entries_carry_their_hash_and_the_reuse_key_ignores_it() -> None:
+    sample = need("reader.freshness.sample")
+    legacy = sample.Picked(3, 8, "text", "t", False)
+    hashed = sample.Picked(4, 8, "text", "t", False, LOC, "1" * 64)
+    assert sample.Sample((legacy, hashed)).stored(SHA) == [
+        {"span": f"{SHA}:3", "page": 8},
+        {"span": LOC, "page": 8, "quote_sha256": "1" * 64},
+    ]
+    bare = sample.Picked(4, 8, "text", "t", False, LOC)
+    ids = [p.id_in(SHA) for p in (legacy, hashed)]
+    assert ids == [p.id_in(SHA) for p in (legacy, bare)]  # scan_inputs_sha256 reads ids only
+    key = sample.scan_inputs_sha256("i", ids, "v", "p", "m")
+    assert key == sample.scan_inputs_sha256("i", [p.id_in(SHA) for p in (legacy, bare)], "v", "p", "m")
+
+
+def test_a_locator_without_its_hash_fails_closed() -> None:
+    sample = need("reader.freshness.sample")
+    bare = sample.Picked(4, 8, "text", "t", False, LOC)
+    with pytest.raises(AssertionError):
+        sample.Sample((bare,)).stored(SHA)
+    with pytest.raises(AssertionError):
+        bare.ref(SHA)

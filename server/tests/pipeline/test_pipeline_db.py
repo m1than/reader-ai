@@ -155,10 +155,28 @@ async def test_loop_case(
         assert "Claim 1." not in "\n".join(r.getMessage() for r in caplog.records)
 
 
-async def test_provenance_and_citations_of_every_revision(pg: Pg, tmp_path: Path) -> None:
-    """FR-PIPELINE-12 and INV-PIPELINE-3 on a run that fails each check once (stop loop_limit)."""
+def _r3_form(spans: list[Any]) -> list[Any]:
+    """The same synthetic spans as an r3 pack gives them: locators with their quote hashes (r3_gates_revision)."""
+    source, locator = need("reader.pipeline.source"), need("reader.ingest.locator")
+    out: list[Any] = []
+    for page in sorted({s.page for s in spans}):
+        on_page = [s for s in spans if s.page == page]
+        ids = locator.page_locators(MATERIAL, page, [s.text for s in on_page])
+        out += [
+            source.Span(i, s.page, s.kind, s.text, locator.quote_sha256(s.text))
+            for i, s in zip(ids, on_page, strict=True)
+        ]
+    return out
+
+
+@pytest.mark.parametrize("form", ["legacy", "r3"])
+async def test_provenance_and_citations_of_every_revision(pg: Pg, tmp_path: Path, form: str) -> None:
+    """FR-PIPELINE-12 and INV-PIPELINE-3 on a run that fails each check once (stop loop_limit), over a legacy-id
+    source and over a locator source (r3_gates_revision: a locator citation carries its span's quote hash)."""
     case = BY_NAME["four-checks-fail-once"]
     async with pipeline_env(pg, tmp_path, **_env_kwargs(case)) as env:
+        if form == "r3":
+            env.spans.spans = _r3_form(env.spans.spans)
         run, status = await _run_case(env, case)
         records = await env.rows(
             "SELECT stage, provenance, sha256 FROM lesson_revision_stages WHERE lesson_id = :l ORDER BY id",
@@ -189,6 +207,7 @@ async def test_provenance_and_citations_of_every_revision(pg: Pg, tmp_path: Path
                     claim.pop("credibility")
             assert stripped == before
         spans = {s.span_id: s for s in env.spans.spans}
+        cited = 0
         for _, _, sha in records:
             nb = await env.notebook(sha)
             for cell in nb["cells"]:
@@ -198,6 +217,12 @@ async def test_provenance_and_citations_of_every_revision(pg: Pg, tmp_path: Path
                             span = spans[citation["span"]]
                             assert citation["page"] == span.page
                             assert citation["material_title"] == "Synthetic course"  # the course title
+                            if form == "r3":
+                                assert citation["quote_sha256"] == span.quote_sha256
+                            else:
+                                assert "quote_sha256" not in citation
+                            cited += 1
+        assert cited > 0
         assert status["g2"]["publishable"] is False
         assert status["spent_usd"] == str(await _spent(env, run))
         assert status["task_budgets"] == {"draft": "4.0", "fact_check": "2.0", "review": "4.0"}

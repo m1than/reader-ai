@@ -2297,6 +2297,69 @@ tasks:
         grounding re-measured as a gate; L5 boost once learner
         state exists (S6.SRV-RECALL). FR-TUTOR-5; NFR-TUTOR-1, -2, -3; INV-TUTOR-2. Supersedes V.tutor-retrieval where
         both change tutor retrieval" }
+  - { id: V.kl-r3-gates, stage: V, kind: module, track: engineering, status: in_progress, needs: [V.kl-search-find],
+      branch: V/kl-r3-gates,
+      note: "2026-11-28. The r3 converter bump (SRV-INGEST FR-INGEST-40) is held at docling-2.151.1+r2 until gates
+        (e)-(i) land on V/slice-integration. Gate status, verified on origin/V/slice-integration at 83e1831 by code
+        and tests: (a)-(d) MET (FR-INGEST-40 notes; INV-INGEST-16 scan passes). (e) NOT MET: cell.schema.json
+        span_ref still accepts only `<sha>:<seq>` (pattern ^[0-9a-f]{64}:(0|[1-9][0-9]{0,11})$), citations have
+        no quote_sha256, and lessons has no revision_packs table (migrations 0001, 0002 only). (f) NOT MET:
+        pipeline/notebook.py `_ref` takes the material as span_id.split(':', 1)[0] and reports.py
+        constrain_credibility counts materials the same way (a locator gives `spn` for every span, so credibility 1
+        becomes unreachable and source_ref.material_sha256 would be `spn`, refused by the schema); pipeline Span has
+        no quote_sha256 and no citation carries one. (g) handled by V.kl-tutor-find (FR-TUTOR-8 quote_sha256;
+        not touched here). (h) NOT MET: web/src/notebook/citations.ts materialOf groups by the part before the last
+        `:`, so every page of a locator becomes its own material. (i) MET: search/jobs.py seals the vector overlay
+        then calls request_activation({vectors}) and try_activate in the run transaction; manifest._precondition
+        refuses `vectors_missing` when the replaced head element names a vectors overlay; tests
+        ingest/test_manifest_db.py::test_activation_contract (r3 replacing a vectored pack -> vectors_missing, then
+        seqmap_missing) and search/test_search_active_pack_db.py (r3 sealed overlay waits, the legacy pack keeps
+        serving). Residual for the reviewer: when the legacy pack's own embed has not sealed yet (its dark window
+        after ingest_0004), the replaced element names no vectors and an r3 pack may enter the head without
+        vectors; this opens no second dark window. Drafted (proposed, not approved; the coordinator runs
+        deep-reviewer): SRV-LESSON proposed_revisions FR-LESSON-1, -4, VEC-LESSON-1, -3, INV-LESSON-6 and
+        proposed FR-LESSON-32 (revision_packs) with paired SRV-INGEST FR-INGEST-49 (views.citing_packs);
+        SRV-PIPELINE proposed_revisions FR-PIPELINE-7, -27, INV-PIPELINE-3; WEB-NOTEBOOK proposed_revisions
+        FR-NOTEBOOK-2; SRV-INGEST proposed FR-INGEST-40 step (r3 bump) with the owner's live re-conversion step
+        (reader-ingest --setup, watcher restart, reader-ingest <material>). CONVERTER_VERSION untouched.
+        Gate (h) also fixes a live bug: SRV-SEARCH already cites locators for legacy packs
+        (reader/search/store.py search()), so the tutor's Ask panel, sharing citations.ts's grouping, shows each
+        cited page as its own 'source spn:...' entry today.
+        Deep-reviewer (Fable) round 1 on 340bc02: changes, 5 blocking (gate findings confirmed), fixed in the specs:
+        (1) VEC-LESSON-1's if needs `required: [span]` (span-less source_ref / lab reference stay valid; 3 new
+        VEC-LESSON-3 cases); (2) FR-INGEST-49 citing_packs names one pack per locator (the active pack when it
+        holds the span, else the lowest pack id; FR-INGEST-42 steps 2, 4), none for a legacy id, so no backfill and
+        the r2 pack is not pinned; cross-spec note keys aligned; (3) compile runs in flight across the activation:
+        option (a), the owner step forbids compiles from the re-conversion until `appended`, INV-PIPELINE-3 stated
+        per step, a unit test over a legacy-id notebook with r3 aliases; (4) SRV-FRESH revision (FR-FRESH-2, -3,
+        -10: sample and claims carry quote_sha256 beside a locator) added to the bump precondition; (5) the bump's
+        tests list every r2/r3-pinning test file as change or keeps r2. Decisions written in: gate (i)'s residual is
+        covered by owner step (3)'s check; quote_sha256 beside a legacy id is refused (tutor too); state labels go
+        to WEB-NOTEBOOK defers; a locator without hash fails closed. Real cost of skipping step (3)'s check: still
+        one dark window, but up to one embed longer, and the legacy embed's work is wasted.
+        Round 2 on ac97a5b: changes, 2 blocking (owner step's compile check via GET /api/compiles; SRV-FRESH read
+        shape unchanged), fixed in 637af3a. Round 3 on 637af3a: VERDICT approve. Approved by agent 2026-11-28
+        (r3_gates_revision block in SRV-LESSON, SRV-PIPELINE, WEB-NOTEBOOK, SRV-FRESH, SRV-INGEST; b7a7db9).
+        Phase 2 (implementation, one module per unit, Red then Green): unit e (SRV-LESSON + SRV-INGEST FR-INGEST-49)
+        done: cell.schema.json span_ref takes the PDF locator with a required quote_sha256 (refused beside a legacy
+        id; step 7b locator.parse), lessons_0003 revision_packs (append-only triggers) written in write_revision
+        through views.citing_packs (head read + one DISTINCT ON query: active pack first, else the lowest pack id);
+        gc.Seams.cited stays unbound; test_manage_courses_db.py's FR-LESSON-20 migration test now downgrades to
+        lessons_0001 by id. Unit f (SRV-PIPELINE) done: pipeline Span carries quote_sha256 from the view;
+        material_of (in reader.pipeline.source, re-exported by notebook; raises LocatorError on neither form) drives
+        the erratum/route material and the credibility-1 count; span_ref adds the hash beside a locator and fails
+        output_invalid on a locator without one; a model-written reference hash is dropped and to_compact hides
+        hashes; INV-PIPELINE-3 checked over a legacy and a locator source; VEC-PIPELINE-6 gains 3 locator cases.
+        Unit h (WEB-NOTEBOOK) done: citations.ts materialOf takes a locator's 64-hex material (the Ask panel shares
+        it), which also fixes the live 'source spn:…' entry per cited page in the tutor's Ask panel. Unit fresh
+        (SRV-FRESH) done: SpanRow/Picked carry quote_sha256; Picked.ref asserts a locator's hash (plain assert);
+        sample[] and claims[] store it beside a locator only; scan_inputs_sha256 and the read shape (_CLAIM_KEYS)
+        unchanged. Code review round 1 on cb82561: approve, no blocking; non-blocking 1-3, 5 applied with tests
+        (span holders only, unsealed/purged packs pinned, model-written reference hash, explicit raise), 4 kept,
+        6 accepted (r3_gates_revision.code_review_round_1; 056a881). Left for the bump task: CONVERTER_VERSION r3 once gate (g) (V.kl-tutor-find) is Green on
+        V/slice-integration.
+        CONVERTER_VERSION stays docling-2.151.1+r2 (the bump waits for gate (g)).",
+      what: "spec revisions for FR-INGEST-40 gates (e), (f), (h), (i) and the final CONVERTER_VERSION r3 step" }
   - { id: V.kl-live, stage: V, kind: live, status: todo, needs: [V.kl-pipeline-checks, V.kl-tutor-find],
       what: "upload -> one manifest entry; a BIP-32 question -> cards with locators; remove the pack -> search no longer
         sees it; restore -> the same cards; MLflow stopped -> search still answers; Haiku evaluation meets the brain/v1

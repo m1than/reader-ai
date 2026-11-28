@@ -18,8 +18,10 @@ from typing import Any, Final
 from reader.lessons.schema import CELL_TYPES, LessonWriteError, validate
 from reader.pipeline.findings import Problem
 from reader.pipeline.findings import slice_items as findings_slice_items
-from reader.pipeline.reports import Key, expand_citations, invalid, parse_json
-from reader.pipeline.source import Span
+from reader.pipeline.reports import Key, expand_citations, invalid, parse_json, span_ref
+from reader.pipeline.source import Span, material_of
+
+__all__ = ["Built", "build", "material_of", "parse", "slice_items", "to_bytes", "to_compact"]
 
 CELL_ID: Final = re.compile(r"[A-Za-z0-9_-]{1,64}")
 BASE_KEYS: Final = frozenset({"id", "kind", "source", "sectors"})
@@ -44,8 +46,11 @@ def _ref(value: Any, aliases: Mapping[str, Span]) -> dict[str, Any] | None:
     span = aliases.get(alias) if isinstance(alias, str) else None
     if span is None:
         return None
-    material = span.span_id.split(":", 1)[0]
-    return {"material_sha256": material, "page": span.page, "span": span.span_id}
+    try:
+        material = material_of(span.span_id)
+    except ValueError:  # LocatorError; unreachable, every id came from a view (FR-PIPELINE-7)
+        raise invalid() from None
+    return {"material_sha256": material, "page": span.page, **span_ref(span)}
 
 
 def _reader(
@@ -62,12 +67,13 @@ def _reader(
             reader[key] = copy.deepcopy(value)
     if kind == "lab" and isinstance(reader.get("reference"), dict):
         reference = reader["reference"]  # FR-PIPELINE-25: the alias becomes the span id; unknown → no span
+        reference.pop("quote_sha256", None)  # only code writes it (FR-PIPELINE-7)
         if "span" in reference:
             span = aliases.get(reference["span"]) if isinstance(reference["span"], str) else None
             if span is None:
                 del reference["span"]
             else:
-                reference["span"] = span.span_id
+                reference.update(span_ref(span))
     if kind == "explain":
         for claim in reader.get("claims", []):
             if not isinstance(claim, dict):
@@ -174,7 +180,7 @@ def to_compact(notebook: Mapping[str, Any], aliases: Mapping[str, Span]) -> dict
                 for c in reader["claims"]
             ]
         if isinstance(reader.get("reference"), dict) and "span" in reader["reference"]:
-            ref = reader["reference"]
+            ref = {k: v for k, v in reader["reference"].items() if k != "quote_sha256"}  # model sees no hash
             reader["reference"] = {**ref, "span": back.get(ref["span"], "unknown")}
         if "citations" in reader:
             reader["citations"] = [cite(x) for x in reader["citations"]]

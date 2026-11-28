@@ -144,7 +144,8 @@ async def spans(conn: AsyncConnection, owner_id: uuid.UUID, ingest_id: uuid.UUID
     pack = await _pack(conn, owner_id, ingest_id)
     if pack is None:
         return []
-    return [SpanRow(s.seq, s.page, s.kind, s.text, s.span_id) for s in await views.pack_spans(conn, pack)]
+    rows = await views.pack_spans(conn, pack)
+    return [SpanRow(s.seq, s.page, s.kind, s.text, s.span_id, s.quote_sha256) for s in rows]
 
 
 async def outline(conn: AsyncConnection, owner_id: uuid.UUID, ingest_id: uuid.UUID) -> list[OutlineRow]:

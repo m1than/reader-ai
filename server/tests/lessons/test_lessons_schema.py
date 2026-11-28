@@ -121,6 +121,15 @@ def test_vector_case(case: dict[str, Any]) -> None:
     assert _code(case_bytes(case)) == case["write"]
 
 
+def test_a_free_key_map_yields_no_span_ref() -> None:
+    """Code review round 1 (r3_gates_revision): `rejected_because: {"span": ...}` is not a span holder."""
+    schema = need("reader.lessons.schema")
+    case = next(c for c in cases()["cases"] if c["id"] == "rejected-because-span-key")
+    mutated = schema.validate(case_bytes(case)).notebook
+    assert schema.span_refs(mutated) == schema.span_refs(schema.validate(F01).notebook)
+    assert all(not span.startswith("spn: ") for span, _ in schema.span_refs(mutated))
+
+
 def test_reindented_input_has_the_same_revision() -> None:
     schema = need("reader.lessons.schema")
     doc = json.loads(F01)

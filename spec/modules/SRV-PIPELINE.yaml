@@ -250,6 +250,11 @@ requirements:
       model never writes them). In the slice, every `changed` cell and
       every URL citation also becomes an open cell (`url_citation_unchecked`, `changed_unchecked`; `finding.stage`
       `fact_check`), since there is no web fact-check yet.
+      **Promoted revision (r3_gates_revision, unit f):** this id's text in `proposed_revisions` (a locator span id
+      carries its `quote_sha256`; `material_of`) extends the text above. Recorded: `material_of` is defined in
+      `reader.pipeline.source` beside `Span` (reports.py needs it, and notebook.py imports reports.py) and
+      re-exported as `reader.pipeline.notebook.material_of`; `to_compact` also drops a lab reference's
+      `quote_sha256`. test_source_and_reports.py, test_source_active_pack_db.py.
   - id: FR-PIPELINE-8
     text: >-
       G2 report (VEC-PIPELINE-3), computed after lab verification and stored on the run; no publish in the slice. For the
@@ -633,6 +638,9 @@ requirements:
       step writes its revision with each claim's, and each `changed` or `erratum` cell's, `credibility` set to that
       value (`stamp_credibility`); nothing else changes. Credibility does not change the check's outcome (the verdict
       does); it is the `credibility` facet of ADR-0039 B3 when SRV-KB turns claims into L4 findings.
+      **Promoted revision (r3_gates_revision, unit f):** this id's text in `proposed_revisions` (distinct materials
+      through `material_of`) extends the text above. VEC-PIPELINE-6 gains the locator cases.
+      test_source_and_reports.py.
     tests_planned:
       - "add to test_source_and_reports.py: stamp_credibility over VEC-PIPELINE-6"
       - "add to test_pipeline_db.py [db]: the fact_check step's revision differs from its input only in credibility fields, present on every claim and every changed and erratum cell"
@@ -653,6 +661,10 @@ invariants:
     text: >-
       Every span citation in a stored revision names a span of the lesson's source, with page and title taken from
       that span. **Revised by ADR-0039 (in force 2026-11-26): `revisions` → INV-PIPELINE-3.**
+      **Promoted revision (r3_gates_revision, unit f):** this id's text in `proposed_revisions` (per step; a
+      locator citation carries its span's `quote_sha256`) extends the text in `revisions`. test_pipeline_db.py runs
+      the check over a legacy-id source and over a locator source; test_source_and_reports.py holds the
+      legacy-id-with-r3-aliases case.
   - id: INV-PIPELINE-4
     text: No log line contains source text, a prompt, model output or a claim text (canary test); only ids, stage names, costs and counts.
   - id: INV-PIPELINE-5
@@ -1125,3 +1137,76 @@ revisions:
 
 # Tests of the vectors added by this revision: VEC-PIPELINE-6 is read by test_source_and_reports.py (FR-PIPELINE-4,
 # -27); VEC-PIPELINE-7 by test_rules.py (FR-PIPELINE-24, -25). The defers of this revision are merged into `defers`.
+
+# ---- Proposed revision (2026-11-28, V/kl-r3-gates; approved by agent 2026-11-28, r3_gates_revision): SRV-INGEST FR-INGEST-40 gate (f), locator
+# span ids in compiled lessons (ADR-0039 P2; SRV-INGEST's cross-spec note "SRV-PIPELINE: FR-PIPELINE-7 expands an
+# alias to the locator span id plus quote_sha256"). Found on V/slice-integration (83e1831): notebook.py `_ref` takes
+# the material as `span_id.split(":", 1)[0]` and reports.py `constrain_credibility` counts materials the same way;
+# on a locator both yield `spn`, so an erratum `source_ref.material_sha256` would fail SRV-LESSON's schema
+# (`output_invalid` for every such lesson) and credibility 1 would become unreachable. Today's span ids are the
+# active pack's (`reader.ingest.views`: `<sha>:<seq>` for a legacy pack, the locator for r3), so the change is
+# inert until the r3 bump. Paired: SRV-LESSON's revision (gate (e)), which accepts the locator and requires the hash.
+# Stated consequence (P2 (6), unchanged): after the pilot's r3 pack is active, FR-PIPELINE-3's `input_sha256` of
+# every step misses once (the source spans and their ids change), so each lesson's next compile pays in full.
+proposed_revisions:
+  - id: FR-PIPELINE-7
+    text: >-
+      As approved (and as revised by ADR-0039), with the span identity of SRV-INGEST FR-INGEST-33/-34:
+      `reader.pipeline.source.Span` gains `quote_sha256: str | None`, read from `views.PackSpan.quote_sha256`. Code
+      expands an alias to the span's id as its pack mints it and, **when that id is a locator** (`spn:`), adds the
+      span's `quote_sha256` to the citation (`{span, quote_sha256, page, material_title}`), to an erratum
+      `source_ref` and to each `source_refs` entry (`{material_sha256, page, span, quote_sha256}`) and to a lab
+      `reference` (FR-PIPELINE-25); a legacy id gets no hash (SRV-LESSON's schema refuses one). A locator span with
+      no stored hash cannot occur (an active pack is sealed, and the seal trigger requires it); if it does, the step
+      fails `output_invalid`, never a citation without its hash. The material of a span id is
+      `reader.pipeline.notebook.material_of(span_id)`: `reader.ingest.locator.parse(span_id).material_sha256` for a
+      locator, the part before the `:` for a legacy id (`locator.is_legacy_id`), never a split of a locator on `:`;
+      a string of neither form raises `LocatorError` (the caller's step fails `output_invalid`; every id it is given
+      came from a view, so this is unreachable in operation).
+      The model's compact view (`to_compact`) maps a stored citation back to its alias by span id and drops
+      `quote_sha256` (the model never sees ids or hashes).
+    tests_planned:
+      - "add to server/tests/pipeline/test_source_and_reports.py [unit]: expand_citations over one legacy-pack Span and one r3 Span (synthetic sha, synthetic text) → the legacy citation is {span, page, material_title}, the r3 one adds its quote_sha256; material_of over a PDF locator, an empty-span locator (#0) and a legacy id gives the 64-hex material, and over `spn:abc`, `a:b:3` and `` raises LocatorError; an r3 Span with quote_sha256 None → output_invalid"
+      - "add to test_source_and_reports.py [unit] (round 1, blocking 3): a stored notebook whose citations hold legacy ids (written by a draft over the legacy pack) while the step's aliases are r3 spans: to_compact, the rule checks (FR-PIPELINE-24) and the failing check's payload to revise run without an exception; each legacy-id citation appears as `{span: unknown}` in the compact view and in the payload; no span id or quote hash reaches either"
+      - "add to test_source_and_reports.py [unit]: build() of a compact notebook citing an r3 span in an explain claim, an erratum source_ref, a route source_refs entry and a lab reference validates under SRV-LESSON's revised schema, each with the span's hash and source_ref.material_sha256 equal to the material; to_compact gives back the aliases with no quote_sha256 key"
+      - "add to server/tests/pipeline/test_source_active_pack_db.py [db]: with the material's r3 pack active, DbSpanReader's spans carry the stored quote hashes and a compiled draft's citations name locators with them"
+  - id: FR-PIPELINE-27
+    text: >-
+      As approved, with the distinct-material count of the credibility-1 rule taken through `material_of`
+      (FR-PIPELINE-7), so two locators of one material count once and a locator and a legacy id of one material
+      count once. In route mode (FR-PIPELINE-26) the cited route cards' span ids are locators already (SRV-SEARCH
+      cites locators for legacy packs too), so the same function applies there.
+    tests_planned:
+      - "change spec/fixtures/SRV-PIPELINE/credibility.yaml (VEC-PIPELINE-6) and its test in test_source_and_reports.py: the span placeholders `A:<n>` / `B:<n>` gain locator forms (`spn:A:p<n>:<s>-<e>`, A and B 64-hex) with cases supported-1-two-locators-one-material → 2, supported-1-locators-two-materials → 1, supported-1-locator-and-legacy-same-material → 2; the existing cases keep their expectations"
+  - id: INV-PIPELINE-3
+    text: >-
+      As revised by ADR-0039, with "the lesson's source" read as **the source as loaded by the step that wrote the
+      citation** (a run in flight across an activation may hold citations of the pack its draft loaded; SRV-INGEST
+      FR-INGEST-40-r3-bump's owner step forbids such runs for the pilot, round 1, blocking 3), plus: a span citation
+      (and a `source_ref`, `source_refs` entry or lab `reference`) that names a locator carries the `quote_sha256`
+      of that span in that source, and its `material_sha256` (where the object has one) equals the locator's
+      material.
+    tests_planned:
+      - "change test_pipeline_db.py [db]: the INV-PIPELINE-3 check over stored revisions also compares each locator citation's quote_sha256 with the source span's stored hash"
+
+proposed_decisions:  # deep-reviewer round 1 (340bc02), coordinator answers
+  - "A locator span with no stored hash fails the step closed (output_invalid), never a citation without its hash."
+  - "VEC-PIPELINE-6 is extended in place (new cases, old ones kept); the old `A:1` placeholders are legacy-id shaped once the test substitutes 64-hex shas for `A`/`B`, and stay valid."
+  - "A compile run in flight across the r3 activation: option (a), the owner step forbids it and INV-PIPELINE-3 is stated per step."
+
+r3_gates_revision:  # the review record of V/kl-r3-gates' revision, the same block in each spec it touches
+  task: V.kl-r3-gates
+  scope: "SRV-INGEST FR-INGEST-40's gates: (e) SRV-LESSON VEC-LESSON-1, -3, FR-LESSON-1, -4, -32, INV-LESSON-6 with SRV-INGEST FR-INGEST-49 (views.citing_packs); (f) SRV-PIPELINE FR-PIPELINE-7, -27, INV-PIPELINE-3; (h) WEB-NOTEBOOK FR-NOTEBOOK-2; SRV-FRESH FR-FRESH-2, -3, -10 (the bump's precondition); SRV-INGEST FR-INGEST-40-r3-bump (the held bump step)"
+  round_1: "deep-reviewer (Fable) on 340bc02: changes, 5 blocking, all applied in ac97a5b: (1) VEC-LESSON-1's `if` needs `required: [span]`, so a span-less source_ref or lab reference stays valid (3 new VEC-LESSON-3 cases); (2) FR-INGEST-49 names one pack per locator (the active pack when it holds the span, else the lowest pack id; FR-INGEST-42 steps 2, 4) and none for a legacy id, so no backfill and the r2 pack is never pinned; (3) compile runs in flight across the r3 activation: option (a), the owner step forbids compiles from the re-conversion until `appended`, INV-PIPELINE-3 stated per step, a unit test over a legacy-id notebook with r3 aliases; (4) SRV-FRESH's revision (FR-FRESH-2, -3, -10) added to the bump's precondition; (5) the bump's tests list every r2/r3-pinning test file as change or keeps r2. Decisions written in: gate (i)'s residual is covered by owner step (3)'s check; quote_sha256 beside a legacy id is refused; the citation state labels go to WEB-NOTEBOOK's defers; a locator span without a hash fails closed"
+  round_2: "deep-reviewer (Fable) on ac97a5b: changes, 2 blocking, applied in 637af3a: (1) the owner step's no-compile check named `reader status`, which lists no compile runs: it now reads `GET /api/compiles` (its `open_runs` predicate, reader/pipeline/routes.py); (2) SRV-FRESH FR-FRESH-10 widened the read shape and left WEB-FRESH unconfirmed: the read shape is unchanged (`_CLAIM_KEYS`, reader/freshness/check.py). Nits applied: FR-FRESH-2's fail-closed is a plain assertion (the scan has no output_invalid), VEC-PIPELINE-6's placeholder note"
+  round_3: "deep-reviewer (Fable) on 637af3a: VERDICT approve"
+  status: approved
+  approved_by: agent
+  approved_at: 2026-11-28
+  promotion: >-
+    The revision is approved as text. Its items move from proposed_* into requirements / invariants / vectors
+    (replacing the revised ids' approved text, which stays in proposed_revisions verbatim as reviewed) only together
+    with their Red tests, one module per unit (the SRV-SEARCH pattern; T5). FR-INGEST-40-r3-bump stays proposed:
+    `CONVERTER_VERSION` stays `docling-2.151.1+r2` until gate (g) (V.kl-tutor-find, SRV-TUTOR FR-TUTOR-8) is Green
+    on V/slice-integration too.
+  code_review_round_1: "deep-reviewer (Fable) on cb82561: VERDICT approve, no blocking. Non-blocking, applied: (1) FR-LESSON-1 step 7b and FR-LESSON-32's span_refs walked free-key maps (a tradeoff's rejected_because): the walk now visits only the schema's span holders (claims[].citations, citations, source_ref, source_refs, the lab reference); VEC-LESSON-3 case rejected-because-span-key (valid, no span ref); (2) test_citing_packs_db.py pins FR-INGEST-49's sealed and purged filters with an unsealed and a purged pack holding the same (locator, hash); (3) test_source_and_reports.py: a model-supplied quote_sha256 on a lab reference is overwritten for a known alias and dropped with the span for an unknown one (FR-PIPELINE-7); (4) the redundant check: kept for readability; (5) SRV-FRESH Picked.ref raises AssertionError explicitly (survives python -O); (6) the recorded deviations: accepted."
