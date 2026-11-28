@@ -3,7 +3,7 @@
 
 Every transition is `UPDATE … WHERE state = 'queued'`, so the api's finalisation and the worker's last write
 cannot both win. Span texts are read from the owner's active packs through SRV-INGEST's
-`reader.ingest.views.active_span_texts` (INV-INGEST-16).
+`reader.ingest.views.active_span_rows` (INV-INGEST-16), with their stored quote hashes.
 """
 
 from __future__ import annotations
@@ -120,6 +120,7 @@ class Question:
     material_sha256: str | None
     course_title: str
     course_id: uuid.UUID | None = None  # SRV-OBS FR-OBS-12 (d): an id for the trace, never the title
+    role: str = ""  # the owner's role: SRV-SEARCH find's caller (FR-TUTOR-5)
 
 
 async def load(conn: AsyncConnection, question_id: uuid.UUID) -> Question | None:
@@ -127,7 +128,7 @@ async def load(conn: AsyncConnection, question_id: uuid.UUID) -> Question | None
         await conn.execute(
             text(
                 "SELECT q.id, q.owner_id, u.handle, q.lesson_id, q.revision_sha256, q.cell_id, q.question,"
-                " q.state, extract(epoch FROM now() - q.created_at), c.material_sha256, c.title, c.id"
+                " q.state, extract(epoch FROM now() - q.created_at), c.material_sha256, c.title, c.id, u.role"
                 " FROM tutor_questions q JOIN users u ON u.id = q.owner_id"
                 " JOIN lessons l ON l.id = q.lesson_id JOIN courses c ON c.id = l.course_id"
                 " WHERE q.id = :i"
@@ -139,7 +140,7 @@ async def load(conn: AsyncConnection, question_id: uuid.UUID) -> Question | None
         return None
     return Question(
         row[0], row[1], row[2], row[3], row[4], row[5], row[6], row[7], float(row[8]), row[9], row[10],
-        row[11] if len(row) > 11 else None,
+        row[11], str(row[12]),
     )
 
 
@@ -156,12 +157,12 @@ async def queued_of(conn: AsyncConnection, owner_id: uuid.UUID) -> list[tuple[uu
 
 async def spans_by_ids(
     conn: AsyncConnection, owner_id: uuid.UUID, span_ids: Sequence[str]
-) -> dict[str, tuple[int, str]]:
-    """span id (`<material_sha256>:<seq>` or a locator) → (page, text), from the owner's active packs only
-    (FR-TUTOR-5's paired change, SRV-INGEST INV-INGEST-16)."""
+) -> dict[str, tuple[int, str, str]]:
+    """span id (a locator, or `<material_sha256>:<seq>` for FR-TUTOR-22's never-run case) → (page, text,
+    quote_sha256), from the owner's active packs only (FR-TUTOR-5, -8; SRV-INGEST INV-INGEST-16)."""
     from reader.ingest import views
 
-    return await views.active_span_texts(conn, owner_id, span_ids)
+    return await views.active_span_rows(conn, owner_id, span_ids)
 
 
 def _source(value: object) -> str:

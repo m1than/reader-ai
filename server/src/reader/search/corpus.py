@@ -3,7 +3,9 @@
 Candidates are FR-SEARCH-7's span candidates over the caller's active packs as L1 cards with their full
 span text (find serves the cut); a pack whose L1 cards the channel may not serve this caller is left out of
 the scan (FR-SEARCH-30). Neighbours are an L1 card's two 1-hop links, its next span and its section, as cards
-of the same pack's `Book`. INV-SEARCH-1: only the caller's own head entry is read.
+of the same pack's `Book`. INV-SEARCH-1: only the caller's own head entry is read. An internal caller (the
+tutor) may scope the corpus to one material (kl_tutor_find.corpus_scope): every other material's pack is
+skipped before its Book or entitlement is read; routes never set the scope.
 """
 
 from __future__ import annotations
@@ -24,6 +26,7 @@ from reader.search.policy import Policy
 class StoreCorpus:
     conn: AsyncConnection
     policy: Policy
+    material_sha256: str | None = None  # the scope; None: every active material of the caller
     _books: dict[str, opening.Book] = field(default_factory=dict)
 
     async def _book(self, pack: views.Pack) -> opening.Book:
@@ -32,7 +35,8 @@ class StoreCorpus:
         return self._books[pack.pack_id]
 
     async def _packs(self, caller: Caller) -> dict[str, views.Pack]:
-        return {p.pack_id: p for p in (await views.active_packs(self.conn, caller.user_id)).values()}
+        return {p.pack_id: p for sha, p in (await views.active_packs(self.conn, caller.user_id)).items()
+                if self.material_sha256 is None or sha == self.material_sha256}
 
     async def candidates(
         self, caller: Caller, channel: str, route: Route, query: str, filters: Mapping[str, object],
@@ -48,8 +52,8 @@ class StoreCorpus:
         data = self.policy.data
         found = await store.candidates(
             self.conn, caller.user_id, query, limit=data["candidates_max"], use_rrf=route.rrf,
-            rrf_k=data["rrf_k"], w_dense=float(data["w_dense"]), exclude_packs=excluded,
-            filters={k: str(v) for k, v in filters.items()},
+            rrf_k=data["rrf_k"], w_dense=float(data["w_dense"]), material_sha256=self.material_sha256,
+            exclude_packs=excluded, filters={k: str(v) for k, v in filters.items()},
         )
         cards: list[Card] = []
         for hit in found.hits if "L1" in route.layers else []:

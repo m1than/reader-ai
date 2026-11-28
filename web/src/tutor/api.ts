@@ -2,7 +2,8 @@
 import * as v from 'valibot';
 import { ApiError } from '../app/api';
 
-const Citation = v.object({ span: v.string(), page: v.number(), material_title: v.string() });
+// SRV-TUTOR FR-TUTOR-8 (ADR-0039 revision): the cited span's stored quote hash; read, never shown; older answers lack it
+const Citation = v.object({ span: v.string(), page: v.number(), material_title: v.string(), quote_sha256: v.optional(v.string()) });
 const Block = v.object({ text: v.string(), supported: v.boolean(), quote: v.string(), citations: v.array(Citation) });
 const Answer = v.object({
   blocks: v.array(Block),

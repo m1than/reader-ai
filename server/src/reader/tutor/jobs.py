@@ -14,7 +14,7 @@ import logging
 import os
 import time
 import uuid
-from collections.abc import AsyncIterator, Awaitable, Callable, Mapping
+from collections.abc import AsyncIterator, Callable, Mapping, Sequence
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -29,12 +29,28 @@ from reader.agent.errors import AgentError
 from reader.agent.pricing import resolve_model
 from reader.agent.provider import Provider, StageCall
 from reader.config import ReaderConfig, load_config
+from reader.ingest import locator
 from reader.jobs.model import JobContext, JobKind, idempotency_key
 from reader.lessons.access import can_open
 from reader.obs import feedback, prompts
 from reader.obs.spans import annotate_job, child_span, session_marker
+from reader.search import find as find_mod
+from reader.search import policy as policy_mod
+from reader.search.corpus import StoreCorpus
+from reader.search.find import Caller, Judge
+from reader.search.find import Deps as FindDeps
+from reader.search.policy import Policy
 from reader.tutor import params, store
-from reader.tutor.answer import Span, build_prompt, check, floor_usd, parse, system_prompt
+from reader.tutor.answer import (
+    LOCATOR_PREFIX,
+    Span,
+    build_prompt,
+    check,
+    citations,
+    floor_usd,
+    parse,
+    system_prompt,
+)
 from reader.tutor.errors import TRANSIENT, TutorError, TutorTransient, outcome
 
 log = logging.getLogger("reader.tutor")
@@ -47,32 +63,33 @@ class AnswerArgs(BaseModel):
     question_id: uuid.UUID
 
 
-class Hit(Protocol):
-    @property
-    def span_id(self) -> str: ...  # the chunk's primary span
-
-    @property
-    def span_ids(self) -> list[str]: ...  # every span the chunk overlaps, in chunk order
-
-
-def candidate_span_ids(hits: list[Any]) -> list[str]:
-    """FR-TUTOR-5: every hit's primary span in rank order, then every hit's other chunk spans in rank order,
-    no repeats; the budget drops from the end, so neighbours go before any primary."""
-    ordered = [hit.span_id for hit in hits]
-    for hit in hits:
-        ordered.extend(s for s in hit.span_ids if s != hit.span_id)
-    return list(dict.fromkeys(ordered))
+def _is_locator(span_id: str) -> bool:
+    try:
+        locator.parse(span_id)
+    except locator.LocatorError:
+        return False
+    return True
 
 
-class Found(Protocol):
-    @property
-    def results(self) -> list[Any]: ...
+def candidate_ids(cards: Sequence[Mapping[str, Any]]) -> list[str]:
+    """FR-TUTOR-5, VEC-TUTOR-9: the L1 cards' ids in response order, then each L1 card's first `next` id that
+    is a span locator, no repeats; the budget drops from the end, so next spans go before any primary. An id
+    that is not a locator (a legacy `<sha>:<seq>` id) is dropped here, before loading, so it is never sent."""
+    l1 = [card for card in cards if card.get("layer") == "L1"]
+    ordered = [str(card["id"]) for card in l1]
+    for card in l1:
+        after = next((str(n) for n in card.get("next", ()) if str(n).startswith(LOCATOR_PREFIX)), None)
+        if after is not None:
+            ordered.append(after)
+    return [i for i in dict.fromkeys(ordered) if _is_locator(i)]
 
-    @property
-    def degraded(self) -> bool: ...
 
+class Find(Protocol):
+    """SRV-SEARCH FR-SEARCH-22's `find` as the tutor calls it: no budget, no k, no judge context."""
 
-Search = Callable[[AsyncEngine, uuid.UUID, str, int, str | None], Awaitable[Found]]
+    async def __call__(
+        self, caller: Caller, channel: str, query: str, *, deps: FindDeps
+    ) -> Mapping[str, Any]: ...
 
 
 @dataclass(frozen=True)
@@ -80,9 +97,11 @@ class Deps:
     """What the handler reaches outside its connection; tests pass fakes."""
 
     provider: Callable[[AsyncEngine], AbstractAsyncContextManager[Provider]]  # closed after the one call
-    search: Search
     blobs_root: Path
     config: Callable[[], ReaderConfig]
+    find: Find = find_mod.find
+    policy: Callable[[], tuple[Policy, str]] = policy_mod.current  # one (policy, version) pair per question
+    judge: Judge | None = None  # kl_open_points 2: not wired while the shipped gate is never_judge
     deadline_s: float = params.CALL_DEADLINE_S
 
 
@@ -101,40 +120,43 @@ async def _agent_provider(engine: AsyncEngine) -> AsyncIterator[Provider]:
         await proxy.aclose()
 
 
-async def _search(
-    engine: AsyncEngine, owner_id: uuid.UUID, query: str, k: int, material_sha256: str | None
-) -> Found:
-    from reader.search.store import search
-
-    return await search(engine, owner_id, query, k, material_sha256)
-
-
 def default_deps() -> Deps:
-    return Deps(provider=_agent_provider, search=_search, blobs_root=blobs.DEFAULT_ROOT, config=_config)
+    return Deps(provider=_agent_provider, blobs_root=blobs.DEFAULT_ROOT, config=_config)
 
 
 def job_key(question_id: uuid.UUID) -> str:
     return idempotency_key(JOB_KINDS[0], {"question_id": str(question_id)})
 
 
-def _citations(kept: tuple[str, ...], by_alias: Mapping[str, Any], title: str) -> list[dict[str, Any]]:
-    return [{"span": by_alias[a].span_id, "page": by_alias[a].page, "material_title": title} for a in kept]
+async def _retrieve(deps: Deps, conn: AsyncConnection, q: store.Question) -> tuple[list[Span], bool]:
+    """FR-TUTOR-5: find on channel `tutor` over the course's material, then the candidates' stored spans."""
+    if q.material_sha256 is None:
+        raise TutorError("sources_unavailable")
+    with child_span("tutor.retrieve") as retrieved:  # SRV-OBS FR-OBS-13: counts only
+        try:
+            policy, version = deps.policy()
+            provider = any(u.handle == q.handle and u.providers for u in deps.config().users)
+            caller = Caller(q.owner_id, (q.role,), provider)
+            found = await deps.find(caller, params.TASK, q.question, deps=FindDeps(
+                corpus=StoreCorpus(conn, policy, q.material_sha256), judge=deps.judge, policy=policy,
+                policy_version=lambda: version))
+        except (policy_mod.PolicyError, find_mod.FindError) as error:
+            log.warning("tutor_find_error question=%s code=%s", q.id, error.code)
+            raise TutorError("tutor_failed") from None
+        cards = found["cards"]
+        span_ids = candidate_ids(cards)[: params.SOURCES_MAX]  # beyond the alias cap: not sent
+        retrieved.set({"reader.retrieval.hits": len(span_ids), "reader.retrieval.candidates": len(cards)})
+    loaded = await store.spans_by_ids(conn, q.owner_id, span_ids) if span_ids else {}
+    spans = [Span(s, *loaded[s]) for s in span_ids if s in loaded]
+    if not spans:
+        raise TutorError("sources_unavailable")
+    return spans, bool(found["degraded"])
 
 
 async def _answer(deps: Deps, conn: AsyncConnection, q: store.Question, ctx: JobContext) -> dict[str, Any]:
     """Retrieval, prompt, one call, check: the fields of the `answered` row. Raises on every other outcome."""
-    if q.material_sha256 is None:
-        raise TutorError("sources_unavailable")
     engine = conn.engine
-    with child_span("tutor.retrieve") as retrieved:  # SRV-OBS FR-OBS-13: counts only
-        found = await deps.search(engine, q.owner_id, q.question, params.RETRIEVE_K, q.material_sha256)
-        span_ids = candidate_span_ids(found.results)[: params.SOURCES_MAX]  # beyond the alias cap: not sent
-        retrieved.set({"reader.retrieval.hits": len(span_ids),
-                       "reader.retrieval.candidates": len(found.results)})
-    if not span_ids:
-        raise TutorError("sources_unavailable")
-    loaded = await store.spans_by_ids(conn, q.owner_id, span_ids)
-    spans = [Span(s, loaded[s][0], loaded[s][1]) for s in span_ids if s in loaded]
+    spans, degraded = await _retrieve(deps, conn, q)
     cell = None
     if q.cell_id is not None:
         cells = await asyncio.to_thread(store.revision_cells, deps.blobs_root, q.revision_sha256)
@@ -180,7 +202,6 @@ async def _answer(deps: Deps, conn: AsyncConnection, q: store.Question, ctx: Job
     await feedback.record(ctx, "tutor.citations_valid", total > 0 and valid == total, counts)
     if total:
         await feedback.record(ctx, "tutor.citation_share", valid / total)
-    by_alias = {s.alias: s for s in prompt.sources}
     return {
         "answer": {
             "blocks": [
@@ -188,12 +209,12 @@ async def _answer(deps: Deps, conn: AsyncConnection, q: store.Question, ctx: Job
                     "text": b.text,
                     "supported": b.supported,
                     "quote": b.quote,
-                    "citations": _citations(b.kept, by_alias, q.course_title),
+                    "citations": citations(b.kept, prompt.sources, q.course_title),
                 }
                 for b in checked.blocks
             ],
             "insufficient": checked.insufficient,
-            "retrieval": "degraded" if found.degraded else "ok",
+            "retrieval": "degraded" if degraded else "ok",
             "prompt_sha256": prompt_sha256,
             "model": result.model,
         },

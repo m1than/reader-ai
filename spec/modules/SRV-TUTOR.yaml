@@ -601,7 +601,10 @@ kl_revision:
     removed, the owner notes and defers joined; with the paired SRV-SEARCH kl_tutor_find.corpus_scope and
     legacy_search. Still proposed: NFR-TUTOR-1, -2, -3, VEC-TUTOR-7, -8 (the bench predictor gold_in_find, the
     paired SRV-OBS VEC-OBS-5 key and e2e/web/live/owner.slice.ts), which land with the paid run P1 that measures
-    them; P1 waits for the owner's go (M1 28 of 40, below the P1 threshold of 40).
+    them; P1 waits for the owner's go (M1 28 of 40, below the P1 threshold of 40). Green test corrections, no
+    oracle weakened: test_tutor_find_db.py's r3 case records the accepted seq map from the r2 pack first, because
+    SRV-INGEST FR-INGEST-39 keeps an r3 pack's vector overlay pending (`seqmap_missing`) while a legacy pack of
+    the material has none.
   revised_ids: [FR-TUTOR-1, FR-TUTOR-3, FR-TUTOR-5, FR-TUTOR-8, INV-TUTOR-2, INV-TUTOR-4, NFR-TUTOR-1, NFR-TUTOR-2,
     NFR-TUTOR-3, VEC-TUTOR-1, VEC-TUTOR-7, VEC-TUTOR-8]
   new_ids: [FR-TUTOR-22, VEC-TUTOR-9]

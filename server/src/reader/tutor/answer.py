@@ -28,25 +28,28 @@ _QUESTION_CELL_BYTES: Final = params.QUESTION_CELL_BYTES_MAX
 _FENCE: Final = re.compile(r"\A```(?:json)?[ \t]*\n(.*)\n```\Z", re.DOTALL)
 _BLOCK_KEYS: Final = frozenset({"text", "spans", "quote"})
 _TOP_KEYS: Final = frozenset({"blocks", "insufficient"})
+LOCATOR_PREFIX: Final = "spn:"  # SRV-INGEST FR-INGEST-33's span locators; a legacy `<sha>:<seq>` id has none
 
 
 @dataclass(frozen=True)
 class Span:
-    """A retrieved span, in rank order: SRV-SEARCH's span id, its page and its text."""
+    """A retrieved span, in rank order: its locator, page, text and stored quote hash (FR-INGEST-34)."""
 
     span_id: str
     page: int
     text: str
+    quote_sha256: str | None = None
 
 
 @dataclass(frozen=True)
 class Source:
-    """A span as sent: its alias in the prompt and its text after the byte cut."""
+    """A span as sent: its alias in the prompt, its text after the byte cut, the stored span's hash."""
 
     alias: str
     span_id: str
     page: int
     text: str
+    quote_sha256: str | None = None
 
 
 @dataclass(frozen=True)
@@ -116,7 +119,7 @@ def _shrink(text: str, excess: int) -> str:
 def build_prompt(question: str, cell: Cell | None, spans: Sequence[Span]) -> Prompt:
     """FR-TUTOR-6: the user prompt as one JSON document, sized after escaping, lowest ranks dropped first."""
     sources = [
-        Source(f"s{i + 1}", s.span_id, s.page, cut_bytes(s.text, params.SPAN_BYTES_MAX))
+        Source(f"s{i + 1}", s.span_id, s.page, cut_bytes(s.text, params.SPAN_BYTES_MAX), s.quote_sha256)
         for i, s in enumerate(spans[: params.SOURCES_MAX])
     ]
     if not sources:
@@ -193,6 +196,20 @@ def check(output: Mapping[str, Any], sent: Sequence[Source]) -> Checked:
         blocks.append(Block(raw["text"], kept, raw["quote"], supported))
     insufficient = bool(output["insufficient"])
     return Checked(tuple(blocks), insufficient, not insufficient and all(b.supported for b in blocks))
+
+
+def citations(kept: Sequence[str], sent: Sequence[Source], title: str) -> list[dict[str, Any]]:
+    """FR-TUTOR-8: one citation per kept alias, from the sent span only (never from model text). The stored
+    quote hash goes only beside a locator: a legacy `<sha>:<seq>` id never carries one (fail-closed)."""
+    by_alias = {s.alias: s for s in sent}
+    out: list[dict[str, Any]] = []
+    for alias in kept:
+        source = by_alias[alias]
+        cited: dict[str, Any] = {"span": source.span_id, "page": source.page, "material_title": title}
+        if source.quote_sha256 is not None and source.span_id.startswith(LOCATOR_PREFIX):
+            cited["quote_sha256"] = source.quote_sha256
+        out.append(cited)
+    return out
 
 
 def floor_usd(model: str, system_bytes: int, prompt_bytes: int) -> Decimal:

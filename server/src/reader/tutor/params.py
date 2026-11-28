@@ -11,7 +11,6 @@ PRIORITY: Final = 100  # above compile stages' default 0 (SRV-EVENTS FR-EVENTS-1
 
 QUESTION_CHARS_MAX: Final = 1000
 QUESTION_BYTES_MAX: Final = 3000
-RETRIEVE_K: Final = 8
 SPAN_BYTES_MAX: Final = 2000
 CELL_BYTES_MAX: Final = 4000
 QUESTION_CELL_BYTES_MAX: Final = 8000  # question 3000 + cell 4000 + JSON overhead 1000

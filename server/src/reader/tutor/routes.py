@@ -7,6 +7,7 @@ answer exactly like a missing one. Logs carry ids, lengths and codes, never a qu
 from __future__ import annotations
 
 import logging
+import unicodedata
 import uuid
 from pathlib import Path
 from typing import Any, Final
@@ -50,6 +51,10 @@ def valid_question(value: object) -> str | None:
     if any(ord(ch) < 0x20 and ch not in _ALLOWED_C0 for ch in question):
         return None
     if any(0xD800 <= ord(ch) <= 0xDFFF for ch in question):  # lone surrogates cannot be stored as UTF-8
+        return None
+    # FR-TUTOR-1 (ADR-0039 revision): find counts code points after NFC (FR-SEARCH-22), and NFC can lengthen
+    # text (U+0958 becomes two code points), so the NFC form must fit the same bound.
+    if not 1 <= len(unicodedata.normalize("NFC", question).strip()) <= params.QUESTION_CHARS_MAX:
         return None
     return question
 

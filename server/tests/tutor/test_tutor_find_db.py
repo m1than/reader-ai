@@ -16,6 +16,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+from sqlalchemy import text
 
 from ingest.packseed import R3, add_pack
 from obs.conftest import finished, obs_setup, require
@@ -96,14 +97,19 @@ async def test_real_find_over_an_r2_then_an_r3_pack_cites_the_stored_hash(
     r3_spans = [(61, "text", "Re-converted: miners vary the nonce until the hash falls below the target."),
                 (62, "text", "Re-converted: the target moves every 2016 blocks.")]
     async with w.engine.begin() as conn:
-        await add_pack(conn, w.users["ivan"], MAT, R3, r3_spans, activate=True)
+        r2_ingest = (await need("reader.ingest.views").active_pack(conn, w.users["ivan"], MAT)).ingest_id
+        r3 = await add_pack(conn, w.users["ivan"], MAT, R3, r3_spans, activate=True)
+        # FR-INGEST-39: an r3 pack's overlays activate only once the legacy pack's seq map is accepted
+        await conn.execute(text(
+            "INSERT INTO seq_maps (owner_id, from_ingest_id, to_pack_id, state, span_count)"
+            " VALUES (:o, :i, :p, 'accepted', 3)"), {"o": w.users["ivan"], "i": r2_ingest, "p": r3})
     await _embed(w, "ivan")
     blocks = [{"text": "x", "spans": ["s1"], "quote": "miners vary the nonce until the hash"}]
     provider = FakeProvider([Reply(text=answer_json(blocks))])
     qid = await insert_question(w, question=QUESTION)
     await run_handler(w, qid, deps(w, provider, _real_find()))
-    state, stored, _, _, _ = await question_row(w, qid)
-    assert state == "answered"
+    state, stored, _, code, _ = await question_row(w, qid)
+    assert (state, code) == ("answered", None)
     assert {s["text"] for s in _sent(provider)} <= {t for _, _, t in r3_spans}  # the active r3 pack only
     async with w.engine.connect() as conn:
         r3_ids = await locators(conn, w.users["ivan"], MAT)
