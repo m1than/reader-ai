@@ -2954,7 +2954,9 @@ proposed_owner_notes:
 # correction (test data, no oracle weakened): the inactive-pack case reads a span of a sealed, never activated pack
 # of another material, because a span with the same page and text has the same locator in both packs of one
 # material (FR-INGEST-33), so it is the active one's; and an extra r3 span makes the seq map refuse. Green landed
-# 2026-11-28 (V.kl-tutor-find unit 1).
+# 2026-11-28 (V.kl-tutor-find unit 1). SRV-TUTOR code review round 1 (2026-11-28): test_span_rows_db.py also pins
+# that a legacy id whose mapped span exists only in a superseded sealed pack (FR-INGEST-42 `inactive`) returns
+# nothing. Gate (g) is met by SRV-TUTOR FR-TUTOR-8 (V.kl-tutor-find unit 3).
 kl_tutor_find:
   span_rows:
     text: >-

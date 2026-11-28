@@ -272,8 +272,8 @@ requirements:
       else is `output_invalid` (transient). Then, by code: aliases outside the sent set are removed and duplicates
       collapsed; a block is supported iff it keeps ≥ 1 alias and its `quote` has `quote_words` words and, after
       collapsing whitespace and NFC, is a substring of its first kept source's text as sent; otherwise the block is
-      `unsupported`. A quote is checked against one span only, so a quote that crosses a span boundary (now that a
-      chunk's neighbouring spans are sent as separate sources) is unsupported; the bench's `verified_block_share`
+      `unsupported`. A quote is checked against one span only, so a quote that crosses a span boundary (neighbouring spans
+      are sent as separate sources: a card's next span, FR-TUTOR-5) is unsupported; the bench's `verified_block_share`
       watches for it. `grounded` is true iff `insufficient` is false and every block is supported. Each kept alias is
       rendered as a citation `{span, page, material_title}` read from the database (FR-TUTOR-9). [unit]
       **Promoted revision (ADR-0039, V.kl-tutor-find, 2026-11-28):** this id's text in
@@ -548,14 +548,14 @@ defers:
   - "The previous span as a neighbour: `next` names only the following span; M1's variant (d) measures what it would add"
 
 owner_notes:
-  - "Cost (VEC-TUTOR-3, from spikes/tutor-call on 2026-11-22: 10 calls, $0.038, and spikes/tutor-chunks on 2026-11-23): about $0.046 per question asked without a cell and about $0.052 with a focused cell, with Sonnet 5.5, now that a hit sends its whole chunk (measured short calls cost $0.001–0.006); worst-case reserve $0.148 per attempt; caps $0.30 per question and $3 per user per day (about 58–65 questions); the 40-question bench about $1.8."
+  - "Cost (VEC-TUTOR-3, from spikes/tutor-call on 2026-11-22: 10 calls, $0.038, and spikes/tutor-chunks on 2026-11-23): about $0.046 per question asked without a cell and about $0.052 with a focused cell, with Sonnet 5.5, estimated when a hit sent its whole chunk (2026-11-23; the find-based tutor is re-measured by P1) (measured short calls cost $0.001–0.006); worst-case reserve $0.148 per attempt; caps $0.30 per question and $3 per user per day (about 58–65 questions); the 40-question bench about $1.8."
   - "Sources (2026-11-23): each of the 8 search hits now sends all spans of its chunk, not only its main span, because the first live run missed a fact one span away. The $0.30 cap limits the prompt to 29,000 bytes, so for long chunks the lowest-ranked hits are left out."
   - "Cost lever for V.cost-optimize (REF-TUTOR-7): the CLI writes each one-shot prompt to the 1-hour cache at 2× the input price; an uncached send would roughly halve the tutor's input cost, if the CLI allows it."
   - "While a lesson compile stage runs, a question waits for it (one worker); after 10 minutes it expires instead of being answered late."
   - "An answer says when it is not grounded in the book instead of hiding it."
   - "Model choice: with Opus 5.5 as `tasks.tutor.model` the worst-case reserve is $0.296 per attempt (8.00 and 20.00 per million tokens), so a second attempt no longer fits the $0.30 question cap (it is refused as budget_exhausted) and the $3 daily cap allows about 10 questions; Sonnet 5.5 is the example's choice."
   # Joined from kl_revision.proposed_owner_notes on promotion (V.kl-tutor-find, 2026-11-28).
-  - "The tutor now retrieves through the same find as search: about 23 short passages plus the passage after each, within the same 21,000-byte source budget, so the cost per question does not rise (the last bench measured $0.0267 per question)."
+  - "The tutor now retrieves through the same find as search: on M1's 40 questions, 25.4 short passages (cards) on average plus the passage after each, 49.2 sources, within the same 21,000-byte source budget. The worst-case reserve ($0.148 per attempt) and the caps ($0.30 per question, $3 per day) are unchanged; the prompts are larger (M1: mean source bytes 3,214 → 12,804, largest prompt 8,517 → 21,306 bytes), so the mean cost per question (last bench $0.0267) is re-measured by P1 against NFR-TUTOR-2's $0.06."
   - "Grounding: to reach your 0.8 target, every one of the 40 bench questions (40 of 40 by the last bench's rates) must get a page with the answer into the tutor's sources. The free check M1 found 28 of 40 (today's tutor 21, the old chunks 26), so the new tutor is built; the paid bench runs only on your explicit go (a larger budget, more neighbouring passages, the judge, or the target are the alternatives)."
   - "Deviation from the plan: the plan re-measured grounding before approving the spec, but the paid bench needs the built tutor. Now the free M1 decided that the spec is promoted and built, and the paid bench (about $1.09 last time, at most $12) decides whether the work is done and merged; it waits for your go."
 
@@ -587,6 +587,7 @@ kl_revision:
   round_1: "deep-reviewer (Fable) on 3e225f3: changes, 6 blocking (P1 threshold g >= 39.4; M1 variants (a)-(d); M1 gates promotion, P1 gates done; judge ship condition (c), no judge_ctx; SRV-INGEST active_span_rows; NFC length and traceability; no quote_sha256 beside a legacy id), applied in 3b564b8"
   round_2: "deep-reviewer (Fable) on 3b564b8/f0d2fa5: changes, 1 blocking, applied in 19bb784"
   round_3: "deep-reviewer (Fable) on 19bb784: VERDICT approve; its two nits applied in 1ca4321 (progress note; INV-TUTOR-2's Hypothesis case at the check-function level)"
+  code_review_round_1: "deep-reviewer (Fable) on 4be9d68: VERDICT changes, 1 blocking; copyright, spend, scope and the seq-map deviation verified. Applied: (1, blocking) the citation hash is the stored one, never computed: a [unit] case (a 3,000-byte span with a fixed hash, through build_prompt and citations) and a [db] case (a seeded span over 2,000 bytes; its citation equals material_spans.quote_sha256) kill mutant m35 (hash of the cut text); (2) the card's own text and title are never sent (FR-TUTOR-5): a [db] case with a raw card carrying text and title (m33, m47); (3) spikes/tutor-find-m1/m1.py runs at HEAD (variant (a) inlined as recorded, (b)-(d) through jobs.candidate_ids's rule; RESULT.md: the recorded numbers come from 1dc2990); (4) the owner note on cost: reserve and caps unchanged, mean cost re-measured by P1 (M1: 25.4 cards, 49.2 sources; mean source bytes 3,214 → 12,804; largest prompt 8,517 → 21,306); (5) SRV-INGEST test_span_rows_db.py: a legacy id mapped to a span found only in a superseded sealed pack returns nothing (m46); (6) gates: the gold_in_find promotion lands before P1, P1 gates the merge, the owner's go is still required; (8) stale text in params.py, SRV-SEARCH FR-SEARCH-7's test list, FR-TUTOR-8 and the cost owner note. (9, optional) not applied: the prefix check beside a stored hash stays, since candidate_ids already admits only parsed locators"
   m1: "spikes/tutor-find-m1 (2026-11-28, 0 model calls): gold page in the sent sources (a) 21, (b) 28, (c) 28, (d) 28 of 40; mean L1 card cost 400.6 estimator tokens (about 25 cards in 10,500); the drop rule never bound for (c). Build threshold met (28 >= 21, >= 26); P1 threshold not met (28, not 40): P1 waits for the owner's explicit go"
   status: approved
   approved_by: agent
@@ -616,6 +617,10 @@ kl_revision:
     **build threshold** gates the promotion of this revision with its Red tests and the build; the **P1
     threshold** (or the owner's explicit go) gates the paid run P1; **P1** gates done, the merge and
     `implemented`; a P1 miss reopens retrieval, not the 0.8 threshold. Stated in proposed_owner_notes.
+    Code review round 1 (2026-11-28): the gold_in_find promotion (NFR-TUTOR-3's predictor in web/src/tutor/bench.ts,
+    SRV-OBS VEC-OBS-5's key, e2e/web/live/owner.slice.ts through POST /api/find; VEC-TUTOR-7, -8) lands before
+    P1 starts; P1 still gates the merge, and the owner's go is still required for it. The code review's approval
+    covers the code only.
   measurement_plan:
     free: >-
       (M1, before promotion, [local], 0 model calls, own containers, never the owner's stack) over the 40

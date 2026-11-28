@@ -2290,8 +2290,13 @@ tasks:
         accepted seq map (FR-INGEST-39 holds r3 overlays at seqmap_missing otherwise). Still proposed until P1:
         NFR-TUTOR-1..3, VEC-TUTOR-7/-8 (bench.ts gold_in_find, SRV-OBS VEC-OBS-5 key, owner.slice.ts predictor
         through /api/find); spikes/tutor-find-m1/m1.py variant (a) still imports the removed candidate_span_ids
-        and RETRIEVE_K, so its re-run against the Green function before P1 needs variant (a) inlined. Code review
-        round (deep-reviewer) of unit 3 not yet run. Blocked for the owner's P1 go (reason, ask)",
+        and RETRIEVE_K (fixed in code review round 1). Code review round 1 (deep-reviewer, Fable, on 4be9d68): changes, 1 blocking, all applied (findings and fixes in
+        SRV-TUTOR kl_revision.code_review_round_1): the citation hash pinned as the stored one ([unit] and [db],
+        mutant m35), the card's text and title never sent (m33, m47), SRV-INGEST test_span_rows_db.py's inactive
+        mapped span (m46), m1.py runs at HEAD (RESULT.md: numbers from 1dc2990), the cost owner note, gates (the
+        gold_in_find promotion lands before P1; P1 gates the merge; the approval covers the code only), stale
+        texts; optional item 9 not applied. Merged origin/V/slice-integration (r3 gates, SRV-INGEST conflict:
+        both review blocks kept). Blocked for the owner's P1 go (reason, ask)",
       what: "SRV-TUTOR revision (~100–200 lines): retrieval through find on the tutor channel with its own maximum in
         policy, starting at today's 21,000-byte source budget, full span text for personal-use cards, NFR-TUTOR-3
         grounding re-measured as a gate; L5 boost once learner

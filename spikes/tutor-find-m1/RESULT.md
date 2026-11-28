@@ -32,6 +32,11 @@ a gold page reach the tutor's sources, after FR-TUTOR-6's 29,000-byte drop rule,
 
 ## Results (`results.json`, n = 40)
 
+The recorded numbers below come from commit 1dc2990 (before the tutor's Green). Since SRV-TUTOR's code review
+round 1, m1.py runs at HEAD: variant (a) keeps the pre-revision rule inlined as recorded (search k = 8, primaries then
+chunk spans), and variant (c) is the shipped `reader.tutor.jobs.candidate_ids`, asserted equal to the recorded rule.
+Not re-run since (no spend either way; the re-run against the Green function is part of P1's preparation).
+
 | Variant | gold in sources | sources (mean) | source bytes (mean) | gold spans (mean) | gold bytes (mean) | prompt bytes (max) |
 |---|---|---|---|---|---|---|
 | (a) search(k=8), single spans (today) | 21 | 8.0 | 3,214 | 1.15 | 567 | 8,517 |

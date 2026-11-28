@@ -44,6 +44,7 @@ sys.path[:0] = [str(SERVER / "src"), str(SERVER / "tests")]
 
 BUDGET = 10_500  # the revision's channels.tutor.budget_default (paired SRV-SEARCH change)
 VARIANTS = ("a", "b", "c", "d")
+RETRIEVE_K = 8  # variant (a): the pre-revision tutor's search k (bounds.retrieve_k, removed by the revision)
 
 
 def questions() -> list[dict[str, Any]]:
@@ -100,7 +101,15 @@ async def measure(art: Path, work: Path) -> dict[str, Any]:
     from reader.search.policy import estimate
     from reader.tutor import params as tutor_params
     from reader.tutor.answer import Span, build_prompt
-    from reader.tutor.jobs import candidate_span_ids
+    from reader.tutor.jobs import candidate_ids
+
+    def candidate_span_ids(hits: list[Any]) -> list[str]:
+        """Variant (a) frozen as recorded at 1dc2990 (the tutor's pre-revision rule, removed from reader.tutor):
+        every hit's primary span in rank order, then its other chunk spans, no repeats."""
+        ordered = [hit.span_id for hit in hits]
+        for hit in hits:
+            ordered.extend(s for s in hit.span_ids if s != hit.span_id)
+        return list(dict.fromkeys(ordered))
 
     spans = [json.loads(line) for line in (art / "spans.jsonl").open(encoding="utf-8")]
     outline = json.loads((art / "outline.json").read_text(encoding="utf-8"))
@@ -146,7 +155,7 @@ async def measure(art: Path, work: Path) -> dict[str, Any]:
             for q in qs:
                 gold = set(q["gold_pages"])
                 rec: dict[str, Any] = {"id": q["id"]}
-                found = await store.search(w.engine, owner, q["question"], tutor_params.RETRIEVE_K, sc.MAT_RU)
+                found = await store.search(w.engine, owner, q["question"], RETRIEVE_K, sc.MAT_RU)
                 rec["a"] = {"hits": len(found.results), "degraded": found.degraded,
                             **await sources(candidate_span_ids(found.results), q["question"], gold)}
                 t1 = time.monotonic()
@@ -163,7 +172,8 @@ async def measure(art: Path, work: Path) -> dict[str, Any]:
                                "degraded": bool(response.get("degraded")),
                                "gold_in_find": any(pages[i][0] in gold for i in primaries if i in pages)}
                 b = dedupe(primaries)
-                c_ids = dedupe(b + [n for n in nexts if n])
+                c_ids = candidate_ids(response["cards"])  # the shipped rule (VEC-TUTOR-9)
+                assert c_ids == dedupe(b + [n for n in nexts if n])  # equals the rule as recorded at 1dc2990
                 d_ids = dedupe(c_ids + [p for p in prevs if p])
                 for name, ids in (("b", b), ("c", c_ids), ("d", d_ids)):
                     rec[name] = {"candidates": len(ids), **await sources(ids, q["question"], gold)}

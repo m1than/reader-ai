@@ -74,3 +74,22 @@ async def test_span_rows_hashes_and_scope(pg: Pg, tmp_path: Path) -> None:
         got, texts = await rows(w, [b3, d3, f"{sha}:1"])
         assert got == {b3: (1, "b", stored_b3), f"{sha}:1": (1, "b", stored_b3)}  # mapped: r3's hash
         assert texts == {k: v[:2] for k, v in got.items()}
+
+        # SRV-TUTOR code review round 1: a legacy id whose mapped span exists only in the superseded (sealed,
+        # no longer active) legacy pack resolves `inactive` and is never served (triggers off: sealed rows).
+        locator = need("reader.ingest.locator")
+        only_old = locator.page_locators(sha, 9, ["z"])[0]
+        async with w.engine.begin() as conn:
+            await conn.execute(text("SET LOCAL session_replication_role = replica"))
+            await conn.execute(text(
+                "INSERT INTO material_spans (ingest_id, owner_id, seq, page, kind, text, x0, y0, x1, y1,"
+                " locator, quote_sha256) VALUES (:i, :o, 3, 9, 'text', 'z', 0, 0, 1, 1, :l, :q)"),
+                {"i": await ingest_of(w, legacy), "o": owner, "l": only_old, "q": q("z")})
+            await conn.execute(text(
+                "INSERT INTO span_seq_map (owner_id, from_ingest_id, to_pack_id, seq, locator, quote_sha256)"
+                " VALUES (:o, :i, :p, 3, :l, :q)"),
+                {"o": owner, "i": await ingest_of(w, legacy), "p": r3, "l": only_old, "q": q("z")})
+        async with w.engine.connect() as conn:
+            (state,) = await need("reader.ingest.spanref").resolve(conn, owner, [(f"{sha}:3", None)])
+        assert state.state == "inactive"
+        assert (await rows(w, [f"{sha}:3", only_old]))[0] == {}

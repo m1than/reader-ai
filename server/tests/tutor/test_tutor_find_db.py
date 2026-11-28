@@ -264,6 +264,39 @@ async def test_legacy_ids_from_find_never_reach_the_loader(
     assert all(c["span"].startswith("spn:") and len(c["quote_sha256"]) == 64 for c in citations)
 
 
+async def test_a_long_span_is_cited_with_its_stored_hash(pg: Pg, tmp_path: Path) -> None:
+    """FR-TUTOR-8, INV-TUTOR-2 (code review round 1): a span over span_bytes_max is cut when sent; its citation
+    carries material_spans.quote_sha256, never a hash computed from the sent text."""
+    params = need("reader.tutor.params")
+    long_text = SPANS[0][1] + " filler" * 400  # about 2,900 bytes
+    assert len(long_text.encode()) > params.SPAN_BYTES_MAX
+    w = await world(pg, tmp_path, {"ivan": [(61, long_text), *SPANS[1:]]})
+    provider = FakeProvider()
+    qid = await insert_question(w)
+    await run_handler(w, qid, deps(w, provider, FakeFind(cards=[(0, None)])))
+    (sent,) = _sent(provider)
+    assert len(sent["text"].encode()) <= params.SPAN_BYTES_MAX
+    stored = (await question_row(w, qid))[1]
+    (citation,) = stored["blocks"][0]["citations"]
+    assert citation["quote_sha256"] == await scalar(
+        w.engine, "SELECT quote_sha256 FROM material_spans WHERE owner_id = :o AND locator = :l",
+        o=w.users["ivan"], l=citation["span"])
+
+
+async def test_the_cards_own_text_and_title_are_never_sent(pg: Pg, tmp_path: Path) -> None:
+    """FR-TUTOR-5 (code review round 1): the sent text is the stored span's, never the card's text or title."""
+    w = await world(pg, tmp_path)
+    async with w.engine.connect() as conn:
+        ids = await locators(conn, w.users["ivan"], MAT)
+    raw = [{"id": ids[0], "layer": "L1", "title": "CARD-TITLE", "text": "CARD-TEXT", "next": []}]
+    provider = FakeProvider()
+    qid = await insert_question(w)
+    await run_handler(w, qid, deps(w, provider, FakeFind(raw=raw)))
+    (sent,) = _sent(provider)
+    assert sent["text"] == SPANS[0][1]
+    assert "CARD-TEXT" not in provider.calls[0].prompt and "CARD-TITLE" not in provider.calls[0].prompt
+
+
 # ---- the judge stays out (kl_open_points 2)
 
 

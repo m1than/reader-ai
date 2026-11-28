@@ -367,6 +367,19 @@ def test_find_sources_vectors(case: dict[str, Any]) -> None:
     assert jobs.candidate_ids(cards) == [ids[k] for k in case["expect"]]
 
 
+def test_the_citation_hash_is_the_stored_one_never_computed() -> None:
+    """FR-TUTOR-8, INV-TUTOR-2 (code review round 1): a span longer than span_bytes_max is cut when sent, and its
+    citation still carries the stored hash, not a hash of the cut or the full text."""
+    answer = need("reader.tutor.answer")
+    params = need("reader.tutor.params")
+    stored = "e" * 64
+    prompt = answer.build_prompt("q", None, [answer.Span(_loc(1), 1, "w " * 1500, stored)])
+    (source,) = prompt.sources
+    assert len(source.text.encode()) <= params.SPAN_BYTES_MAX < len(("w " * 1500).encode())
+    assert answer.citations(("s1",), prompt.sources, "T") == [
+        {"span": _loc(1), "page": 1, "material_title": "T", "quote_sha256": stored}]
+
+
 def test_legacy_ids_in_a_find_response_are_never_candidates() -> None:
     """FR-TUTOR-5/-8 (revision): a legacy `<sha>:<seq>` id as a card id or a next id is dropped before loading,
     so no alias can name it and no citation can carry quote_sha256 beside it."""

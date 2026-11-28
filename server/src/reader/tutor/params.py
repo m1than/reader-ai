@@ -14,7 +14,7 @@ QUESTION_BYTES_MAX: Final = 3000
 SPAN_BYTES_MAX: Final = 2000
 CELL_BYTES_MAX: Final = 4000
 QUESTION_CELL_BYTES_MAX: Final = 8000  # question 3000 + cell 4000 + JSON overhead 1000
-SOURCES_MAX: Final = 88  # one alias per span: 8 hits x p95 11 spans per chunk; bytes bind first (REF-TUTOR-9)
+SOURCES_MAX: Final = 88  # one alias per span; find gives <= 31 cards + their next = 62 < 88, bytes bind first
 PROMPT_BYTES_MAX: Final = 29000  # the largest prompt whose reserve fits 2 attempts in $0.30 (REF-TUTOR-9)
 SYSTEM_BYTES_MAX: Final = 2000
 QUOTE_WORDS: Final = (5, 30)

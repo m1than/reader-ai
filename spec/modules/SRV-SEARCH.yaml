@@ -392,7 +392,7 @@ requirements:
       entitlement is read (test_search_db.py, two active materials and a `load_book` spy); the tutor no longer calls
       `search()` and SRV-TUTOR's `Hit` Protocol is gone, so the Hit contract test is removed; `search()` keeps
       serving `POST /api/search` until V.kl-live. The compatibility `Hit` has no `chunk_id`; its page and snippet come from
-      `views.active_span_texts`. test_search_db.py, test_search_unit.py (Hit contract), test_search_props.py.
+      `views.active_span_texts`. test_search_db.py, test_search_props.py.
   - id: FR-SEARCH-8
     text: >-
       **The route.** `POST /api/search` with JSON `{"q": str, "k": int?, "material": str?}` (a body, so the query never
